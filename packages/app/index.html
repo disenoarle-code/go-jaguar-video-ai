@@ -12,12 +12,13 @@
   <div id="app" hidden>
     <header>
       <a class="brand small" href="#/"><img src="/logo.svg" alt="Go Jaguar" /><span>Video AI</span></a>
-      <button id="back" data-ico="arrow-left">Proyectos</button>
-      <input id="pname" type="text" aria-label="Nombre del proyecto" />
-      <button id="export" class="primary" data-ico="download" title="Exportar a MP4">Exportar</button>
-      <span id="savestate" class="dim" title="Todo se guarda solo, unos segundos después de cada cambio">Guardado</span>
+      <button id="back" data-ico="arrow-left" title="Volver a los proyectos">Proyectos</button>
+      <input id="pname" type="text" readonly aria-label="Nombre del proyecto" title="Doble clic para cambiar el nombre" />
+      <span class="grow"></span>
       <span id="note" class="dim"></span>
-      <span id="stats" class="dim right"></span>
+      <span id="savestate" class="dim" title="Todo se guarda solo, unos segundos después de cada cambio">Guardado</span>
+      <button id="export" class="primary" data-ico="download" title="Exportar a MP4">Exportar</button>
+      <span id="stats" hidden></span>
     </header>
     <main>
       <section id="stage">

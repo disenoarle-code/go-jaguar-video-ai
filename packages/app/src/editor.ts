@@ -51,7 +51,18 @@ export async function bootEditor(slug: string) {
   }
   const nameEl = $<HTMLInputElement>('pname')
   nameEl.value = store.project.name
-  nameEl.addEventListener('change', () => store.mutate(p => { p.name = nameEl.value.trim() || 'Proyecto sin título' }))
+  // El nombre se ve como texto; con doble clic se puede editar (Enter guarda, Esc cancela)
+  const fitName = () => { nameEl.style.width = `${Math.max(8, nameEl.value.length + 2)}ch` }
+  fitName()
+  const endEdit = (save: boolean) => {
+    if (nameEl.readOnly) return
+    if (save) store.mutate(p => { p.name = nameEl.value.trim() || 'Proyecto sin título' })
+    nameEl.value = store.project.name; nameEl.readOnly = true; nameEl.blur(); fitName()
+  }
+  nameEl.addEventListener('dblclick', () => { nameEl.readOnly = false; nameEl.focus(); nameEl.select() })
+  nameEl.addEventListener('input', fitName)
+  nameEl.addEventListener('keydown', e => { if (e.key === 'Enter') endEdit(true); else if (e.key === 'Escape') endEdit(false) })
+  nameEl.addEventListener('blur', () => endEdit(true))
 
   // --- guardado en la carpeta del proyecto (autoguardado + botón) -----------------------------------------
   let lastSavedRev = store.revision
@@ -72,7 +83,7 @@ export async function bootEditor(slug: string) {
     } catch (e) { notify('No se pudo guardar: ' + (e as Error).message) }
   }
   store.onChange(() => {
-    if (document.activeElement !== nameEl) nameEl.value = store.project.name
+    if (document.activeElement !== nameEl) { nameEl.value = store.project.name; fitName() }
     const json = JSON.stringify(store.project)      // seleccionar o mover el cabezal no cambia la edición: no se guarda
     if (json === lastJson) return
     lastJson = json
