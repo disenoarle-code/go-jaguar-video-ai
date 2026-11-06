@@ -6,7 +6,8 @@
  *   proyectos/<slug>/ { proyecto.json, proyecto.gojaguar, material/, proxies/, transcripciones/, analisis/, salidas/ }
  *   referencias/      { <archivo>, <archivo>.json, <nombre>.estilo.json }   ← compartidas por todos los proyectos
  */
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -49,9 +50,16 @@ async function uniqueName(dir: string, name: string) {
   return n
 }
 
+/** El trabajo en curso: lo que se ejecute dentro queda registrado para poder cancelarlo. */
+const jobCtx = new AsyncLocalStorage<Job>()
+const procsDe = new Map<string, Set<ChildProcess>>()
+
 function run(cmd: string, args: string[], onOut?: (chunk: string) => void): Promise<{ code: number; out: string; err: string }> {
   return new Promise(resolve => {
+    const job = jobCtx.getStore()
+    if (job?.cancelada) return resolve({ code: -1, out: '', err: 'cancelado' })
     const p = spawn(cmd, args)
+    if (job) { const s = procsDe.get(job.id) ?? new Set(); s.add(p); procsDe.set(job.id, s); p.on('close', () => s.delete(p)) }
     let out = '', err = ''
     p.stdout.on('data', d => { const s = d.toString(); out += s; onOut?.(s) })
     p.stderr.on('data', d => { err += d.toString() })
@@ -205,7 +213,7 @@ async function ritmoDe(slug: string, f: Fuente) {
 async function ensureLibrary() { await fsp.mkdir(PROJ, { recursive: true }); await fsp.mkdir(REFS, { recursive: true }); await fsp.mkdir(SOL, { recursive: true }) }
 
 // --- pedidos a Claude: el botón deja un archivo; Claude (vigilando en el chat) lo recibe y lo ejecuta ----------
-export interface Solicitud { id: string; slug: string; tipo: 'errores' | 'completa'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error'; creado: string; referencias: string[]; recomendacion?: string; nota?: string }
+export interface Solicitud { id: string; slug: string; tipo: 'errores' | 'completa'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error' | 'cancelado'; creado: string; referencias: string[]; recomendacion?: string; nota?: string }
 async function crearSolicitud(slug: string, tipo: Solicitud['tipo'], referencias: string[], recomendacion?: string): Promise<Solicitud> {
   const activa = (await solicitudesDe(slug)).find(x => x.tipo === tipo && (x.estado === 'pendiente' || x.estado === 'en_curso'))
   if (activa) return activa
@@ -378,7 +386,7 @@ async function locateFile(name: string, size: number, lastModified: number): Pro
 
 // --- trabajos (procesamiento en segundo plano) ---------------------------------------------------
 interface Step { id: string; label: string; state: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string; pct?: number }
-interface Job { id: string; slug: string; status: 'running' | 'done' | 'error'; steps: Step[]; error?: string }
+interface Job { id: string; slug: string; status: 'running' | 'done' | 'error' | 'cancelado'; steps: Step[]; error?: string; cancelada?: boolean; solicitud?: string }
 const jobs = new Map<string, Job>()
 
 function newJob(slug: string): Job {
@@ -410,12 +418,14 @@ async function probe(file: string) {
 
 async function makeProxy(src: string, dst: string, duration: number, onPct: (p: number) => void) {
   const base = ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-y']
-  const enc = ['-vf', 'scale=640:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-g', '1', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', dst]
+  const tmp = dst + '.part.mp4'   // si se cancela a medias no queda un proxy roto
+  const enc = ['-vf', 'scale=640:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-g', '1', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', tmp]
   const track = (s: string) => { const m = /out_time_us=(\d+)/.exec(s.split('\n').filter(l => l.startsWith('out_time_us=')).pop() ?? ''); if (m) onPct(Math.min(1, Number(m[1]) / 1e6 / duration)) }
   const hw = process.platform === 'darwin' && !process.env.GOJAGUAR_NO_HWACCEL ? ['-hwaccel', 'videotoolbox'] : []
   let r = await run('ffmpeg', [...base, ...hw, '-i', src, ...enc], track)
   if (r.code !== 0 && hw.length) r = await run('ffmpeg', [...base, '-i', src, ...enc], track)
-  if (r.code !== 0) throw new Error('ffmpeg falló: ' + r.err.slice(-300))
+  if (r.code !== 0) { await fsp.rm(tmp, { force: true }); throw new Error(r.err === 'cancelado' ? 'Cancelado' : 'ffmpeg falló: ' + r.err.slice(-300)) }
+  await fsp.rename(tmp, dst)
 }
 
 function groupLines(words: { i: number; t0: number; w: string; t1: number }[]) {
@@ -434,7 +444,7 @@ function groupLines(words: { i: number; t0: number; w: string; t1: number }[]) {
 async function transcribe(proxy: string, outPrefix: string, idioma: string) {
   const wav = outPrefix + '.16k.wav'
   const a = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', proxy, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav])
-  if (a.code !== 0) throw new Error('No pude extraer el audio')
+  if (a.code !== 0) { await fsp.rm(wav, { force: true }); throw new Error('No pude extraer el audio') }
   const w = await run('whisper-cli', ['-m', MODEL, '-f', wav, '-l', idioma, '-t', String(Math.max(2, os.cpus().length - 2)), '-ml', '1', '-sow', '-oj', '-of', outPrefix + '.whisper'])
   await fsp.rm(wav, { force: true })
   if (w.code !== 0) throw new Error('Whisper falló: ' + w.err.slice(-200))
@@ -473,10 +483,22 @@ const keepSegments = (duration: number, cuts: [number, number][]) => {
   return keep
 }
 
-async function processProject(job: Job) {
+/** Cancela un trabajo: detiene ffmpeg/whisper al instante y anula el pedido a Claude si ya se había enviado. */
+async function cancelarTrabajo(job: Job) {
+  if (job.status !== 'running') return
+  job.cancelada = true
+  for (const p of procsDe.get(job.id) ?? []) p.kill('SIGKILL')
+  if (job.solicitud) {
+    const x = await leerSolicitud(job.solicitud)
+    if (x && (x.estado === 'pendiente' || x.estado === 'en_curso')) await writeJson(path.join(SOL, x.id + '.json'), { ...x, estado: 'cancelado', nota: 'Cancelado por el usuario' })
+  }
+}
+
+const processProject = (job: Job) => jobCtx.run(job, () => processProjectInner(job))
+async function processProjectInner(job: Job) {
   const slug = job.slug, d = projDir(slug)
   const meta = (await loadMeta(slug))!
-  const set = (id: string, p: Partial<Step>) => Object.assign(step(job, id), p)
+  const set = (id: string, p: Partial<Step>) => { if (job.cancelada) throw new Error('Cancelado'); return Object.assign(step(job, id), p) }
   try {
     const files = (await listMaterial(slug)).filter(f => f.tipo === 'video')
     if (!files.length) throw new Error('No hay videos en el material')
@@ -550,6 +572,7 @@ async function processProject(job: Job) {
     // 5) Claude: quita lo repetido y ordena el guion (le llega el pedido en el chat) ---------------------------
     set('claude', { state: 'running', detail: 'enviado, esperando a Claude…' })
     const sol = await crearSolicitud(slug, 'errores', [])
+    job.solicitud = sol.id
     const t0 = Date.now()
     for (;;) {
       const x = await leerSolicitud(sol.id)
@@ -562,8 +585,14 @@ async function processProject(job: Job) {
     job.status = 'done'
   } catch (e) {
     const cur = job.steps.find(s => s.state === 'running')
-    if (cur) { cur.state = 'error'; cur.detail = (e as Error).message }
-    job.status = 'error'; job.error = (e as Error).message
+    if (job.cancelada) {
+      if (cur) { cur.state = 'skipped'; cur.detail = 'cancelado' }
+      job.status = 'cancelado'; job.error = 'Cancelado. Lo que ya estaba hecho se conserva.'
+    } else {
+      if (cur) { cur.state = 'error'; cur.detail = (e as Error).message }
+      job.status = 'error'; job.error = (e as Error).message
+    }
+    procsDe.delete(job.id)
   }
 }
 
@@ -690,6 +719,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
 
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/solicitudes$/.exec(p)) && m === 'GET') {
       return send(res, 200, isSlug(g[1]) ? await solicitudesDe(g[1]) : [])
+    }
+
+    if ((g = /^\/trabajos\/(.+)\/cancelar$/.exec(p)) && m === 'POST') {
+      const job = jobs.get(decodeURIComponent(g[1]))
+      if (!job) return send(res, 404, { error: 'Trabajo no encontrado' })
+      await cancelarTrabajo(job)
+      return send(res, 200, { ok: true })
     }
 
     if ((g = /^\/trabajos\/(.+)$/.exec(p)) && m === 'GET') {

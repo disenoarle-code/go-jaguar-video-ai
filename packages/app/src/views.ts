@@ -156,7 +156,9 @@ function jobHtml(j: Trabajo) {
       <span>${esc(s.label)}${s.detail ? ` <span class="dim">· ${esc(s.detail)}</span>` : ''}</span>
       ${s.state === 'running' && s.pct !== undefined ? `<span class="bar"><i style="width:${Math.round(s.pct * 100)}%"></i></span>` : ''}
     </li>`).join('')}</ul>
-    ${j.status === 'error' ? `<div class="warn">${esc(j.error ?? 'Error')}</div>` : ''}`
+    ${j.status === 'running' ? `<button class="danger" data-cancelar="${esc(j.id)}">Cancelar</button>` : ''}
+    ${j.status === 'error' ? `<div class="warn">${esc(j.error ?? 'Error')}</div>` : ''}
+    ${j.status === 'cancelado' ? `<p class="dim">${esc(j.error ?? 'Cancelado')}</p>` : ''}`
 }
 
 export async function renderProject(slug: string) {
@@ -307,6 +309,11 @@ export async function renderProject(slug: string) {
       }
       await new Promise(r => setTimeout(r, 700))
     }
+  }
+  jobBox.onclick = async e => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-cancelar]'); if (!b) return
+    b.disabled = true; b.textContent = 'Cancelando…'
+    try { await api.cancelarTrabajo(b.dataset.cancelar!) } catch { b.disabled = false; b.textContent = 'Cancelar' }
   }
   $('recortar').onclick = async () => {
     try { const { jobId } = await api.procesar(slug); void seguir(jobId) } catch (e) { jobBox.innerHTML = `<div class="warn">${esc((e as Error).message)}</div>` }
