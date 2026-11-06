@@ -369,7 +369,7 @@ export class Timeline {
     c.fillStyle = '#0f6a6f'; c.fillRect(x0, V.y, w, HEAD)
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
     const name = a?.info.name ?? pl.clip.id
-    c.fillText(`${name}  ${tc(dur)}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}`, Math.max(x0, LEFT) + 6, V.y + HEAD / 2, Math.max(w - 10, 0))
+    c.fillText(`${name}  ${tc(dur)}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}`, Math.max(x0, LEFT) + 6, V.y + HEAD / 2)
     // onda del audio del clip, al pie
     c.fillStyle = '#0a3d40'; c.fillRect(x0, V.y + V.h - WAVE, w, WAVE)
     if (a && a.peaks.length) {
@@ -393,7 +393,8 @@ export class Timeline {
       const tw2 = Math.min(c.measureText(label).width + 20, w - 8)
       c.fillStyle = 'rgba(20,20,18,.78)'; c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 8); c.fill()
       c.fillStyle = FX_INFO[fx].color; c.beginPath(); c.arc(x0 + 12, V.y + HEAD + 12, 3, 0, Math.PI * 2); c.fill()
-      c.fillStyle = '#fff'; c.fillText(label, x0 + 18, V.y + HEAD + 12, Math.max(tw2 - 20, 0))
+      c.save(); c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 8); c.clip()
+      c.fillStyle = '#fff'; c.fillText(label, x0 + 18, V.y + HEAD + 12); c.restore()
     }
     c.restore()
 
@@ -464,7 +465,8 @@ export class Timeline {
     }
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
     c.fillStyle = 'rgba(8,20,40,.6)'; c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 4); c.fill()
-    c.fillStyle = '#fff'; c.fillText('♪ ' + (this.store.asset(m.assetId)?.name ?? 'música'), Math.max(x0, LEFT) + 10, R.y + 10, 218)
+    c.save(); c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 4); c.clip()
+    c.fillStyle = '#fff'; c.fillText('♪ ' + (this.store.asset(m.assetId)?.name ?? 'música'), Math.max(x0, LEFT) + 10, R.y + 10); c.restore()
     c.restore()
   }
 
