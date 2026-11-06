@@ -151,7 +151,8 @@ export async function bootEditor(slug: string) {
       const b = document.createElement('button'); b.draggable = true; b.className = 'binitem'
       b.innerHTML = `<span>${a.kind === 'audio' ? '♪' : '▶'}</span><b>${a.name.replace(/[<&]/g, '')}</b><i>${tc(a.duration)}</i>`
       b.onclick = () => { exec(store, { op: 'add_overlay', asset: a.id, start: player.playhead }); const o = store.project.overlays?.at(-1); if (o) store.select({ type: 'overlay', id: o.id }) }
-      b.ondragstart = ev => { ev.dataTransfer!.setData('text/gojaguar-asset', a.id); ev.dataTransfer!.effectAllowed = 'copy' }
+      b.ondragstart = ev => { ev.dataTransfer!.setData('text/gojaguar-asset', a.id); ev.dataTransfer!.effectAllowed = 'copy'; tl.showDropLane(a.kind === 'audio' ? 'audio' : 'video') }
+      b.ondragend = () => tl.showDropLane(null)
       m.append(b)
     }
     document.body.append(m); bin = m

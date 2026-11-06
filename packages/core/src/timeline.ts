@@ -29,6 +29,14 @@ export const duration = (p: Project) => (p.overlays ?? []).reduce((m, o) => Math
 /** Número de pistas usadas por un tipo (video o audio). */
 export const trackCount = (p: Project, kind: OverlayClip['kind']) => (p.overlays ?? []).reduce((m, o) => (o.kind === kind ? Math.max(m, o.track) : m), 0)
 
+/** Renumera las pistas para que no queden huecos (si una pista se vacía, las demás bajan). El orden relativo se conserva. */
+export function compactTracks(p: Project) {
+  for (const kind of ['video', 'audio'] as const) {
+    const used = [...new Set((p.overlays ?? []).filter(o => o.kind === kind).map(o => o.track))].sort((a, b) => a - b)
+    for (const o of p.overlays ?? []) if (o.kind === kind) o.track = used.indexOf(o.track) + 1
+  }
+}
+
 /**
  * Primera pista (desde `from`) donde cabe [start, end) sin pisar a otro clip del mismo tipo.
  * Si todas están ocupadas devuelve una nueva: así "se abre otra pista" al superponer.

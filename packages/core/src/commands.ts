@@ -1,4 +1,4 @@
-import { MIN_DUR, clipDur, duration, freeTrack, layout, overlayDur } from './timeline'
+import { MIN_DUR, clipDur, compactTracks, duration, freeTrack, layout, overlayDur } from './timeline'
 import type { Store } from './store'
 import {
   DEFAULT_TRANSFORM, isTextLayer,
@@ -84,6 +84,7 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       const o = { id: store.newId('o'), assetId: a.id, kind, track, start, srcIn, srcOut, speed: 1, volume: clamp(cmd.volume ?? 1, 0, 4),
         transform: { ...DEFAULT_TRANSFORM, x: cmd.x ?? 0.5, y: cmd.y ?? 0.5, scale: cmd.scale ?? (kind === 'video' ? 0.5 : 1) } }
       ;(p.overlays ??= []).push(o)
+      compactTracks(p)
       return `${o.id} ${kind} en pista ${track} desde ${f2(start)}s (${a.name})`
     }
     case 'update_overlay': {
@@ -97,11 +98,13 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       if (transform) o.transform = { ...o.transform, ...transform }
       if (cmd.patch.start !== undefined || cmd.patch.track !== undefined || cmd.patch.srcIn !== undefined || cmd.patch.srcOut !== undefined || cmd.patch.speed !== undefined)
         o.track = freeTrack(p, o.kind, o.start, o.start + overlayDur(o), cmd.patch.track ?? o.track, o.id)   // si pisa a otro, se abre otra pista
+      compactTracks(p)
       return `${o.id} actualizado (pista ${o.track}, ${f2(o.start)}s)`
     }
     case 'delete_overlay': {
       const n = p.overlays?.length ?? 0
       p.overlays = (p.overlays ?? []).filter(x => x.id !== cmd.id)
+      compactTracks(p)
       if (store.selection?.id === cmd.id) store.selection = null
       return n === p.overlays.length ? 'clip superpuesto no encontrado' : `${cmd.id} eliminado`
     }

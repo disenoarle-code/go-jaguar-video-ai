@@ -46,4 +46,12 @@ describe('superposición de pistas', () => {
     exec(s, { op: 'delete_overlay', id: s.project.overlays![0].id })
     expect(s.project.overlays).toHaveLength(0)
   })
+  it('si una pista se queda vacía, las demás bajan (sin huecos)', () => {
+    const s = base()
+    execBatch(s, [{ op: 'add_overlay', asset: 'a1', start: 0, src_in: 0, src_out: 4 }, { op: 'add_overlay', asset: 'a1', start: 1, src_in: 0, src_out: 4 }])
+    const [a, b] = s.project.overlays!
+    expect([a.track, b.track]).toEqual([1, 2])
+    exec(s, { op: 'delete_overlay', id: a.id })
+    expect(s.project.overlays![0].track).toBe(1)
+  })
 })

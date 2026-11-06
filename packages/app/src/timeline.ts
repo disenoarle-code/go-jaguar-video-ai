@@ -1,7 +1,7 @@
 import { PEAK_RATE, THUMB_H, THUMB_W } from './media'
 import { FX_INFO, TRANSITIONS } from './fxinfo'
 import type { Player } from './player'
-import { MIN_DUR, clipDur, duration, exec, freeTrack, isTextLayer, layout, overlayDur, overlayEnd, trackCount, type OverlayClip, type Placed, type Store, type TextLayer } from '@gojaguar/core'
+import { MIN_DUR, clipDur, compactTracks, duration, exec, freeTrack, isTextLayer, layout, overlayDur, overlayEnd, trackCount, type OverlayClip, type Placed, type Store, type TextLayer } from '@gojaguar/core'
 
 const LEFT = 78, RULER_H = 26
 interface Row { y: number; h: number; label: string }
@@ -33,6 +33,8 @@ export class Timeline {
   private vLanes: Row[] = []      // pistas de video superpuestas (índice 0 = pista 1)
   private aLanes: Row[] = []      // pistas de audio extra
   private height = 234
+  /** Tipo de pista con una pista vacía extra visible (solo mientras se arrastra: así se puede soltar en una pista nueva). */
+  private extra: 'video' | 'audio' | null = null
   private mouse = { x: 0, y: 0 }
   /** Corte al que el cabezal quedó "pegado" (imán), para dibujar la guía. */
   private snapAt: number | null = null
@@ -92,10 +94,13 @@ export class Timeline {
   }
 
   // --- hit testing ----------------------------------------------------------
-  /** Coloca las filas: textos, pistas de video superpuestas (la más alta arriba), video principal, música y pistas de audio. Siempre hay una pista vacía de más como destino. */
+  /** Lo usa el panel Material: mientras se arrastra un archivo, aparece una pista de su tipo donde soltarlo. */
+  showDropLane(kind: 'video' | 'audio' | null) { this.extra = kind; this.dirty = true }
+
+  /** Coloca las filas: textos, pistas de video superpuestas (la más alta arriba), video principal, música y pistas de audio. Solo se ven las pistas en uso. */
   private relayout() {
     const p = this.store.project
-    const nv = trackCount(p, 'video') + 1, na = trackCount(p, 'audio') + 1
+    const nv = trackCount(p, 'video') + (this.extra === 'video' ? 1 : 0), na = trackCount(p, 'audio') + (this.extra === 'audio' ? 1 : 0)
     let y = 30
     ROWS.subtitle.y = y; y += 30
     ROWS.graphic.y = y; y += 32
@@ -248,7 +253,12 @@ export class Timeline {
 
     if (d.k === 'ovc') {
       const dt = (x - d.x0) / this.pps, y = this.mouse.y
-      const dur = this.store.asset(this.store.project.overlays?.find(q => q.id === d.id)?.assetId ?? '')?.duration ?? Infinity
+      const o0 = this.store.project.overlays?.find(q => q.id === d.id)
+      const dur = this.store.asset(o0?.assetId ?? '')?.duration ?? Infinity
+      if (o0 && d.mode === 'move') {   // una pista nueva aparece solo al arrastrar más allá de la última de su tipo
+        const lanes = o0.kind === 'video' ? this.vLanes : this.aLanes, ref = lanes[trackCount(this.store.project, o0.kind) - 1]
+        this.extra = ref && (o0.kind === 'video' ? y < ref.y : y > ref.y + ref.h) ? o0.kind : null
+      }
       this.store.live(pr => {
         const o = pr.overlays!.find(q => q.id === d.id)!
         if (d.mode === 'move') {
@@ -322,6 +332,7 @@ export class Timeline {
     this.drag = null
     this.snapAt = null
     this.player.override = null
+    if (d.k === 'ovc') { this.extra = null; this.store.live(pr => compactTracks(pr)) }   // si una pista quedó vacía, desaparece
     if (d.k === 'trim' || d.k === 'ov' || d.k === 'ovc') this.store.endTx()
     if (d.k === 'clip' && d.moved) {
       if (d.target !== this.store.project.clips.findIndex(c => c.id === d.id)) exec(this.store, { op: 'move_clip', id: d.id, to_index: d.target })
@@ -338,6 +349,7 @@ export class Timeline {
     const kind: 'video' | 'audio' = a.kind === 'audio' ? 'audio' : 'video', row = this.rowAt(y)
     const track = (row === 'vlane' && kind === 'video') || (row === 'alane' && kind === 'audio') ? this.laneAt(y, kind) ?? undefined : undefined
     const t = this.magnet(this.x2t(x)); this.snapAt = null
+    this.extra = null
     exec(this.store, { op: 'add_overlay', asset: id, start: t, track })
     const o = this.store.project.overlays?.at(-1); if (o) this.store.select({ type: 'overlay', id: o.id })
   }
