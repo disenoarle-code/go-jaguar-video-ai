@@ -280,11 +280,13 @@ export class Player {
       const f = asset.source.peek(idx)
       if (!f) { void asset.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}); continue }
       const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight
-      const k = Math.min(W / fw, H / fh) * o.transform.scale, w = fw * k, h = fh * k
+      const screen = o.blend === 'screen'      // luces: cubren todo el cuadro y suman su luz al video de abajo
+      const k = (screen ? Math.max(W / fw, H / fh) : Math.min(W / fw, H / fh)) * o.transform.scale, w = fw * k, h = fh * k
       const x = o.transform.x * W - w / 2, y = o.transform.y * H - h / 2
       this.ctx.save()
       this.ctx.globalAlpha = o.transform.opacity
-      this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.06); this.ctx.clip()
+      if (screen) this.ctx.globalCompositeOperation = 'screen'
+      else { this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.06); this.ctx.clip() }
       try { this.ctx.drawImage(f, x, y, w, h) } catch { /* frame cerrado por el LRU */ }
       this.ctx.restore()
     }

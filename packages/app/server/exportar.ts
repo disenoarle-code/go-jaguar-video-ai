@@ -112,7 +112,16 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   for (const [j, o] of ovs.entries()) {
     const file = await srcOf(o.assetId), D = overlayDur(o)
     const k = addInput(o.srcIn, (o.srcOut - o.srcIn) + 0.3, file)
-    if (o.kind === 'video' && !ts('v' + o.track).hidden) {
+    if (o.kind === 'video' && o.blend === 'screen' && !ts('v' + o.track).hidden) {
+      // luz (screen): cubre todo el cuadro; ambos lados en el MISMO formato (gbrp) o el color sale desviado (magenta)
+      const st = num(o.start), en = num(o.start + D), kb = `kb${j}`
+      vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${st}/TB,fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},format=gbrp[sc${j}]`)
+      vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(duration(project))},format=gbrp[${kb}]`)
+      vf.push(`[${kb}][sc${j}]overlay=0:0:eof_action=pass:enable='between(t,${st},${en})'[kl${j}]`)
+      vf.push(`[${cur}]format=gbrp[cf${j}]`)
+      vf.push(`[cf${j}][kl${j}]blend=all_mode=screen:all_opacity=${num(o.transform.opacity)}[b${j + 1}]`)
+      cur = `b${j + 1}`
+    } else if (o.kind === 'video' && !ts('v' + o.track).hidden) {
       const R = `(min(W,H)*0.06)`
       const round = `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(abs(X-W/2)-(W/2-${R}),0)*gt(abs(Y-H/2)-(H/2-${R}),0)*gt(hypot(abs(X-W/2)-(W/2-${R}),abs(Y-H/2)-(H/2-${R})),${R}),0,255)'`
       vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${round},colorchannelmixer=aa=${num(o.transform.opacity)}[ov${j}]`)

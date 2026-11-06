@@ -87,6 +87,10 @@ Reglas:
 
 Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.json`: `bpm`, `bpmAlt` (doble/mitad), `confianza`, `beats` (pulsos, s), `golpes` (kicks/impactos fuertes, s), `energia` (cada 0,5 s). Úsalo para **cortar sobre el beat** (cada 2, 4 u 8 pulsos), poner zooms y transiciones en los `golpes`, y dejar los momentos de más energía para lo mejor del producto. El tempo es fiable en música con pulso marcado (trap, hip hop, electrónica); si `confianza` < 0,3 revísalo a oído. Los tiempos de `beats` pueden tener ~±0,03 s de desfase. La música y las imágenes **no se procesan** con el botón "Recorta silencios" (solo los videos); las usas tú al armar la edición. Las pistas de Pixabay u otras las descarga el usuario a mano (sus términos prohíben bots) y las agrega aquí.
 
+## Efectos de sonido y luces (propios, sin descargar nada)
+
+`scripts/efectos/sonidos.py <carpeta>` sintetiza SFX libres de derechos (subida de 3,4 s, impacto, whoosh izq→der y der→izq, brillo) y `scripts/efectos/luces.py <carpeta>` genera luces de lente (cálida, fría, dorada). Se dejan en `material/` del proyecto, el botón Importar (o `POST /preparar`) los trae al editor y se colocan con `add_overlay`: SFX como audio sobre los cortes (subida que termina justo en la entrada de la música, impacto en ella, whoosh centrado en cada `slide`, brillo en cada `flash`) y las luces como video con `blend:'screen'`, `scale:1`, centradas en un corte (empiezan ~45 % de su duración antes). Para mezclar con `blend` en ffmpeg ambas entradas deben tener el mismo formato (`gbrp`) o el color sale magenta.
+
 ## Recetas
 
 - **Silencios:** ya los quita el botón. A mano: `ffmpeg -i proxy -vn -af silencedetect=noise=-32dB:d=0.45 -f null -`.
