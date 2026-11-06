@@ -291,13 +291,9 @@ header .grow { flex:1 1 0; min-width:0; }
 #tools { min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; } #tools::-webkit-scrollbar { display:none; }
 #zoomr { flex:0 1 104px; min-width:36px; }
 
-@media (max-width: 1100px) {              /* 1.º se compactan los textos */
+@media (max-width: 780px) {               /* 1.º "Proyectos" queda solo con la flecha */
   #app #back { font-size:0; gap:0; padding:4px 6px; } #app #back .ico { width:14px; height:14px; }
-}
-@media (max-width: 980px) {
   header { padding:5px 10px; gap:6px; }
-  header .brand.small span, header .vsep { display:none; }   /* queda el logo */
-  #savestate { font-size:0; margin:0; } #savestate::before { content:attr(data-icon); font-size:13px; }
   #pname { max-width:34vw; }
 }
 @media (max-width: 860px) {               /* 2.º el panel pasa a ser un menú que entra desde la derecha */
@@ -307,6 +303,12 @@ header .grow { flex:1 1 0; min-width:0; }
   #app.drawer-open #inspector { transform:translateX(0); }
   #app.drawer-open #backdrop { display:block; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:35; }
   header { position:relative; z-index:50; }
+}
+@media (max-width: 720px) {               /* 2.º "Guardado" pasa a ✓ */
+  #savestate { font-size:0; margin:0; } #savestate::before { content:attr(data-icon); font-size:13px; }
+}
+@media (max-width: 640px) {               /* 3.º solo el logo, sin "VIDEO AI" */
+  header .brand.small span, header .vsep { display:none; }
 }
 @media (max-width: 520px) {               /* 3.º en un teléfono: Exportar queda solo con su icono */
   header { padding:5px 8px; gap:5px; }
