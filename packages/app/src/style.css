@@ -269,3 +269,7 @@ header .grow { flex:1; }
 .modal-box.exp .folder { display:flex; align-items:center; gap:8px; background:#151513; border:1px solid var(--line); border-radius:8px; padding:4px 4px 4px 10px; }
 .modal-box.exp .folder span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; }
 .modal-box.exp .folder button { white-space:nowrap; font-size:12px; padding:4px 10px; }
+
+/* Cabecera: 'Proyectos' a la izquierda del logo, con separador */
+header .vsep { width:1px; height:18px; background:#3a3a36; margin:0 6px 0 4px; flex:none; }
+#app #back { padding:3px 8px 3px 5px; }
