@@ -1,19 +1,18 @@
 import { PEAK_RATE, THUMB_H, THUMB_W } from './media'
-import { FX_INFO } from './fxinfo'
+import { FX_INFO, TRANSITIONS } from './fxinfo'
 import type { Player } from './player'
 import { MIN_DUR, clipDur, duration, exec, isTextLayer, layout, type Placed, type Store, type TextLayer } from '@gojaguar/core'
 
 const LEFT = 78, RULER_H = 26
 const ROWS = {
-  video: { y: 30, h: 58, label: 'Video' },
-  audio: { y: 92, h: 34, label: 'Audio' },
-  subtitle: { y: 132, h: 26, label: 'Subtítulos' },
-  graphic: { y: 162, h: 26, label: 'Gráficos' },
-  fx: { y: 192, h: 26, label: 'Efectos' },
-  music: { y: 222, h: 30, label: 'Música' },
+  subtitle: { y: 30, h: 26, label: 'Subtítulos' },
+  graphic: { y: 60, h: 26, label: 'Gráficos' },
+  video: { y: 92, h: 88, label: 'Video' },
+  music: { y: 186, h: 40, label: 'Música' },
 } as const
-export const TL_HEIGHT = 258
+export const TL_HEIGHT = 234
 const EDGE = 7
+const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
 
 type Drag =
   | { k: 'seek' }
@@ -118,7 +117,11 @@ export class Timeline {
 
     if (row === 'ruler') { this.drag = { k: 'seek' }; this.player.seek(t); return }
 
-    if (row === 'video' || row === 'audio') {
+    if (row === 'video') {
+      const tr = this.hitTransition(x, y)
+      if (tr) { this.store.select({ type: 'clip', id: tr.clip.id }); this.player.seek(tr.start + 0.01); return }
+    }
+    if (row === 'video') {
       const h = this.hitClip(x)
       if (!h) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
       this.store.select({ type: 'clip', id: h.p.clip.id })
@@ -132,13 +135,6 @@ export class Timeline {
       return
     }
 
-    if (row === 'fx') {
-      const h = this.hitClip(x)
-      if (!h) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
-      this.store.select({ type: 'clip', id: h.p.clip.id })
-      this.player.seek(h.p.start + 0.01)
-      return
-    }
     if (row === 'music') { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
 
     if (row === 'subtitle' || row === 'graphic') {
@@ -252,7 +248,7 @@ export class Timeline {
   private cursorAt(x: number, y: number) {
     if (x < LEFT) return 'default'
     const row = this.rowAt(y)
-    if (row === 'video' || row === 'audio') {
+    if (row === 'video') {
       const h = this.hitClip(x)
       return h ? (h.zone === 'body' ? 'grab' : 'ew-resize') : 'default'
     }
@@ -287,7 +283,7 @@ export class Timeline {
     for (const pl of placed) this.drawClip(pl, dragging?.id === pl.clip.id)
 
     for (const o of p.layers) if (isTextLayer(o)) this.drawOverlay(o)
-    this.drawFx(placed)
+    this.drawTransitions(placed)
     this.drawMusic()
 
     // indicador de destino al reordenar
@@ -348,81 +344,105 @@ export class Timeline {
 
   private drawClip(pl: Placed, ghost: boolean) {
     const c = this.ctx
-    const x0 = this.t2x(pl.start), x1 = this.t2x(pl.end)
+    const x0 = this.t2x(pl.start) + 0.5, x1 = this.t2x(pl.end) - 0.5     // casi pegados, como en CapCut
     if (x1 < LEFT || x0 > this.w) return
     const a = this.player.assets.get(pl.clip.assetId)
     const sel = this.store.selection?.type === 'clip' && this.store.selection.id === pl.clip.id
-    const V = ROWS.video, A = ROWS.audio
+    const V = ROWS.video, w = Math.max(x1 - x0, 2), HEAD = 18, WAVE = 20, TH = V.h - HEAD - WAVE
+    const dur = (pl.end - pl.start)
 
     c.save()
     c.globalAlpha = ghost ? 0.35 : 1
-    c.beginPath(); c.rect(Math.max(x0, LEFT), V.y, x1 - Math.max(x0, LEFT), V.h); c.clip()
-    c.fillStyle = '#3a3a36'; c.fillRect(x0, V.y, x1 - x0, V.h)
+    c.beginPath(); c.roundRect(x0, V.y, w, V.h, 5); c.clip()
+    c.fillStyle = '#0d4f53'; c.fillRect(x0, V.y, w, V.h)
+    // miniaturas (recortadas al centro)
     if (a) {
-      const tw = THUMB_W * (V.h / THUMB_H)
+      const tw = THUMB_W * (TH / THUMB_H)
       for (let tx = x0; tx < x1; tx += tw) {
         if (tx + tw < LEFT || tx > this.w) continue
         const src = pl.clip.srcIn + ((tx + tw / 2 - x0) / this.pps) * pl.clip.speed
         const th = a.thumbs[Math.min(Math.floor(src), a.thumbs.length - 1)]
-        if (th) c.drawImage(th, tx, V.y, tw, V.h)
+        if (th) c.drawImage(th, tx, V.y + HEAD, tw, TH)
       }
     }
-    c.fillStyle = 'rgba(8,9,14,.55)'; c.fillRect(x0, V.y, Math.min(150, x1 - x0), 18)
+    // cabecera: nombre y duración
+    c.fillStyle = '#0f6a6f'; c.fillRect(x0, V.y, w, HEAD)
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
-    c.fillText(`${pl.clip.id}${pl.clip.fx ? `  ✦${pl.clip.fx}` : ''}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}${pl.clip.volume !== 1 ? `  vol ${pl.clip.volume}` : ''}`, x0 + 6, V.y + 9)
-    c.restore()
-
-    // audio + waveform
-    c.save()
-    c.globalAlpha = ghost ? 0.35 : 1
-    c.beginPath(); c.rect(Math.max(x0, LEFT), A.y, x1 - Math.max(x0, LEFT), A.h); c.clip()
-    c.fillStyle = '#1f3a34'; c.fillRect(x0, A.y, x1 - x0, A.h)
+    const name = a?.info.name ?? pl.clip.id
+    c.fillText(`${name}  ${tc(dur)}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}`, Math.max(x0, LEFT) + 6, V.y + HEAD / 2, Math.max(w - 10, 0))
+    // onda del audio del clip, al pie
+    c.fillStyle = '#0a3d40'; c.fillRect(x0, V.y + V.h - WAVE, w, WAVE)
     if (a && a.peaks.length) {
-      c.fillStyle = '#4fd1a5'
-      const mid = A.y + A.h / 2
+      c.fillStyle = '#35c2b5'
+      const mid = V.y + V.h - WAVE / 2
       for (let x = Math.max(Math.floor(x0), LEFT); x < Math.min(x1, this.w); x++) {
         const t = pl.clip.srcIn + ((x - x0) / this.pps) * pl.clip.speed
         const i0 = Math.floor(t * PEAK_RATE)
         const i1 = Math.max(i0 + 1, Math.floor((t + (pl.clip.speed / this.pps)) * PEAK_RATE))
         let m = 0
         for (let i = i0; i < i1 && i < a.peaks.length; i++) if (a.peaks[i] > m) m = a.peaks[i]
-        const h = Math.min(1, m * pl.clip.volume) * (A.h - 4)
+        const h = Math.min(1, m * pl.clip.volume) * (WAVE - 4)
         c.fillRect(x, mid - h / 2, 1, Math.max(h, 1))
       }
     }
+    // etiqueta de zoom (los zooms son "animaciones" del clip; las transiciones van como pastilla en el corte)
+    const fx = pl.clip.fx
+    if (fx && !TRANSITIONS.has(fx) && w > 60) {
+      const label = FX_INFO[fx].name
+      c.font = '10px Figtree, system-ui, sans-serif'
+      const tw2 = Math.min(c.measureText(label).width + 20, w - 8)
+      c.fillStyle = 'rgba(20,20,18,.78)'; c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 8); c.fill()
+      c.fillStyle = FX_INFO[fx].color; c.beginPath(); c.arc(x0 + 12, V.y + HEAD + 12, 3, 0, Math.PI * 2); c.fill()
+      c.fillStyle = '#fff'; c.fillText(label, x0 + 18, V.y + HEAD + 12, Math.max(tw2 - 20, 0))
+    }
     c.restore()
 
-    // bordes
-    for (const r of [V, A]) {
-      c.strokeStyle = sel ? '#e8b152' : 'rgba(255,255,255,.25)'; c.lineWidth = sel ? 2 : 1
-      c.strokeRect(x0 + .5, r.y + .5, x1 - x0 - 1, r.h - 1)
-    }
+    // selección: contorno blanco con asas, como en CapCut
     if (sel) {
-      c.fillStyle = '#e8b152'
-      for (const xx of [x0, x1 - 5]) c.fillRect(xx, V.y + V.h / 2 - 12, 5, 24)
+      c.strokeStyle = '#fff'; c.lineWidth = 2
+      c.beginPath(); c.roundRect(x0 + 1, V.y + 1, w - 2, V.h - 2, 5); c.stroke()
+      c.fillStyle = '#fff'
+      for (const xx of [x0 + 1, x1 - 7]) { c.beginPath(); c.roundRect(xx, V.y + V.h / 2 - 14, 6, 28, 3); c.fill() }
     }
   }
 
-  /** Fila de efectos: una pastilla por clip con el color del efecto; la parte fuerte (el "golpe") va más marcada. */
-  private drawFx(placed: Placed[]) {
-    const c = this.ctx, R = ROWS.fx
-    c.save(); c.beginPath(); c.rect(LEFT, R.y, this.w - LEFT, R.h); c.clip()
-    c.font = '10px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
-    for (const pl of placed) {
-      const fx = pl.clip.fx; if (!fx) continue
-      const x0 = this.t2x(pl.start), x1 = this.t2x(pl.end)
-      if (x1 < LEFT || x0 > this.w) continue
-      const info = FX_INFO[fx], sel = this.store.selection?.type === 'clip' && this.store.selection.id === pl.clip.id
-      c.globalAlpha = 0.45; c.fillStyle = info.color
-      c.beginPath(); c.roundRect(x0 + 1, R.y + 2, Math.max(x1 - x0 - 2, 2), R.h - 4, 4); c.fill()
-      c.globalAlpha = 1
-      const hw = Math.min((info.hit || (pl.end - pl.start)) * this.pps, x1 - x0 - 2)
-      c.fillStyle = info.color; c.beginPath(); c.roundRect(x0 + 1, R.y + 2, Math.max(hw, 2), R.h - 4, 4); c.fill()
-      if (fx === 'punchflash' || fx === 'dropflash') { c.fillStyle = '#fff'; c.fillRect(x0 + 1, R.y + 2, 2, R.h - 4) }
-      if (x1 - x0 > 52) { c.fillStyle = info.hit ? info.ink : '#fff'; c.fillText(info.short, x0 + 6, R.y + R.h / 2) }
-      if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1.5, R.y + 2.5, Math.max(x1 - x0 - 3, 2), R.h - 5, 4); c.stroke() }
+  /** Pastilla de transición en el corte (entre el clip anterior y este), como en CapCut. */
+  private chipPos(pl: Placed) { return { cx: this.t2x(pl.start), cy: ROWS.video.y + ROWS.video.h / 2, r: 12 } }
+  private hitTransition(x: number, y: number): Placed | null {
+    const placed = layout(this.store.project)
+    for (let i = 1; i < placed.length; i++) {
+      const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx)) continue
+      const { cx, cy, r } = this.chipPos(placed[i])
+      if (Math.abs(x - cx) <= r && Math.abs(y - cy) <= 16) return placed[i]
     }
-    c.restore()
+    return null
+  }
+  private drawTransitions(placed: Placed[]) {
+    const c = this.ctx
+    for (let i = 1; i < placed.length; i++) {
+      const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx)) continue
+      const { cx, cy, r } = this.chipPos(placed[i])
+      if (cx < LEFT + r || cx > this.w + r) continue
+      const info = FX_INFO[fx], sel = this.store.selection?.type === 'clip' && this.store.selection.id === placed[i].clip.id
+      c.save()
+      c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 4
+      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - 10, cy - 14, 20, 28, 5); c.fill()
+      c.shadowBlur = 0
+      if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(cx - 13, cy - 17, 26, 34, 7); c.stroke() }
+      c.fillStyle = info.color; c.beginPath(); c.roundRect(cx - 10, cy + 10, 20, 4, 2); c.fill()
+      c.fillStyle = '#1d1d1b'; c.strokeStyle = '#1d1d1b'; c.lineWidth = 1.8; c.lineCap = 'round'; c.lineJoin = 'round'
+      if (fx === 'slide') {            // flechas ⇄
+        const d = (placed[i].clip.fxDir ?? 1) > 0 ? 1 : -1
+        c.beginPath(); c.moveTo(cx - 6 * d, cy - 2.5); c.lineTo(cx + 6 * d, cy - 2.5); c.moveTo(cx + 3 * d, cy - 5.5); c.lineTo(cx + 6 * d, cy - 2.5); c.lineTo(cx + 3 * d, cy + 0.5)
+        c.moveTo(cx + 6 * d, cy + 3.5); c.lineTo(cx - 6 * d, cy + 3.5); c.stroke()
+      } else {                          // destello ✦
+        const k = fx === 'dropflash' ? 7.5 : 6
+        c.beginPath()
+        for (let a = 0; a < 8; a++) { const rr = a % 2 === 0 ? k : k * 0.35, ang = (a * Math.PI) / 4 - Math.PI / 2; c.lineTo(cx + rr * Math.cos(ang), cy + rr * Math.sin(ang)) }
+        c.closePath(); c.fill()
+      }
+      c.restore()
+    }
   }
 
   private drawMusic() {
@@ -432,18 +452,19 @@ export class Timeline {
     if (x1 < LEFT || x0 > this.w) return
     const l = Math.max(x0, LEFT)
     c.save(); c.beginPath(); c.rect(l, R.y, x1 - l, R.h); c.clip()
-    c.fillStyle = '#4a3a17'; c.beginPath(); c.roundRect(x0, R.y + 2, x1 - x0, R.h - 4, 5); c.fill()
+    c.fillStyle = '#143a66'; c.beginPath(); c.roundRect(x0, R.y + 1, x1 - x0, R.h - 2, 5); c.fill()
     const pk = this.player.musicPeaks.get(m.assetId)
     if (pk) {
-      c.fillStyle = '#e8b152'; const mid = R.y + R.h / 2
+      c.fillStyle = '#2f86e0'; const mid = R.y + R.h / 2 + 6
       for (let x = Math.floor(l); x < Math.min(x1, this.w); x++) {
         const t = m.srcIn + (x - x0) / this.pps, i0 = Math.floor(t * 100), i1 = Math.max(i0 + 1, Math.floor((t + 1 / this.pps) * 100))
         let mx = 0; for (let i = i0; i < i1 && i < pk.length; i++) if (pk[i] > mx) mx = pk[i]
-        const h = Math.min(1, mx * m.volume) * (R.h - 8); c.fillRect(x, mid - h / 2, 1, Math.max(h, 1))
+        const h = Math.min(1, mx * m.volume) * (R.h - 16); c.fillRect(x, mid - h / 2, 1, Math.max(h, 1))
       }
     }
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
-    c.fillText('♪ ' + (this.store.asset(m.assetId)?.name ?? 'música'), Math.max(x0, LEFT) + 8, R.y + 9)
+    c.fillStyle = 'rgba(8,20,40,.6)'; c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 4); c.fill()
+    c.fillStyle = '#fff'; c.fillText('♪ ' + (this.store.asset(m.assetId)?.name ?? 'música'), Math.max(x0, LEFT) + 10, R.y + 10, 218)
     c.restore()
   }
 
@@ -455,10 +476,10 @@ export class Timeline {
     const l = Math.max(x0, LEFT)
     c.save()
     c.beginPath(); c.rect(l, R.y, x1 - l, R.h); c.clip()
-    c.fillStyle = o.type === 'subtitle' ? '#8a6324' : '#c4366a'
+    c.fillStyle = o.type === 'subtitle' ? '#c4553f' : '#a23b6d'
     c.beginPath(); c.roundRect(x0, R.y + 2, x1 - x0, R.h - 4, 5); c.fill()
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
-    c.fillText(o.text, x0 + 8, R.y + R.h / 2)
+    c.fillText('Aa≡ ' + o.text, x0 + 8, R.y + R.h / 2)
     if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 3, x1 - x0 - 2, R.h - 6, 5); c.stroke() }
     c.restore()
   }

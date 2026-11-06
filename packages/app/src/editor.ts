@@ -2,7 +2,7 @@ import {
   Store, describe, duration, exec, execBatch, layout, parseProject, serialize,
   CLIP_FX, type ClipFx, type Cmd, type Project, type TextLayer,
 } from '@gojaguar/core'
-import { FX_INFO } from './fxinfo'
+import { FX_INFO, TRANSITIONS } from './fxinfo'
 import { H, W } from './constants'
 import { ico } from './icons'
 import { runBench } from './bench'
@@ -169,10 +169,13 @@ export async function bootEditor(slug: string) {
       insp.insertAdjacentHTML('beforeend', `<h3>Clip ${id}</h3>`)
       // efecto del clip (zoom, deslizar, destello…)
       const fxSel = document.createElement('select')
-      fxSel.innerHTML = '<option value="">Ninguno</option>' + CLIP_FX.map(f => `<option value="${f}">${FX_INFO[f].name}</option>`).join('')
+      const opt = (f: ClipFx) => `<option value="${f}">${FX_INFO[f].name}</option>`
+      fxSel.innerHTML = '<option value="">Ninguno</option>'
+        + `<optgroup label="Zoom del clip">${CLIP_FX.filter(f => !TRANSITIONS.has(f)).map(opt).join('')}</optgroup>`
+        + `<optgroup label="Transición (en el corte, al entrar este clip)">${CLIP_FX.filter(f => TRANSITIONS.has(f)).map(opt).join('')}</optgroup>`
       fxSel.value = clip.fx ?? ''
       fxSel.onchange = () => { exec(store, { op: 'set_effect', clip: id, effect: (fxSel.value || null) as ClipFx | null, dir: clip.fxDir ?? 1 }) }
-      field('Efecto', fxSel)
+      field('Zoom o transición', fxSel)
       if (clip.fx) insp.insertAdjacentHTML('beforeend', `<p class="hint" style="margin:6px 0 0">${FX_INFO[clip.fx].hint}</p>`)
       if (clip.fx === 'slide') {
         const dSel = document.createElement('select')
@@ -211,7 +214,7 @@ export async function bootEditor(slug: string) {
         insp.append(rm)
       }
       const legend = CLIP_FX.map(f => `<div class="lg"><i style="background:${FX_INFO[f].color}"></i><b>${FX_INFO[f].name}</b><span>${FX_INFO[f].hint}</span></div>`).join('')
-      insp.insertAdjacentHTML('beforeend', `<h3 style="margin-top:18px">Efectos (fila “Efectos”)</h3><div class="legend">${legend}</div><p class="hint">Toca una pastilla de la fila <b>Efectos</b> para elegir ese clip y cambiarle el efecto.</p>`)
+      insp.insertAdjacentHTML('beforeend', `<h3 style="margin-top:18px">Zooms y transiciones</h3><div class="legend">${legend}</div><p class="hint">Los <b>zooms</b> aparecen como una etiqueta dentro del clip. Las <b>transiciones</b> son la pastilla blanca en el corte entre dos clips: tócala (o toca el clip) para cambiarla.</p>`)
       insp.insertAdjacentHTML('beforeend', `<h3 style="margin-top:18px">Lo que lee Claude</h3><pre></pre>
         <p class="hint">Pasa el mouse por el timeline para ver los frames. Arrastra los bordes de un clip para recortar (ves el frame del corte en vivo). Arrastra los gráficos y subtítulos directo sobre el video o por su barra. Doble clic en las filas de Subtítulos/Gráficos crea uno nuevo.<br><br>
         <b>S</b> corta · <b>Espacio</b> reproduce · <b>Supr</b> borra · <b>⌘/Ctrl+Z</b> deshace · <b>⌘/Ctrl+S</b> guarda · Ctrl/⌘+rueda = zoom</p>`)

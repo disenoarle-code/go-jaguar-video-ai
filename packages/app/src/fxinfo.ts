@@ -8,3 +8,6 @@ export const FX_INFO: Record<ClipFx, { name: string; short: string; color: strin
   punchflash: { name: 'Golpe + destello',      short: 'Golpe+flash', color: '#d9778b', ink: '#1d1d1b', hit: 0.3,  hint: 'Golpe de zoom con un destello blanco corto.' },
   dropflash:  { name: 'Entrada fuerte',        short: 'Drop',        color: '#f8f4ec', ink: '#1d1d1b', hit: 0.5,  hint: 'Zoom grande y destello fuerte, para la entrada de la música.' },
 }
+
+/** Efectos que ocurren en el CORTE entre dos clips (se dibujan como pastilla ahí); el resto son zooms del clip. */
+export const TRANSITIONS = new Set<ClipFx>(['slide', 'punchflash', 'dropflash'])
