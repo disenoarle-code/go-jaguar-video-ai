@@ -70,6 +70,8 @@ await editor.bench()                   // mide scrub y reproducción (pestaña v
 
 Comandos (`op`): `import_asset`, `add_clip {asset,src_in,src_out,effect?,dir?}`, `set_effect {clip,effect|null,dir?}` (efectos: `push` zoom lento, `punch` golpe de zoom, `slide` deslizamiento, `punchflash`/`dropflash` zoom con destello), `set_music {asset,src_in,volume,fade_out}` (pista de música desde el inicio; el asset es `kind:'audio'` con `proxy` = la vista previa `.previews/<id>.m4a`), `clear_music`, `set_format {width,height}` (vertical: 1080×1920), `split {at}`, `delete_range {from,to}`, `delete_ranges {ranges}`, `delete_clip {id}`, `speed {clip,value}`, `speed_all {value}`, `volume {clip,value}`, `move_clip {id,to_index}`, `trim {id,edge,src_time}`, `add_text {type:'subtitle'|'graphic',start,end,text,…}`, `add_layer`, `update_layer`, `delete_layer`. Definición: `packages/core/src/commands.ts`.
 
+En el editor el usuario ve los efectos en la fila **Efectos** (una pastilla de color por clip; la parte fuerte del efecto va más marcada), cambia el efecto del clip seleccionado en el panel derecho (selector + dirección + "Ver este clip") y ajusta la música (volumen, dónde empieza, fundido) con nada seleccionado. Si el usuario cambia algo a mano, el MP4 de `salidas/` queda desactualizado: hay que re-renderizar.
+
 Reglas:
 - **Nunca borres, muevas ni renombres los videos originales del usuario** (están enlazados, no copiados). Quitar algo de la app solo quita el enlace.
 - **Usa lotes** (`editor.batch`, `delete_ranges`, `speed_all`), no cientos de llamadas.

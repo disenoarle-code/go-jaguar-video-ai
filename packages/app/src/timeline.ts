@@ -1,4 +1,5 @@
 import { PEAK_RATE, THUMB_H, THUMB_W } from './media'
+import { FX_INFO } from './fxinfo'
 import type { Player } from './player'
 import { MIN_DUR, clipDur, duration, exec, isTextLayer, layout, type Placed, type Store, type TextLayer } from '@gojaguar/core'
 
@@ -8,9 +9,10 @@ const ROWS = {
   audio: { y: 92, h: 34, label: 'Audio' },
   subtitle: { y: 132, h: 26, label: 'Subtítulos' },
   graphic: { y: 162, h: 26, label: 'Gráficos' },
-  music: { y: 192, h: 30, label: 'Música' },
+  fx: { y: 192, h: 26, label: 'Efectos' },
+  music: { y: 222, h: 30, label: 'Música' },
 } as const
-export const TL_HEIGHT = 228
+export const TL_HEIGHT = 258
 const EDGE = 7
 
 type Drag =
@@ -129,6 +131,15 @@ export class Timeline {
       }
       return
     }
+
+    if (row === 'fx') {
+      const h = this.hitClip(x)
+      if (!h) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
+      this.store.select({ type: 'clip', id: h.p.clip.id })
+      this.player.seek(h.p.start + 0.01)
+      return
+    }
+    if (row === 'music') { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
 
     if (row === 'subtitle' || row === 'graphic') {
       const h = this.hitOverlay(x, row)
@@ -276,6 +287,7 @@ export class Timeline {
     for (const pl of placed) this.drawClip(pl, dragging?.id === pl.clip.id)
 
     for (const o of p.layers) if (isTextLayer(o)) this.drawOverlay(o)
+    this.drawFx(placed)
     this.drawMusic()
 
     // indicador de destino al reordenar
@@ -389,6 +401,28 @@ export class Timeline {
       c.fillStyle = '#e8b152'
       for (const xx of [x0, x1 - 5]) c.fillRect(xx, V.y + V.h / 2 - 12, 5, 24)
     }
+  }
+
+  /** Fila de efectos: una pastilla por clip con el color del efecto; la parte fuerte (el "golpe") va más marcada. */
+  private drawFx(placed: Placed[]) {
+    const c = this.ctx, R = ROWS.fx
+    c.save(); c.beginPath(); c.rect(LEFT, R.y, this.w - LEFT, R.h); c.clip()
+    c.font = '10px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
+    for (const pl of placed) {
+      const fx = pl.clip.fx; if (!fx) continue
+      const x0 = this.t2x(pl.start), x1 = this.t2x(pl.end)
+      if (x1 < LEFT || x0 > this.w) continue
+      const info = FX_INFO[fx], sel = this.store.selection?.type === 'clip' && this.store.selection.id === pl.clip.id
+      c.globalAlpha = 0.45; c.fillStyle = info.color
+      c.beginPath(); c.roundRect(x0 + 1, R.y + 2, Math.max(x1 - x0 - 2, 2), R.h - 4, 4); c.fill()
+      c.globalAlpha = 1
+      const hw = Math.min((info.hit || (pl.end - pl.start)) * this.pps, x1 - x0 - 2)
+      c.fillStyle = info.color; c.beginPath(); c.roundRect(x0 + 1, R.y + 2, Math.max(hw, 2), R.h - 4, 4); c.fill()
+      if (fx === 'punchflash' || fx === 'dropflash') { c.fillStyle = '#fff'; c.fillRect(x0 + 1, R.y + 2, 2, R.h - 4) }
+      if (x1 - x0 > 52) { c.fillStyle = info.hit ? info.ink : '#fff'; c.fillText(info.short, x0 + 6, R.y + R.h / 2) }
+      if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1.5, R.y + 2.5, Math.max(x1 - x0 - 3, 2), R.h - 5, 4); c.stroke() }
+    }
+    c.restore()
   }
 
   private drawMusic() {

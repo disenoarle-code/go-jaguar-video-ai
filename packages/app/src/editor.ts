@@ -1,7 +1,8 @@
 import {
   Store, describe, duration, exec, execBatch, layout, parseProject, serialize,
-  type Cmd, type Project, type TextLayer,
+  CLIP_FX, type ClipFx, type Cmd, type Project, type TextLayer,
 } from '@gojaguar/core'
+import { FX_INFO } from './fxinfo'
 import { H, W } from './constants'
 import { ico } from './icons'
 import { runBench } from './bench'
@@ -157,7 +158,7 @@ export async function bootEditor(slug: string) {
     const p = store.project
     const clip = s?.type === 'clip' ? p.clips.find(c => c.id === s.id) : undefined
     const lay = s?.type === 'layer' ? p.layers.find(o => o.id === s.id) : undefined
-    const key = s ? `${s.type}:${s.id}` : 'none'
+    const key = s ? `${s.type}:${s.id}:${clip?.fx ?? ''}:${clip?.fxDir ?? ''}` : 'none'
     if (key === lastKey && key !== 'none') return
     if (key === 'none' && lastKey === 'none') { const pre = insp.querySelector('pre'); if (pre) pre.textContent = describe(store); return }
     lastKey = key
@@ -166,6 +167,23 @@ export async function bootEditor(slug: string) {
       const id = clip.id
       const C = (pr: Project) => pr.clips.find(c => c.id === id)!
       insp.insertAdjacentHTML('beforeend', `<h3>Clip ${id}</h3>`)
+      // efecto del clip (zoom, deslizar, destello…)
+      const fxSel = document.createElement('select')
+      fxSel.innerHTML = '<option value="">Ninguno</option>' + CLIP_FX.map(f => `<option value="${f}">${FX_INFO[f].name}</option>`).join('')
+      fxSel.value = clip.fx ?? ''
+      fxSel.onchange = () => { exec(store, { op: 'set_effect', clip: id, effect: (fxSel.value || null) as ClipFx | null, dir: clip.fxDir ?? 1 }) }
+      field('Efecto', fxSel)
+      if (clip.fx) insp.insertAdjacentHTML('beforeend', `<p class="hint" style="margin:6px 0 0">${FX_INFO[clip.fx].hint}</p>`)
+      if (clip.fx === 'slide') {
+        const dSel = document.createElement('select')
+        dSel.innerHTML = '<option value="-1">Entra desde la derecha</option><option value="1">Entra desde la izquierda</option>'
+        dSel.value = String(clip.fxDir ?? 1)
+        dSel.onchange = () => { exec(store, { op: 'set_effect', clip: id, effect: 'slide', dir: Number(dSel.value) as 1 | -1 }) }
+        field('Dirección', dSel)
+      }
+      const see = document.createElement('button'); see.textContent = 'Ver este clip'; see.style.marginTop = '10px'
+      see.onclick = () => { const pl = layout(store.project).find(x => x.clip.id === id); if (pl) { player.seek(pl.start); void player.play() } }
+      insp.append(see)
       field('Velocidad (×)', input('number', clip.speed, (pr, v) => { const n = parseFloat(v); if (n > 0) C(pr).speed = Math.min(Math.max(n, 0.1), 8) }, { step: '0.1', min: '0.1', max: '8' }))
       field('Volumen', input('range', clip.volume, (pr, v) => { C(pr).volume = parseFloat(v) }, { min: '0', max: '2', step: '0.05' }))
       const b = document.createElement('button'); b.textContent = 'Borrar clip (ripple)'; b.style.marginTop = '14px'; b.onclick = deleteSelected
@@ -182,7 +200,19 @@ export async function bootEditor(slug: string) {
       const b = document.createElement('button'); b.textContent = 'Borrar'; b.style.marginTop = '14px'; b.onclick = deleteSelected
       insp.append(b)
     } else {
-      insp.insertAdjacentHTML('beforeend', `<h3>Lo que lee Claude</h3><pre></pre>
+      const m = store.project.music
+      if (m) {
+        const nm = store.asset(m.assetId)?.name ?? 'música'
+        insp.insertAdjacentHTML('beforeend', `<h3>Música · ${nm}</h3>`)
+        field('Volumen', input('range', m.volume, (pr, v) => { if (pr.music) pr.music.volume = parseFloat(v) }, { min: '0', max: '2', step: '0.05' }))
+        field('Empieza en (s de la canción)', input('number', m.srcIn.toFixed(2), (pr, v) => { if (pr.music) pr.music.srcIn = Math.max(0, parseFloat(v) || 0) }, { step: '0.05', min: '0' }))
+        field('Fundido final (s)', input('number', m.fadeOut, (pr, v) => { if (pr.music) pr.music.fadeOut = Math.max(0, parseFloat(v) || 0) }, { step: '0.1', min: '0' }))
+        const rm = document.createElement('button'); rm.textContent = 'Quitar música'; rm.style.marginTop = '10px'; rm.onclick = () => { exec(store, { op: 'clear_music' }); lastKey = '' }
+        insp.append(rm)
+      }
+      const legend = CLIP_FX.map(f => `<div class="lg"><i style="background:${FX_INFO[f].color}"></i><b>${FX_INFO[f].name}</b><span>${FX_INFO[f].hint}</span></div>`).join('')
+      insp.insertAdjacentHTML('beforeend', `<h3 style="margin-top:18px">Efectos (fila “Efectos”)</h3><div class="legend">${legend}</div><p class="hint">Toca una pastilla de la fila <b>Efectos</b> para elegir ese clip y cambiarle el efecto.</p>`)
+      insp.insertAdjacentHTML('beforeend', `<h3 style="margin-top:18px">Lo que lee Claude</h3><pre></pre>
         <p class="hint">Pasa el mouse por el timeline para ver los frames. Arrastra los bordes de un clip para recortar (ves el frame del corte en vivo). Arrastra los gráficos y subtítulos directo sobre el video o por su barra. Doble clic en las filas de Subtítulos/Gráficos crea uno nuevo.<br><br>
         <b>S</b> corta · <b>Espacio</b> reproduce · <b>Supr</b> borra · <b>⌘/Ctrl+Z</b> deshace · <b>⌘/Ctrl+S</b> guarda · Ctrl/⌘+rueda = zoom</p>`)
       insp.querySelector('pre')!.textContent = describe(store)
