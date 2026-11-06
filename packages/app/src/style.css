@@ -206,7 +206,6 @@ header #back { padding:3px 9px 3px 7px; } header #back .ico { width:13px; height
 #tools button:disabled { opacity:.28; background:transparent; }
 #tools .ico { width:15px; height:15px; stroke-width:1.5; }
 #tools .sep { width:1px; height:14px; background:#33332f; margin:0 7px; }
-#tools #addmat { gap:5px; padding:4px 10px 4px 7px; color:#fff; } #tools #addmat .ico { width:14px; height:14px; }
 #zoomr { width:104px; height:3px; accent-color:var(--acc); margin:0 4px; cursor:pointer; }
 #tl { border-top:0; }
 
@@ -249,3 +248,12 @@ header .brand.small { gap:9px; margin:0 4px 0 0; } header .brand.small img { hei
 #pname:not([readonly]) { background:#151513; border-color:var(--acc); cursor:text; outline:none; }
 header .grow { flex:1; }
 #savestate { margin-left:0; font-size:11.5px; } #app #export { margin-left:4px; }
+
+/* Título del panel de medios (pestaña) y filtros */
+.pool-tabs { display:flex; gap:18px; border-bottom:1px solid #2f2f2b; margin:-2px -12px 12px; padding:0 14px; }
+.ptab { font-size:13px; font-weight:500; color:var(--dim); padding:3px 0 9px; border-bottom:2px solid transparent; margin-bottom:-1px; }
+.ptab.on { color:#fff; border-bottom-color:var(--acc); }
+.pool-filter { display:flex; gap:14px; margin:2px 0 9px; }
+#app .pool-filter button { background:transparent; border:0; padding:0; font-size:12px; color:var(--dim); border-radius:0; }
+#app .pool-filter button:hover { color:#fff; } #app .pool-filter button.on { color:#fff; }
+.pool-title { display:none; }

@@ -213,9 +213,6 @@ export async function bootEditor(slug: string) {
   })
   window.addEventListener('mouseup', () => { if (pdrag) { store.endTx(); pdrag = null } })
 
-  // El botón Material de la barra lleva al panel de medios (lo que se muestra cuando no hay nada seleccionado)
-  $('addmat').onclick = () => { store.select(null); lastKey = ''; renderInspector() }
-
   // --- menú de transición al tocar un corte entre dos clips ---------------------------------
   let cutMenu: HTMLElement | null = null
   const closeCutMenu = () => { cutMenu?.remove(); cutMenu = null }
@@ -347,7 +344,7 @@ export async function bootEditor(slug: string) {
   }
 
   // --- biblioteca de medios (como CapCut): lo que se ve cuando no hay nada seleccionado -------------------
-  let poolSig = '', poolQuery = ''
+  let poolSig = '', poolQuery = '', poolFilter: 'todo' | 'video' | 'audio' = 'todo'
   const used = () => new Set<string>([...store.project.clips.map(c => c.assetId), ...(store.project.overlays ?? []).map(o => o.assetId), ...(store.project.music ? [store.project.music.assetId] : [])])
   function drawCard(cv: HTMLCanvasElement, a: AssetInfo, tries = 0) {
     const g = cv.getContext('2d')!, W2 = cv.width, H2 = cv.height
@@ -376,7 +373,7 @@ export async function bootEditor(slug: string) {
     const list = insp.querySelector<HTMLElement>('.pool-list'); if (!list) return
     list.innerHTML = ''
     const q = poolQuery.trim().toLowerCase(), u = used()
-    const items = store.project.assets.filter(a => !q || a.name.toLowerCase().includes(q))
+    const items = store.project.assets.filter(a => (!q || a.name.toLowerCase().includes(q)) && (poolFilter === 'todo' || (poolFilter === 'audio') === (a.kind === 'audio')))
     if (!items.length) list.innerHTML = `<p class="hint">${store.project.assets.length ? 'Sin resultados.' : 'Aún no hay archivos. Pulsa Importar.'}</p>`
     for (const a of items) {
       const box = document.createElement('div'); box.className = 'pool-item'
@@ -390,12 +387,16 @@ export async function bootEditor(slug: string) {
       list.append(box); drawCard(cv, a)
     }
   }
-  const poolSignature = () => JSON.stringify([store.project.assets.map(a => a.id), [...used()].sort(), poolQuery])
+  const poolSignature = () => JSON.stringify([store.project.assets.map(a => a.id), [...used()].sort(), poolQuery, poolFilter])
   function updatePool() { const sig = poolSignature(); if (sig !== poolSig && insp.querySelector('.pool')) { poolSig = sig; poolList() } }
   function buildPool() {
-    insp.innerHTML = `<div class="pool"><div class="pool-top"><button id="p-import" class="pimp" title="Elige archivos de tu computador: se enlazan, no se copian"><b>+</b> Importar</button><input id="p-q" type="text" placeholder="Buscar" /></div><div class="pool-title">Todo</div><div class="pool-list"></div><p class="pool-note dim" id="p-note"></p></div>`
+    insp.innerHTML = `<div class="pool"><div class="pool-tabs"><span class="ptab on">Medios</span></div><div class="pool-top"><button id="p-import" class="pimp" title="Elige archivos de tu computador: se enlazan, no se copian"><b>+</b> Importar</button><input id="p-q" type="text" placeholder="Buscar" /></div><div class="pool-filter"><button data-f="todo">Todo</button><button data-f="video">Videos</button><button data-f="audio">Audio</button></div><div class="pool-list"></div><p class="pool-note dim" id="p-note"></p></div>`
     const q = insp.querySelector<HTMLInputElement>('#p-q')!; q.value = poolQuery
     q.oninput = () => { poolQuery = q.value; poolSig = ''; updatePool() }
+    const filters = [...insp.querySelectorAll<HTMLButtonElement>('.pool-filter button')]
+    const markFilter = () => filters.forEach(b => b.classList.toggle('on', b.dataset.f === poolFilter))
+    filters.forEach(b => { b.onclick = () => { poolFilter = b.dataset.f as typeof poolFilter; markFilter(); poolSig = ''; updatePool() } })
+    markFilter()
     insp.querySelector<HTMLElement>('#p-import')!.onclick = async ev => {
       const btn = ev.currentTarget as HTMLButtonElement, note = insp.querySelector<HTMLElement>('#p-note')!
       btn.disabled = true; btn.innerHTML = 'Elige los archivos…'
