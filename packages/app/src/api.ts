@@ -1,13 +1,15 @@
 /** Cliente de la API local (server/api.ts). */
 export interface Herramientas { ffmpeg: boolean; ffprobe: boolean; whisper: boolean; whisperModel: boolean; hwaccel: string | null }
-export interface Miniatura { poster: string | null; video: string | null; listo: boolean }
+export interface Miniatura { poster: string | null; video: string | null; audio: string | null; listo: boolean }
+export type Tipo = 'video' | 'audio' | 'imagen'
+export interface Ritmo { bpm: number; bpmAlt: number | null; confianza: number; duracion: number }
 export interface ProyectoResumen { slug: string; name: string; createdAt: string; ultimaEdicion: string; procesado: boolean; tieneEditor: boolean; material: number; referencias: number; duracion: number; preview: (Miniatura & { tipo: 'edicion' | 'material' }) | null }
 export type Modo = 'enlace' | 'copia'
 export interface Referencia { id: string; nombre: string; size: number; agregada: string; modo: Modo; existe: boolean; ruta: string; perfilDeEstilo: boolean; preview: Miniatura }
 export interface ArchivoInfo { name: string; size: number; lastModified: number }
 export interface ProyectoInfo {
   name: string; slug: string; createdAt: string; idioma: string; referencias: string[]; procesado?: string
-  material: { id: string; name: string; modo: Modo; existe: boolean; ruta: string; size: number; preview: Miniatura }[]; tieneEditor: boolean
+  material: { id: string; tipo: Tipo; ritmo: Ritmo | null; name: string; modo: Modo; existe: boolean; ruta: string; size: number; preview: Miniatura }[]; tieneEditor: boolean
 }
 export interface Paso { id: string; label: string; state: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string; pct?: number }
 export interface Solicitud { id: string; slug: string; tipo: 'errores' | 'completa'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error'; creado: string; nota?: string }

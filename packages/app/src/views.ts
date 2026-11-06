@@ -1,9 +1,10 @@
 import { ico } from './icons'
-import { api, fmtDur, fmtSize, subir, type ArchivoInfo, type Miniatura, type ProyectoInfo, type ProyectoResumen, type Referencia, type Trabajo } from './api'
+import { api, fmtDur, fmtSize, subir, type ArchivoInfo, type Miniatura, type Tipo, type ProyectoInfo, type ProyectoResumen, type Referencia, type Trabajo } from './api'
 
 const root = () => document.getElementById('shell')!
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
 const VIDEO = /\.(mp4|mov|m4v|mkv|webm|avi)$/i
+const MATERIAL = /\.(mp4|mov|m4v|mkv|webm|avi|mp3|wav|m4a|aac|flac|ogg|aiff?|jpe?g|png|webp|heic|gif|bmp|tiff?)$/i
 const go = (hash: string) => { location.hash = hash }
 const BRAND = '<a class="brand" href="#/"><img src="/logo.svg" alt="Go Jaguar" /><span>Video AI</span></a>'
 
@@ -22,21 +23,30 @@ function confirmar(titulo: string, textoHtml: string, ok = 'Borrar', peligro = t
 }
 
 // --- tarjetas con miniatura reproducible -------------------------------------------------------------
-const thumb = (pv: Miniatura) => pv.video
-  ? `<video src="/${pv.video}" ${pv.poster ? `poster="/${pv.poster}"` : ''} controls preload="none" playsinline></video>`
-  : `<div class="ph">${pv.poster ? `<img src="/${pv.poster}" alt="">` : ''}<span>${pv.poster ? 'Preparando video…' : 'Preparando miniatura…'}</span></div>`
+const thumb = (pv: Miniatura, tipo: Tipo = 'video') => tipo === 'audio'
+  ? `<div class="aud">${pv.poster ? `<img src="/${pv.poster}" alt="">` : ''}${pv.audio ? `<audio src="/${pv.audio}" controls preload="none"></audio>` : '<span class="ph-t">Preparando audio…</span>'}</div>`
+  : tipo === 'imagen'
+    ? (pv.poster ? `<img src="/${pv.poster}" alt="">` : '<div class="ph"><span>Preparando miniatura…</span></div>')
+    : pv.video
+      ? `<video src="/${pv.video}" ${pv.poster ? `poster="/${pv.poster}"` : ''} controls preload="none" playsinline></video>`
+      : `<div class="ph">${pv.poster ? `<img src="/${pv.poster}" alt="">` : ''}<span>${pv.poster ? 'Preparando video…' : 'Preparando miniatura…'}</span></div>`
+
+const fmtRitmo = (f: ProyectoInfo['material'][number]) => f.tipo !== 'audio' ? '' : f.ritmo
+  ? `<span class="chip" title="Ritmo detectado: sirve para cortar y poner zooms sobre el beat">${Math.round(f.ritmo.bpm)} BPM · ${fmtDur(f.ritmo.duracion)}</span>`
+  : '<span class="chip dim">analizando ritmo…</span>'
+const tipoIco = (t: Tipo) => t === 'audio' ? '♪' : t === 'imagen' ? '▣' : ''
 
 /** Solo se avisa si el original no está; si está bien, no se muestra nada (enlace o copia da igual al usuario). */
 const modoChip = (_modo: 'enlace' | 'copia', existe: boolean) => !existe
   ? `<span class="miss" title="Moviste o borraste el original">${ico('warning')} no encontrado</span>` : ''
 
 const tilesMat = (m: ProyectoInfo['material']) => m.length ? m.map(f => `
-  <div class="tile ${f.existe ? '' : 'missing'}"><div class="thumb">${thumb(f.preview)}</div>
-    <div class="cap"><span class="nm" title="${esc(f.name)}">${esc(f.name)}</span>
-      <span class="dim small">${fmtSize(f.size)}</span>${modoChip(f.modo, f.existe)}
+  <div class="tile ${f.existe ? '' : 'missing'}"><div class="thumb">${thumb(f.preview, f.tipo)}</div>
+    <div class="cap"><span class="nm" title="${esc(f.name)}">${tipoIco(f.tipo)} ${esc(f.name)}</span>
+      <span class="dim small">${fmtSize(f.size)}</span>${fmtRitmo(f)}${modoChip(f.modo, f.existe)}
       ${!f.existe && f.modo === 'enlace' ? `<button class="mini" data-ubicar="${esc(f.id)}">Ubicar</button>` : ''}
       <button class="trash" data-del="${esc(f.id)}" data-nombre="${esc(f.name)}" data-modo="${f.modo}" title="${f.modo === 'enlace' ? 'Quitar del proyecto (tu archivo no se borra)' : 'Borrar la copia del proyecto'}">${ico('trash')}</button></div>
-  </div>`).join('') : '<p class="dim">Aún no agregas videos.</p>'
+  </div>`).join('') : '<p class="dim">Aún no agregas material.</p>'
 
 const tilesRef = (refs: Referencia[], linked: Set<string>) => refs.length ? refs.map(r => `
   <div class="tile ${linked.has(r.id) ? 'sel' : ''} ${r.existe ? '' : 'missing'}"><div class="thumb">${thumb(r.preview)}</div>
@@ -47,7 +57,7 @@ const tilesRef = (refs: Referencia[], linked: Set<string>) => refs.length ? refs
   </div>`).join('') : '<p class="dim">Aún no hay referencias. Agrega una abajo.</p>'
 
 const signature = (info: ProyectoInfo, refs: Referencia[]) =>
-  JSON.stringify([info.material.map(f => [f.id, f.preview.listo, f.existe, f.modo]), refs.map(r => [r.id, r.preview.listo, r.existe, r.modo])])
+  JSON.stringify([info.material.map(f => [f.id, f.preview.listo, f.existe, f.modo, !!f.ritmo]), refs.map(r => [r.id, r.preview.listo, r.existe, r.modo])])
 
 const cardThumb = (pv: ProyectoResumen['preview']) => !pv
   ? '<div class="ph"><span>Sin video aún</span></div>'
@@ -168,11 +178,11 @@ export async function renderProject(slug: string) {
     </div>
 
     <section>
-      <h2><span class="num">1</span> Material <small class="dim">los videos que vas a editar</small></h2>
-      <div class="drop" id="dropMat"><p>Arrastra aquí tus videos</p><p class="dim small">o</p><button class="primary" id="pickMat">Elegir archivos</button></div>
+      <h2><span class="num">1</span> Material <small class="dim">videos, música e imágenes para tu edición</small></h2>
+      <div class="drop" id="dropMat"><p>Arrastra aquí videos, música o imágenes</p><p class="dim small">o</p><button class="primary" id="pickMat">Elegir archivos</button></div>
       <div class="tiles" id="matList">${tilesMat(info.material)}</div>
       <div id="upl"></div>
-      <button class="primary big wide" id="recortar" ${info.material.length ? '' : 'disabled'}>Recorta silencios y errores</button>
+      <button class="primary big wide" id="recortar" ${info.material.some(f => f.tipo === 'video') ? '' : 'disabled'}>Recorta silencios y errores</button>
       <p class="dim small">Convierte el audio en texto, quita los silencios y Claude quita lo repetido y ordena el guion para que se entienda.</p>
       <div id="job"></div>
     </section>
@@ -204,9 +214,9 @@ export async function renderProject(slug: string) {
       catch (e) { box.insertAdjacentHTML('beforeend', `<div class="warn">${esc(f.name)}: ${esc((e as Error).message)}</div>`); return }
     }
   }
-  async function agregarArrastrados(files: FileList, box: HTMLElement, enlazar: Enlazar, urlCopia: string) {
-    const vids = [...files].filter(f => VIDEO.test(f.name) || f.type.startsWith('video/'))
-    if (!vids.length) { box.innerHTML = '<div class="warn">Esos archivos no parecen videos.</div>'; return }
+  async function agregarArrastrados(files: FileList, box: HTMLElement, enlazar: Enlazar, urlCopia: string, soloVideo: boolean) {
+    const vids = [...files].filter(f => (soloVideo ? VIDEO.test(f.name) || f.type.startsWith('video/') : MATERIAL.test(f.name) || /^(video|audio|image)\//.test(f.type)))
+    if (!vids.length) { box.innerHTML = `<div class="warn">Esos archivos no parecen ${soloVideo ? 'videos' : 'videos, música ni imágenes'}.</div>`; return }
     box.innerHTML = '<p class="dim small">Buscando los archivos originales…</p>'
     const r = await enlazar(vids.map(f => ({ name: f.name, size: f.size, lastModified: f.lastModified })))
     const faltan = vids.filter(f => r.noEncontrados.includes(f.name))
@@ -222,14 +232,14 @@ export async function renderProject(slug: string) {
     try { await fn() } catch (e) { box.innerHTML = `<div class="warn">${esc((e as Error).message)}</div>`; btn.textContent = t; (btn as HTMLButtonElement).disabled = false; return }
     await renderProject(slug)
   }
-  const wireDrop = (zone: HTMLElement, pick: HTMLElement, elegirFn: () => Promise<{ agregados: string[]; cancelado: boolean }>, enlazar: Enlazar, urlCopia: string, box: HTMLElement) => {
+  const wireDrop = (zone: HTMLElement, pick: HTMLElement, elegirFn: () => Promise<{ agregados: string[]; cancelado: boolean }>, enlazar: Enlazar, urlCopia: string, box: HTMLElement, soloVideo: boolean) => {
     pick.onclick = () => { void elegir(elegirFn, pick, box) }
     zone.ondragover = e => { e.preventDefault(); zone.classList.add('over') }
     zone.ondragleave = () => zone.classList.remove('over')
-    zone.ondrop = e => { e.preventDefault(); zone.classList.remove('over'); if (e.dataTransfer?.files.length) void agregarArrastrados(e.dataTransfer.files, box, enlazar, urlCopia) }
+    zone.ondrop = e => { e.preventDefault(); zone.classList.remove('over'); if (e.dataTransfer?.files.length) void agregarArrastrados(e.dataTransfer.files, box, enlazar, urlCopia, soloVideo) }
   }
-  wireDrop($('dropMat'), $('pickMat'), () => api.elegirMaterial(slug), a => api.enlazarMaterial(slug, a), `/api/proyectos/${slug}/material`, $('upl'))
-  wireDrop($('dropRef'), $('pickRef'), () => api.elegirReferencias(slug), a => api.enlazarReferencias(a, slug), `/api/referencias?proyecto=${slug}`, $('uplRef'))
+  wireDrop($('dropMat'), $('pickMat'), () => api.elegirMaterial(slug), a => api.enlazarMaterial(slug, a), `/api/proyectos/${slug}/material`, $('upl'), false)
+  wireDrop($('dropRef'), $('pickRef'), () => api.elegirReferencias(slug), a => api.enlazarReferencias(a, slug), `/api/referencias?proyecto=${slug}`, $('uplRef'), true)
 
   // --- tarjetas: borrar, elegir referencias y refrescar miniaturas ---------------------------------------
   let cur = { info, refs }
@@ -266,7 +276,7 @@ export async function renderProject(slug: string) {
       }
     })
   }
-  const pendientes = (i: ProyectoInfo, r: Referencia[]) => i.material.some(f => !f.preview.listo) || r.some(x => !x.preview.listo)
+  const pendientes = (i: ProyectoInfo, r: Referencia[]) => i.material.some(f => !f.preview.listo || (f.tipo === 'audio' && !f.ritmo && f.existe)) || r.some(x => !x.preview.listo)
   async function poll() {
     if (!document.getElementById('matList') || location.hash !== `#/p/${slug}`) return
     try {

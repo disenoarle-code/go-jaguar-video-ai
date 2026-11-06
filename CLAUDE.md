@@ -15,7 +15,7 @@ Editor de video local que tú (Claude) controlas con comandos. El usuario ve los
 ## Cómo se usa (lo hace el usuario en la interfaz)
 
 1. **Home** → *Nuevo proyecto* (nombre + idioma).
-2. **Material**: botón *Elegir archivos* (diálogo del sistema) o arrastrar: los videos se **enlazan donde ya están, no se copian** (cada tarjeta dice 🔗 enlazado o 📁 copia). Si el original se mueve o se borra, la tarjeta avisa y se puede *Ubicar* de nuevo; mientras tanto se puede seguir editando con la copia liviana (proxy). Botón **"Recorta silencios y errores"**: la app crea proxies, convierte el audio en texto, quita silencios, arma la edición base y **le pide a Claude** quitar lo repetido y ordenar el guion.
+2. **Material**: acepta **videos, música (mp3, wav, m4a…) e imágenes**. Botón *Elegir archivos* (diálogo del sistema) o arrastrar: los archivos se **enlazan donde ya están, no se copian** (cada tarjeta dice 🔗 enlazado o 📁 copia). Si el original se mueve o se borra, la tarjeta avisa y se puede *Ubicar* de nuevo; mientras tanto se puede seguir editando con la copia liviana (proxy). Botón **"Recorta silencios y errores"**: la app crea proxies, convierte el audio en texto, quita silencios, arma la edición base y **le pide a Claude** quitar lo repetido y ordenar el guion.
 3. **Referencias**: elige las ya guardadas (casilla) o sube nuevas (compartidas por todos los proyectos). Antes del botón hay un cuadro opcional *"¿Alguna recomendación para el video?"*. Botón **"Edición completa basada en referencias"**: le pide a Claude convertir el video según las referencias marcadas y la recomendación.
 4. **Abrir editor**: timeline para corregir a mano. Se guarda solo.
 
@@ -40,6 +40,7 @@ biblioteca/
   proyectos/<slug>/
     proyecto.json          nombre, idioma, referencias elegidas, assets
     proyecto.gojaguar      la edición (formato del core)
+    analisis/              silencios (<video>.silencios.json) y ritmo de la música (<pista>.ritmo.json)
     material/              solo COPIAS (si no se pudo enlazar). Los videos normales se ENLAZAN: su ruta está en proyecto.json → material[].ruta
     proxies/               copias livianas para editar
     transcripciones/       <video>.lineas.txt y .words.json
@@ -78,6 +79,10 @@ Reglas:
 - No renderices para ver un cambio: la vista previa es en vivo.
 - Ediciones no destructivas (nunca tocan los originales).
 
+## Música e imágenes del Material
+
+Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.json`: `bpm`, `bpmAlt` (doble/mitad), `confianza`, `beats` (pulsos, s), `golpes` (kicks/impactos fuertes, s), `energia` (cada 0,5 s). Úsalo para **cortar sobre el beat** (cada 2, 4 u 8 pulsos), poner zooms y transiciones en los `golpes`, y dejar los momentos de más energía para lo mejor del producto. El tempo es fiable en música con pulso marcado (trap, hip hop, electrónica); si `confianza` < 0,3 revísalo a oído. Los tiempos de `beats` pueden tener ~±0,03 s de desfase. La música y las imágenes **no se procesan** con el botón "Recorta silencios" (solo los videos); las usas tú al armar la edición. Las pistas de Pixabay u otras las descarga el usuario a mano (sus términos prohíben bots) y las agrega aquí.
+
 ## Recetas
 
 - **Silencios:** ya los quita el botón. A mano: `ffmpeg -i proxy -vn -af silencedetect=noise=-32dB:d=0.45 -f null -`.
@@ -95,7 +100,7 @@ Antes de cambiar código: `npm test` y `npm run check` deben pasar.
 
 ## Límites actuales (no prometas lo que no existe)
 
-- No hay exportación a MP4 desde el editor todavía (E3).
+- No hay exportación a MP4 desde el editor todavía (E3). El editor aún no tiene capa de música ni de imágenes: se usan al renderizar con `experiments/estilo-3d` (Remotion).
 - 3D, zoom y subtítulos animados viven solo en `experiments/estilo-3d`; no son capas del editor.
 - El análisis de referencias lo haces tú (Claude) cuando el usuario pide la edición completa; la app no lo hace sola.
 - Recorte de fondo (Apple Vision) solo en Mac: `experiments/estilo-3d/scripts/matte.swift`.

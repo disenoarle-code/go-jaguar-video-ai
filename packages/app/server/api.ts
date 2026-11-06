@@ -13,6 +13,7 @@ import fsp from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { analizarRitmo, type Ritmo } from './ritmo'
 import { fileURLToPath } from 'node:url'
 import { Store, createProject, exec, execBatch, serialize, type AssetInfo, type Cmd } from '@gojaguar/core'
 
@@ -23,7 +24,11 @@ const SOL = path.join(ROOT, 'solicitudes')
 const REFS = path.join(ROOT, 'referencias')
 const MODEL = process.env.GOJAGUAR_WHISPER_MODEL ?? path.join(os.homedir(), '.whisper-models', 'ggml-medium.bin')
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi'])
-const MIME: Record<string, string> = { '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wav': 'audio/wav', '.jpg': 'image/jpeg' }
+const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.aiff', '.aif'])
+const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.gif', '.bmp', '.tif', '.tiff'])
+type Tipo = 'video' | 'audio' | 'imagen'
+const tipoDe = (n: string): Tipo | null => { const e = path.extname(n).toLowerCase(); return VIDEO_EXT.has(e) ? 'video' : AUDIO_EXT.has(e) ? 'audio' : IMAGE_EXT.has(e) ? 'imagen' : null }
+const MIME: Record<string, string> = { '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wav': 'audio/wav', '.jpg': 'image/jpeg', '.m4a': 'audio/mp4', '.mp3': 'audio/mpeg', '.png': 'image/png' }
 
 // --- utilidades ------------------------------------------------------------------------
 const exists = (p: string) => fsp.access(p).then(() => true, () => false)
@@ -78,23 +83,36 @@ const projDir = (slug: string) => path.join(PROJ, slug)
 const previewing = new Set<string>()
 /** Genera <pdir>/<key>.jpg (inmediato) y <key>.mp4 (480 px) a partir del archivo <src>. No toca el original. */
 async function ensurePreview(src: string, pdir: string, key: string) {
-  const poster = path.join(pdir, key + '.jpg'), vid = path.join(pdir, key + '.mp4')
-  if (previewing.has(src) || ((await exists(poster)) && (await exists(vid))) || !(await exists(src))) return
+  const tipo = tipoDe(src) ?? 'video'
+  const poster = path.join(pdir, key + '.jpg'), vid = path.join(pdir, key + (tipo === 'audio' ? '.m4a' : '.mp4'))
+  if (previewing.has(src) || ((await exists(poster)) && (tipo === 'imagen' || (await exists(vid)))) || !(await exists(src))) return
   previewing.add(src)
+  const q = ['-hide_banner', '-loglevel', 'error', '-y']
   try {
     await fsp.mkdir(pdir, { recursive: true })
     if (!(await exists(poster))) {
-      const info = await probe(src)
-      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.min(1, (info?.duration ?? 2) / 2)), '-i', src, '-frames:v', '1', '-vf', 'scale=480:-2', poster])
+      if (tipo === 'audio') {
+        // imagen de la forma de onda (dorado sobre oscuro)
+        await run('ffmpeg', [...q, '-i', src, '-filter_complex', 'aformat=channel_layouts=mono,showwavespic=s=480x480:colors=#e8b152:split_channels=0,format=yuv420p', '-frames:v', '1', poster])
+      } else if (tipo === 'imagen') {
+        await run('ffmpeg', [...q, '-i', src, '-frames:v', '1', '-vf', 'scale=480:480:force_original_aspect_ratio=increase,crop=480:480', poster])
+      } else {
+        const info = await probe(src)
+        await run('ffmpeg', [...q, '-ss', String(Math.min(1, (info?.duration ?? 2) / 2)), '-i', src, '-frames:v', '1', '-vf', 'scale=480:-2', poster])
+      }
     }
-    if (!(await exists(vid))) {
-      const tmp = vid + '.part.mp4'
-      const enc = ['-vf', 'scale=480:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart', tmp]
-      const hw = process.platform === 'darwin' && !process.env.GOJAGUAR_NO_HWACCEL ? ['-hwaccel', 'videotoolbox'] : []
-      let r = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...hw, '-i', src, ...enc])
-      if (r.code !== 0 && hw.length) r = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, ...enc])
+    if (tipo === 'imagen' || (await exists(vid))) return
+    const tmp = vid + (tipo === 'audio' ? '.part.m4a' : '.part.mp4')
+    if (tipo === 'audio') {
+      const r = await run('ffmpeg', [...q, '-i', src, '-vn', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', tmp])
       if (r.code === 0) await fsp.rename(tmp, vid); else await fsp.rm(tmp, { force: true })
+      return
     }
+    const enc = ['-vf', 'scale=480:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart', tmp]
+    const hw = process.platform === 'darwin' && !process.env.GOJAGUAR_NO_HWACCEL ? ['-hwaccel', 'videotoolbox'] : []
+    let r = await run('ffmpeg', [...q, ...hw, '-i', src, ...enc])
+    if (r.code !== 0 && hw.length) r = await run('ffmpeg', [...q, '-i', src, ...enc])
+    if (r.code === 0) await fsp.rename(tmp, vid); else await fsp.rm(tmp, { force: true })
   } catch { /* se reintenta en el próximo listado */ } finally { previewing.delete(src) }
 }
 
@@ -156,12 +174,33 @@ async function finalPreviewInfo(slug: string) {
 
 /** Estado de la miniatura de un archivo (src); si falta y el original existe, la pone a generar. */
 async function previewInfo(src: string, pdir: string, urlDir: string, key: string) {
-  const hasPoster = await exists(path.join(pdir, key + '.jpg')), hasVideo = await exists(path.join(pdir, key + '.mp4'))
-  if (!hasPoster || !hasVideo) void ensurePreview(src, pdir, key)
+  const tipo = tipoDe(src) ?? 'video'
+  const hasPoster = await exists(path.join(pdir, key + '.jpg'))
+  const hasMedia = tipo === 'imagen' ? false : await exists(path.join(pdir, key + (tipo === 'audio' ? '.m4a' : '.mp4')))
+  const listo = hasPoster && (tipo === 'imagen' || hasMedia)
+  if (!listo) void ensurePreview(src, pdir, key)
   const u = (ext: string) => `api/files/${urlDir}/${encodeURIComponent(key)}.${ext}`
-  return { poster: hasPoster ? u('jpg') : null, video: hasVideo ? u('mp4') : null, listo: hasPoster && hasVideo }
+  return { poster: hasPoster ? u('jpg') : null, video: tipo === 'video' && hasMedia ? u('mp4') : null, audio: tipo === 'audio' && hasMedia ? u('m4a') : null, listo }
 }
-const rmPreview = (pdir: string, key: string) => Promise.all([fsp.rm(path.join(pdir, key + '.jpg'), { force: true }), fsp.rm(path.join(pdir, key + '.mp4'), { force: true })])
+const rmPreview = (pdir: string, key: string) => Promise.all(['.jpg', '.mp4', '.m4a'].map(e => fsp.rm(path.join(pdir, key + e), { force: true })))
+
+// --- ritmo de la música (BPM, pulsos, golpes): se calcula una vez y queda en analisis/<id>.ritmo.json ------------
+const ritmando = new Set<string>()
+async function ritmoDe(slug: string, f: Fuente) {
+  if (f.tipo !== 'audio' || !f.existe) return null
+  const dir = path.join(projDir(slug), 'analisis'), out = path.join(dir, safeName(f.stem) + '.ritmo.json')
+  const hecho = await readJson<(Ritmo & { fuente: number }) | null>(out, null)
+  const mt = (await fsp.stat(f.ruta)).mtimeMs
+  if (hecho && hecho.fuente === mt) return { bpm: hecho.bpm, bpmAlt: hecho.bpmAlt, confianza: hecho.confianza, duracion: hecho.duracion }
+  if (!ritmando.has(out)) {
+    ritmando.add(out)
+    void (async () => {
+      try { await fsp.mkdir(dir, { recursive: true }); await writeJson(out, { ...(await analizarRitmo(f.ruta)), fuente: mt }) }
+      catch { /* sin ritmo: la tarjeta sigue funcionando */ } finally { ritmando.delete(out) }
+    })()
+  }
+  return null
+}
 
 async function ensureLibrary() { await fsp.mkdir(PROJ, { recursive: true }); await fsp.mkdir(REFS, { recursive: true }); await fsp.mkdir(SOL, { recursive: true }) }
 
@@ -191,9 +230,10 @@ interface ProjectMeta {
 
 /** Video enlazado: solo guardamos dónde está. El original nunca se copia ni se borra desde la app. */
 interface MaterialRef { id: string; name: string; stem: string; ruta: string; size: number }
-interface Fuente { id: string; name: string; stem: string; modo: 'enlace' | 'copia'; ruta: string; size: number; existe: boolean }
+interface Fuente { id: string; tipo: Tipo; name: string; stem: string; modo: 'enlace' | 'copia'; ruta: string; size: number; existe: boolean }
 const stemOf = (n: string) => path.basename(n, path.extname(n))
 const isVideoName = (n: string) => VIDEO_EXT.has(path.extname(n).toLowerCase())
+const isMaterialName = (n: string) => tipoDe(n) !== null
 
 async function loadMeta(slug: string) { return readJson<ProjectMeta | null>(path.join(projDir(slug), 'proyecto.json'), null) }
 
@@ -212,9 +252,9 @@ async function listMaterial(slug: string): Promise<Fuente[]> {
   const meta = await loadMeta(slug), d = projDir(slug), out: Fuente[] = []
   for (const r of meta?.material ?? []) {
     const ok = await exists(r.ruta)
-    out.push({ id: r.id, name: r.name, stem: r.stem, modo: 'enlace', ruta: r.ruta, size: ok ? (await fsp.stat(r.ruta)).size : r.size, existe: ok })
+    out.push({ id: r.id, tipo: tipoDe(r.name) ?? 'video', name: r.name, stem: r.stem, modo: 'enlace', ruta: r.ruta, size: ok ? (await fsp.stat(r.ruta)).size : r.size, existe: ok })
   }
-  for (const f of await listFiles(path.join(d, 'material'))) if (isVideoName(f.name)) out.push({ id: f.name, name: f.name, stem: stemOf(f.name), modo: 'copia', ruta: path.join(d, 'material', f.name), size: f.size, existe: true })
+  for (const f of await listFiles(path.join(d, 'material'))) if (isMaterialName(f.name)) out.push({ id: f.name, tipo: tipoDe(f.name)!, name: f.name, stem: stemOf(f.name), modo: 'copia', ruta: path.join(d, 'material', f.name), size: f.size, existe: true })
   return out
 }
 
@@ -225,7 +265,7 @@ async function linkMaterial(slug: string, rutas: string[]) {
   const usados = new Set((await listMaterial(slug)).map(f => f.stem))
   const agregados: string[] = []
   for (const ruta of rutas) {
-    if (!path.isAbsolute(ruta) || !isVideoName(ruta)) continue
+    if (!path.isAbsolute(ruta) || !isMaterialName(ruta)) continue
     const st = await fsp.stat(ruta).catch(() => null); if (!st?.isFile()) continue
     if (meta.material.some(r => r.ruta === ruta)) continue
     let stem = stemOf(ruta), i = 2; const base = stem
@@ -243,7 +283,7 @@ async function projectInfo(slug: string) {
   const d = projDir(slug)
   return {
     ...meta,
-    material: await Promise.all((await listMaterial(slug)).map(async f => ({ id: f.id, name: f.name, modo: f.modo, existe: f.existe, ruta: f.ruta, size: f.size, preview: await previewInfo(f.ruta, path.join(d, '.previews'), `proyectos/${slug}/.previews`, f.id) }))),
+    material: await Promise.all((await listMaterial(slug)).map(async f => ({ id: f.id, tipo: f.tipo, ritmo: await ritmoDe(slug, f), name: f.name, modo: f.modo, existe: f.existe, ruta: f.ruta, size: f.size, preview: await previewInfo(f.ruta, path.join(d, '.previews'), `proyectos/${slug}/.previews`, f.id) }))),
     tieneEditor: await exists(path.join(d, 'proyecto.gojaguar')),
     vistaFinal: await finalPreviewInfo(slug),
   }
@@ -256,7 +296,7 @@ async function listProjects() {
     if (!isSlug(slug)) continue
     const info = await projectInfo(slug); if (!info) continue
     const { material, assets, name, createdAt, procesado, tieneEditor, referencias, vistaFinal } = info
-    const preview = vistaFinal ? { ...vistaFinal, tipo: 'edicion' as const } : material[0] ? { ...material[0].preview, tipo: 'material' as const } : null
+    const preview = vistaFinal ? { ...vistaFinal, tipo: 'edicion' as const } : (material.find(m => m.tipo === 'video') ?? material[0]) ? { ...(material.find(m => m.tipo === 'video') ?? material[0]).preview, tipo: 'material' as const } : null
     const edit = path.join(projDir(slug), 'proyecto.gojaguar')
     const ultimaEdicion = (await exists(edit)) ? (await fsp.stat(edit)).mtime.toISOString() : createdAt
     out.push({ slug, name, createdAt, ultimaEdicion, procesado: !!procesado, tieneEditor, material: material.length, preview, referencias: referencias.length, duracion: (assets ?? []).reduce((s, a) => s + a.duration, 0) })
@@ -308,16 +348,16 @@ async function seleccionarEnProyecto(slug: string | null, ids: string[]) {
 }
 
 // --- diálogo nativo para elegir archivos (devuelve rutas reales: así no hace falta copiar nada) ----------------
-async function pickFiles(multiple: boolean, titulo: string): Promise<string[]> {
+async function pickFiles(multiple: boolean, titulo: string, todo = false): Promise<string[]> {
   let r: { code: number; out: string }
   if (process.platform === 'darwin') {
     const lines = ['tell me to activate',
-      `set r to choose file with prompt "${titulo.replace(/"/g, '')}" of type {"public.movie"}${multiple ? ' with multiple selections allowed' : ''}`,
+      `set r to choose file with prompt "${titulo.replace(/"/g, '')}" of type {${todo ? '"public.movie","public.audio","public.image"' : '"public.movie"'}}${multiple ? ' with multiple selections allowed' : ''}`,
       'if class of r is not list then set r to {r}', 'set o to {}', 'repeat with f in r', 'set end of o to POSIX path of f', 'end repeat',
       'set AppleScript\'s text item delimiters to linefeed', 'return o as text']
     r = await run('osascript', lines.flatMap(l => ['-e', l]))
   } else if (process.platform === 'win32') {
-    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.OpenFileDialog; $f.Title='${titulo}'; $f.Multiselect=$${multiple}; $f.Filter='Videos|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi|Todos|*.*'; if($f.ShowDialog() -eq 'OK'){ $f.FileNames -join [char]10 }`])
+    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.OpenFileDialog; $f.Title='${titulo}'; $f.Multiselect=$${multiple}; $f.Filter='${todo ? 'Material|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.jpg;*.jpeg;*.png;*.webp;*.heic|Todos|*.*' : 'Videos|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi|Todos|*.*'}'; if($f.ShowDialog() -eq 'OK'){ $f.FileNames -join [char]10 }`])
   } else {
     r = await run('zenity', ['--file-selection', `--title=${titulo}`, ...(multiple ? ['--multiple', '--separator=\n'] : [])])
   }
@@ -438,7 +478,7 @@ async function processProject(job: Job) {
   const meta = (await loadMeta(slug))!
   const set = (id: string, p: Partial<Step>) => Object.assign(step(job, id), p)
   try {
-    const files = await listMaterial(slug)
+    const files = (await listMaterial(slug)).filter(f => f.tipo === 'video')
     if (!files.length) throw new Error('No hay videos en el material')
     for (const sub of ['proxies', 'transcripciones', 'analisis', 'salidas']) await fsp.mkdir(path.join(d, sub), { recursive: true })
     const tools = await toolsStatus()
@@ -596,7 +636,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
     // Elegir con el diálogo nativo: se ENLAZA (no se copia)
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/material\/elegir$/.exec(p)) && m === 'POST') {
       if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
-      const rutas = await pickFiles(true, 'Elige los videos del proyecto')
+      const rutas = await pickFiles(true, 'Elige videos, música o imágenes del proyecto', true)
       return send(res, 200, { agregados: await linkMaterial(g[1], rutas), cancelado: rutas.length === 0 })
     }
     // Arrastrar y soltar: el navegador no da la ruta; se busca el original por nombre+tamaño+fecha y se enlaza
@@ -611,7 +651,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
       const ref = meta?.material?.find(r => r.id === decodeURIComponent(g![2]))
       if (!meta || !ref) return send(res, 404, { error: 'No es un archivo enlazado' })
-      const [ruta] = await pickFiles(false, `Ubica de nuevo: ${ref.name}`)
+      const [ruta] = await pickFiles(false, `Ubica de nuevo: ${ref.name}`, true)
       if (ruta) { ref.ruta = ruta; ref.name = path.basename(ruta); ref.size = (await fsp.stat(ruta)).size; await writeJson(path.join(projDir(g[1]), 'proyecto.json'), meta) }
       return send(res, 200, { ok: !!ruta })
     }
