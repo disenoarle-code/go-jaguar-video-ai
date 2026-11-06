@@ -8,3 +8,15 @@ media/proxies/*
 media/transcripciones/*
 media/manifest.json
 !media/**/.gitkeep
+
+# Experimentos: dependencias y material pesado
+experiments/**/node_modules/
+experiments/**/work/
+experiments/**/out/
+experiments/**/public/*.webm
+experiments/**/public/*.mp4
+experiments/**/public/*.wav
+experiments/**/public/person/
+
+# La biblioteca (media lake) es local y pesada
+biblioteca/

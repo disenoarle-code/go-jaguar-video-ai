@@ -50,9 +50,11 @@ Dos tipos: **locales** (sin Claude, sin costo de tokens) y **con Claude** (juici
 | Pídeme lo que quieras | Instrucción libre | Claude |
 
 ## Cómo se conecta Claude
-- **Decidido:** Claude **externo** (Claude Desktop / Claude Code) conectado por MCP. La app no tiene chat en la v1; el cliente usa su propia suscripción a Claude.
+- **Decidido (2026-11-06):** el producto es un **kit para Claude Code**: una carpeta con el editor + `CLAUDE.md` + skills. El cliente abre Claude Code ahí y Claude instala y abre el editor; el cliente usa su propia suscripción. MCP y aplicativo (Electron) quedan opcionales/pospuestos. Ver PLAN.md, "Enfoque".
+- (Decisión anterior, ahora secundaria): Claude externo por MCP.
 - Los botones locales funcionan sin Claude.
-- **Consecuencia:** la app no puede "llamar" a Claude. Los botones que requieren Claude (aplicar estilo, versión corta, gancho, guion) dejan una **tarea pendiente** visible en la app (con la instrucción ya redactada y un botón de copiar). Claude la lee con la herramienta MCP `tareas_pendientes` cuando el usuario le dice "haz lo pendiente".
+- **Decidido (2026-11-06, ajuste):** las órdenes con criterio se dan **en el chat con Claude**, no desde la app. La app solo tiene botones con acciones claras (recortar silencios, elegir referencias, abrir editor). Se descartó el sistema de "tareas pendientes".
+- (Antes) la app no puede "llamar" a Claude. Los botones que requieren Claude (aplicar estilo, versión corta, gancho, guion) dejan una **tarea pendiente** visible en la app (con la instrucción ya redactada y un botón de copiar). Claude la lee con la herramienta MCP `tareas_pendientes` cuando el usuario le dice "haz lo pendiente".
 - Todo lo que hace Claude pasa por los **mismos comandos** que la interfaz, queda en el registro y se puede deshacer.
 
 ## Decisiones abiertas

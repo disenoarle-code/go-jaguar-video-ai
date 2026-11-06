@@ -1,6 +1,15 @@
 # Editor Gojaguar — Plan por etapas
 
-Objetivo: un editor de video simple, rápido e intuitivo que **Claude controla con pocos tokens** y que el usuario puede **corregir a mano** (cortes, subtítulos, gráficos). Mac y Windows, descargable, vendible.
+Objetivo: un editor de video simple y rápido que **Claude controla con pocos tokens** y que el usuario puede **corregir a mano** (cortes, subtítulos, gráficos).
+
+## Enfoque (decidido 2026-11-06)
+
+**El producto vive dentro de Claude Code: es un kit, no un aplicativo.**
+- Se entrega una carpeta con el editor, un `CLAUDE.md` que explica cómo instalar y usar todo, skills de estilo y plantillas.
+- El cliente abre Claude Code en esa carpeta y le dice "instala y abre el editor". Claude ejecuta `npm install`, `npm run dev`, instala ffmpeg si falta y abre el editor en el panel del navegador.
+- Claude controla el editor directamente (comandos, archivos, panel). El servidor MCP y Electron quedan **opcionales / pospuestos**.
+- Cliente: usa Claude Code (se le enseña). Acceso abierto: sin control de licencias ni de copias; el modelo de negocio (libro, curso, skills, gratis…) se decide aparte.
+- Riesgo asumido: se entrega el código y no se controlan copias. Se espera que, con el tiempo, esto sea una función natural de Claude.
 
 ## Principios (no se negocian)
 
@@ -51,8 +60,10 @@ Convertir el prototipo en un proyecto ordenado.
 - Conjunto fijo de videos de prueba + script de benchmark (ver Presupuestos).
 - **Listo cuando:** guardas, cierras, abres y todo sigue igual; las pruebas pasan.
 
-### E2 — Importar y preparar video
-- Elegir videos desde cualquier carpeta (sin copiarlos).
+### E2 — Importar y preparar video (en progreso, 2026-11-06)
+**Hecho:** Home con lista de proyectos, pantalla de proyecto (Material, Referencias compartidas, botones "Recorta silencios y errores" y "Edición completa"), biblioteca en disco (`biblioteca/proyectos/<slug>/…` y `biblioteca/referencias/`), subida por streaming, proxy + transcripción + silencios con progreso, edición base sin silencios, tareas para Claude en `pendiente/`, editor que carga y autoguarda en la carpeta del proyecto. **Pendiente:** probar arrastrar y soltar con archivos reales desde la interfaz, leer el proxy por tramos (memoria), videos verticales/60 fps, borrar proyectos desde la interfaz, Windows.
+
+- Elegir videos desde cualquier carpeta (sin copiarlos) ✅ (enlaces por ruta, diálogo nativo en Mac/Windows, aviso si el original se mueve).
 - ffmpeg genera el proxy con **barra de progreso** y en segundo plano; el editor se puede usar mientras tanto.
 - Caché en disco de proxy, miniaturas, onda de audio y análisis (silencios, escenas).
 - Lectura por tramos (sin cargar el proxy entero en memoria).
@@ -67,9 +78,10 @@ Sin esto no hay producto utilizable.
 - Verificar que el video exportado coincide con la vista previa (comparación de frames).
 - **Listo cuando:** importar → editar → exportar funciona de punta a punta y se ve/suena igual que en pantalla.
 
-### E4 — Conexión con Claude (servidor MCP)
+### E4 — Claude Code controla el editor
 Lo que diferencia al producto. Se hace temprano para validar el costo en tokens.
-- Servidor MCP local incluido en la app (funciona con Claude Desktop, Claude Code y cualquier cliente MCP). También una CLI con los mismos comandos.
+- **Con el enfoque del kit:** Claude Code usa los comandos del editor directamente (`editor.exec`, CLI con los mismos comandos, archivos de proyecto) y ve el resultado en el panel. El **servidor MCP es opcional** (útil si algún día se quiere Claude Desktop sin terminal).
+- `CLAUDE.md` del kit: cómo iniciar el editor, qué comandos existen, flujo recomendado, qué NO hacer.
 - Herramientas pequeñas y por lotes: `estado` (resumen compacto), `aplicar` (lista de comandos), `deshacer`, `fotograma`, `exportar`, `silencios`.
 - Respuestas de una línea por cambio, nunca el proyecto completo. Resúmenes agrupados y por rango de tiempo.
 - Ver en vivo en la app lo que hace Claude; todo con deshacer.
@@ -121,14 +133,22 @@ El editor es el **punto donde se juntan todos los materiales**; Claude es quien 
 - **Listo cuando:** los 10 estilos de referencia (montaje 3D, motion explicativo, tutorial 3D, bruto→editado, perspectiva 3D, recorte de fondo, 3D explicativo, inserción de imágenes, íconos animados, lettering) se pueden pedir a Claude y retocar a mano.
 - Las generaciones externas consumen créditos de la cuenta del usuario y quedan bajo los términos de cada servicio.
 
-### E8 — Aplicación de escritorio
+### E8 — Kit de instalación (reemplaza a la app de escritorio)
+- **Paquete listo para dar a alguien:** carpeta del editor + `CLAUDE.md` + guía de primer uso + skills de estilo + plantillas + video de prueba.
+- Que Claude Code lo instale solo (Node, ffmpeg, dependencias) en **Mac y Windows**, y que lo verifique.
+- Actualizaciones: el cliente actualiza el kit (git o descarga nueva).
+- **Listo cuando:** una persona nueva abre Claude Code en la carpeta, dice "instala y abre el editor", y en <10 min edita su primer video.
+
+#### E8b — Aplicación de escritorio (pospuesta, ya no es prioridad)
+Solo si un día se necesita llegar a gente sin Claude Code.
 - Envolver en **Electron** (mismo código, misma velocidad).
 - ffmpeg y Whisper empaquetados. **Licencia de ffmpeg:** usar un build LGPL con codificadores por hardware (el build con x264 es GPL y obliga a condiciones estrictas al vender). Decidirlo antes de empaquetar.
 - Instaladores firmados y notarizados: .dmg (Mac, Apple Developer) y .exe (Windows, certificado de firma).
 - Pruebas reales en Windows (aceleración por hardware y códecs distintos).
 - **Listo cuando:** una persona sin conocimientos técnicos instala y exporta su primer video.
 
-### E9 — Comercial
+### E9 — Comercial (pospuesta y a definir)
+Con el enfoque del kit no hay control de licencias. Definir más adelante: cómo se distribuye y se monetiza (libro/curso/skills, gratis con donaciones, etc.). Lo de abajo solo aplicaría si se vuelve aplicativo (E8b):
 - Cuentas e inicio de sesión (Supabase u otro), planes y cobros con un "merchant of record" (Lemon Squeezy o Paddle: manejan impuestos).
 - Licencias con modo sin conexión de gracia (la app no debe dejar de funcionar si falla internet unos días).
 - Actualizaciones automáticas (canal estable y beta).
@@ -183,4 +203,4 @@ Ciclo en cada etapa: **medir → encontrar el cuello de botella → arreglar →
 
 ## Siguiente paso recomendado
 
-**E1 (cimientos)**: `git init`, separar core/app/engine, formato de proyecto con guardar/abrir y pruebas de la capa de comandos. Es corto y hace que todo lo demás sea más seguro y rápido de construir.
+**E2 (importar y preparar video)** y, en paralelo, un primer **`CLAUDE.md` del kit** para probar que Claude Code puede instalar y abrir el editor desde cero.

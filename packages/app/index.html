@@ -7,12 +7,12 @@
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-  <div id="app">
+  <div id="shell" hidden></div>
+  <div id="app" hidden>
     <header>
-      <b>Editor Gojaguar</b>
+      <button id="back">← Proyectos</button>
       <input id="pname" type="text" aria-label="Nombre del proyecto" />
-      <button id="save" title="Ctrl/Cmd+S">💾 Guardar</button><button id="open">📂 Abrir</button><button id="new">Nuevo</button>
-      <input id="filepick" type="file" accept=".gojaguar,application/json" hidden />
+      <button id="save" title="Ctrl/Cmd+S">💾 Guardar</button>
       <span id="note" class="dim"></span>
       <span id="stats" class="dim right"></span>
     </header>

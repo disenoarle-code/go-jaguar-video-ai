@@ -1,40 +1,33 @@
 # Editor Gojaguar
 
-Editor de video pensado para que Claude lo controle con pocos tokens y el usuario pueda corregir todo a mano.
+Editor de video pensado para que Claude lo controle con pocos tokens y el usuario pueda corregir todo a mano. Se usa dentro de Claude Code (ver [CLAUDE.md](CLAUDE.md)).
 
-- Plan por etapas: [docs/PLAN.md](docs/PLAN.md)
-- Definición del producto: [docs/PRODUCTO.md](docs/PRODUCTO.md)
-- Mediciones de rendimiento: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
+- Plan por etapas: [docs/PLAN.md](docs/PLAN.md) · Producto: [docs/PRODUCTO.md](docs/PRODUCTO.md) · Mediciones: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 
 ## Estructura
 
 | Carpeta | Qué es |
 |---|---|
-| `packages/core` | Modelo del proyecto (clips + capas), comandos, historial, guardar/abrir `.gojaguar`. **Sin dependencias del navegador**: lo usarán la app, el servidor MCP y la exportación. |
-| `packages/app` | Interfaz y motor de vista previa (WebCodecs + Web Audio). Vite + TypeScript. |
-| `media/originales` | Tus videos (no van al repositorio) |
-| `media/proxies` | Copias livianas "todo keyframes" (no van al repositorio) |
+| `packages/core` | Modelo del proyecto (clips + capas), comandos, historial, `.gojaguar`. Sin navegador. |
+| `packages/app` | Interfaz (Home, Proyecto, Editor), motor de vista previa y API local (`server/api.ts`). |
+| `biblioteca/` | Tus proyectos y referencias (no va a git). Ver CLAUDE.md. |
+| `.claude/skills/guion-viral` | Criterios para editar el guion (claridad primero). |
+| `experiments/estilo-3d` | Ensayo de estilo con Remotion + three.js. |
 | `docs` | Plan, producto, benchmarks |
 
-## Comandos
+## Usar
 
 ```bash
 npm install
-npm run dev        # editor en http://127.0.0.1:5273
+npm run dev        # http://127.0.0.1:5273
 npm test           # pruebas del núcleo
-npm run check      # tipos de core y app
+npm run check      # tipos
 ```
 
-Agregar un video tuyo (genera el proxy y lo registra en `media/manifest.json`):
+En el navegador: **Nuevo proyecto** → sube videos → **Recorta silencios y errores** → elige referencias → **Edición completa** → **Abrir editor**. Los botones que necesitan criterio le llegan a Claude Code (que vigila con `npm run vigilar`) y la app muestra el estado.
 
-```bash
-HWACCEL=videotoolbox npm run proxy -- media/originales/mi_video.mp4    # HWACCEL es opcional (Mac)
-```
+Herramientas: ffmpeg y ffprobe (obligatorias), whisper-cli + modelo (para el texto). La biblioteca se puede mover con `GOJAGUAR_BIBLIOTECA=/ruta`.
 
-Abrir un video concreto: `http://127.0.0.1:5273/?asset=a2`. Proyecto limpio: `?nuevo`.
+## Editor
 
-## Usarlo
-
-- Pasa el mouse por el timeline para ver los frames; arrastra los bordes para recortar; **S** corta; **Espacio** reproduce; **Supr** borra; **Ctrl/⌘+Z** deshace; **Ctrl/⌘+S** guarda.
-- El proyecto se autoguarda en el navegador y se puede guardar/abrir como archivo `.gojaguar`.
-- En la consola: `editor.exec({op:'delete_ranges', ranges:[[10,12],[30,31]]})`, `editor.describe()`, `await editor.bench()`.
+Pasa el mouse por el timeline para ver los frames; arrastra bordes para recortar; **S** corta; **Espacio** reproduce; **Supr** borra; **Ctrl/⌘+Z** deshace; **Ctrl/⌘+S** guarda (también se guarda solo).

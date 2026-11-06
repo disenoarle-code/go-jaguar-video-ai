@@ -202,8 +202,12 @@ export class Player {
     if (now - this.fps.last > 1000) { this.fps.shown = this.fps.n; this.fps.n = 0; this.fps.last = now }
   }
 
+  /** Dibuja el frame ajustado al lienzo (sin deformar): videos verticales quedan con barras. */
   private blit(f: VideoFrame) {
-    try { this.layerCtx.drawImage(f, 0, 0, W, H) } catch { /* frame cerrado por el LRU */ }
+    const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight
+    const k = Math.min(W / fw, H / fh), w = fw * k, h = fh * k
+    this.layerCtx.fillStyle = '#000'; this.layerCtx.fillRect(0, 0, W, H)
+    try { this.layerCtx.drawImage(f, (W - w) / 2, (H - h) / 2, w, h) } catch { /* frame cerrado por el LRU */ }
   }
 
   private async pump() {

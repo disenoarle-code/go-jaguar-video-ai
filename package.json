@@ -10,7 +10,9 @@
     "dev": "npm run dev -w @gojaguar/app",
     "test": "vitest run",
     "check": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/app",
-    "proxy": "node packages/app/scripts/make-proxy.mjs"
+    "proxy": "node packages/app/scripts/make-proxy.mjs",
+    "vigilar": "node scripts/vigilar-solicitudes.mjs",
+    "solicitud": "node scripts/solicitud.mjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
