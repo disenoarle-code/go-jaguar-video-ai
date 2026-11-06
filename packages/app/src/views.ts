@@ -5,6 +5,20 @@ const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;
 const VIDEO = /\.(mp4|mov|m4v|mkv|webm|avi)$/i
 const go = (hash: string) => { location.hash = hash }
 
+/** Confirmación dentro de la página (el confirm() del navegador no aparece en algunos visores y cancela solo). */
+function confirmar(titulo: string, textoHtml: string, ok = 'Borrar', peligro = true): Promise<boolean> {
+  return new Promise(resolve => {
+    const m = document.createElement('div'); m.className = 'modal'
+    m.innerHTML = `<div class="modal-box"><h2>${esc(titulo)}</h2><p class="dim">${textoHtml}</p>
+      <div class="row"><button id="c-no">Cancelar</button><button class="${peligro ? 'danger' : 'primary'}" id="c-si">${esc(ok)}</button></div></div>`
+    document.body.appendChild(m)
+    const fin = (v: boolean) => { m.remove(); resolve(v) }
+    m.querySelector<HTMLElement>('#c-no')!.onclick = () => fin(false)
+    m.querySelector<HTMLElement>('#c-si')!.onclick = () => fin(true)
+    m.onclick = e => { if (e.target === m) fin(false) }
+  })
+}
+
 // --- tarjetas con miniatura reproducible -------------------------------------------------------------
 const thumb = (pv: Miniatura) => pv.video
   ? `<video src="/${pv.video}" ${pv.poster ? `poster="/${pv.poster}"` : ''} controls preload="none" playsinline></video>`
@@ -20,7 +34,7 @@ const tilesMat = (m: ProyectoInfo['material']) => m.length ? m.map(f => `
     <div class="cap"><span class="nm" title="${esc(f.name)}">${esc(f.name)}</span>
       <span class="dim small">${fmtSize(f.size)}</span>${modoChip(f.modo, f.existe)}
       ${!f.existe && f.modo === 'enlace' ? `<button class="mini" data-ubicar="${esc(f.id)}">Ubicar</button>` : ''}
-      <button class="x" data-del="${esc(f.id)}" data-modo="${f.modo}" title="${f.modo === 'enlace' ? 'Quitar del proyecto (tu archivo no se toca)' : 'Borrar la copia del proyecto'}">✕</button></div>
+      <button class="trash" data-del="${esc(f.id)}" data-nombre="${esc(f.name)}" data-modo="${f.modo}" title="${f.modo === 'enlace' ? 'Quitar del proyecto (tu archivo no se borra)' : 'Borrar la copia del proyecto'}">🗑</button></div>
   </div>`).join('') : '<p class="dim">Aún no agregas videos.</p>'
 
 const tilesRef = (refs: Referencia[], linked: Set<string>) => refs.length ? refs.map(r => `
@@ -28,7 +42,7 @@ const tilesRef = (refs: Referencia[], linked: Set<string>) => refs.length ? refs
     <div class="cap"><label class="nm" title="${esc(r.nombre)}"><input type="checkbox" data-ref="${esc(r.id)}" ${linked.has(r.id) ? 'checked' : ''}/> ${esc(r.nombre)}</label>
       <span class="dim small">${fmtSize(r.size)}${r.perfilDeEstilo ? ' · estilo ✓' : ''}</span>${modoChip(r.modo, r.existe)}
       ${!r.existe && r.modo === 'enlace' ? `<button class="mini" data-ubicarref="${esc(r.id)}">Ubicar</button>` : ''}
-      <button class="x" data-delref="${esc(r.id)}" data-modo="${r.modo}" title="${r.modo === 'enlace' ? 'Quitar de la biblioteca (tu archivo no se toca)' : 'Borrar la copia de la biblioteca'}">✕</button></div>
+      <button class="trash" data-delref="${esc(r.id)}" data-nombre="${esc(r.nombre)}" data-modo="${r.modo}" title="${r.modo === 'enlace' ? 'Quitar de la biblioteca (tu archivo no se borra)' : 'Borrar la copia de la biblioteca'}">🗑</button></div>
   </div>`).join('') : '<p class="dim">Aún no hay referencias. Agrega una abajo.</p>'
 
 const signature = (info: ProyectoInfo, refs: Referencia[]) =>
@@ -42,6 +56,7 @@ const cardThumb = (pv: ProyectoResumen['preview']) => !pv
 
 const tarjetas = (ps: ProyectoResumen[]) => ps.map(p => `
   <div class="card">
+    <button class="trash cardtrash" data-delproj="${p.slug}" data-nombre="${esc(p.name)}" title="Borrar proyecto">🗑</button>
     <div class="thumb">${cardThumb(p.preview)}</div>
     <button class="cardlink" data-slug="${p.slug}">
       <div class="card-title">${esc(p.name)}</div>
@@ -97,7 +112,16 @@ export async function renderHome() {
     const idioma = (document.getElementById('pi') as HTMLSelectElement).value
     try { const p = await api.crearProyecto(name, idioma); go(`#/p/${p.slug}`) } catch (err) { alert((err as Error).message) }
   })
-  const bindCards = () => root().querySelectorAll<HTMLElement>('.cardlink').forEach(c => { c.onclick = () => go(`#/p/${c.dataset.slug}`) })
+  const bindCards = () => {
+    root().querySelectorAll<HTMLElement>('.cardlink').forEach(c => { c.onclick = () => go(`#/p/${c.dataset.slug}`) })
+    root().querySelectorAll<HTMLElement>('[data-delproj]').forEach(b => {
+      b.onclick = async () => {
+        const ok = await confirmar('Borrar proyecto', `Se borra el proyecto <b>${esc(b.dataset.nombre ?? '')}</b>: su edición, textos, transcripción y copias livianas. <b>Tus videos originales enlazados no se borran.</b> Si subiste copias dentro del proyecto, también se borran.`, 'Borrar proyecto')
+        if (!ok) return
+        await api.borrarProyecto(b.dataset.delproj!); await renderHome()
+      }
+    })
+  }
   bindCards()
   // mientras haya vistas previas generándose, refresca las tarjetas (sin cortar un video que se está viendo)
   let last = st.proyectos
@@ -189,7 +213,8 @@ export async function renderProject(slug: string) {
     const faltan = vids.filter(f => r.noEncontrados.includes(f.name))
     if (faltan.length) {
       const total = faltan.reduce((s, f) => s + f.size, 0)
-      if (confirm(`No pude encontrar el original de ${faltan.length} archivo(s) en tu disco, así que habría que COPIARLOS al proyecto (ocupan ${fmtSize(total)} más).\n\n¿Copiar? Si prefieres no duplicar, cancela y usa "Elegir archivos".`)) await copiarVarios(faltan, urlCopia, box)
+      const ok = await confirmar('No encuentro el original', `No pude encontrar en tu disco ${faltan.length === 1 ? 'el original de' : 'los originales de'} <b>${faltan.map(f => esc(f.name)).join(', ')}</b>. Habría que <b>copiarlo al proyecto</b> (ocupa ${fmtSize(total)} más). Si prefieres no duplicar, cancela y usa <b>Elegir archivos</b>.`, 'Copiar', false)
+      if (ok) await copiarVarios(faltan, urlCopia, box)
     }
     await renderProject(slug)
   }
@@ -213,14 +238,21 @@ export async function renderProject(slug: string) {
   function bindTiles() {
     root().querySelectorAll<HTMLElement>('[data-del]').forEach(b => {
       b.onclick = async () => {
-        if (b.dataset.modo === 'copia' && !confirm('Esto borra la COPIA que está dentro del proyecto. ¿Seguir?')) return
+        const n = esc(b.dataset.nombre ?? '')
+        const ok = b.dataset.modo === 'enlace'
+          ? await confirmar('Quitar del proyecto', `Se quita <b>${n}</b> de este proyecto. <b>Tu archivo original no se borra.</b>`, 'Quitar')
+          : await confirmar('Borrar la copia', `Se borra la copia de <b>${n}</b> que está dentro del proyecto. Esto no se puede deshacer.`)
+        if (!ok) return
         await api.borrarMaterial(slug, b.dataset.del!); await renderProject(slug)
       }
     })
     root().querySelectorAll<HTMLElement>('[data-delref]').forEach(b => {
       b.onclick = async () => {
-        const txt = b.dataset.modo === 'enlace' ? 'Se quita de la biblioteca (la pierden todos los proyectos como referencia). Tu archivo original NO se borra. ¿Seguir?' : 'Esto borra la COPIA de la biblioteca. ¿Seguir?'
-        if (!confirm(txt)) return
+        const n = esc(b.dataset.nombre ?? '')
+        const ok = b.dataset.modo === 'enlace'
+          ? await confirmar('Eliminar referencia', `Se elimina <b>${n}</b> de tu biblioteca y ya no aparece en ningún proyecto. <b>Tu archivo original no se borra.</b>`, 'Eliminar')
+          : await confirmar('Eliminar referencia', `Se borra la copia de <b>${n}</b> de tu biblioteca y desaparece de todos los proyectos. Esto no se puede deshacer.`, 'Eliminar')
+        if (!ok) return
         await api.borrarReferencia(b.dataset.delref!); await renderProject(slug)
       }
     })

@@ -38,6 +38,7 @@ export const api = {
   elegirReferencias: () => post('/api/referencias/elegir').then(j<{ agregados: string[]; cancelado: boolean }>),
   enlazarReferencias: (archivos: ArchivoInfo[]) => post('/api/referencias/enlazar', { archivos }).then(j<{ enlazados: string[]; noEncontrados: string[] }>),
   ubicarReferencia: (id: string) => post(`/api/referencias/${encodeURIComponent(id)}/ubicar`).then(j<{ ok: boolean }>),
+  borrarProyecto: (slug: string) => fetch(`/api/proyectos/${slug}`, { method: 'DELETE' }).then(j<{ ok: boolean }>),
   borrarMaterial: (slug: string, name: string) => fetch(`/api/proyectos/${slug}/material/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(j<{ ok: boolean }>),
   borrarReferencia: (id: string) => fetch(`/api/referencias/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(j<{ ok: boolean }>),
 }

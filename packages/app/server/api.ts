@@ -562,6 +562,14 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       return send(res, 200, meta)
     }
 
+    // Borrar un proyecto: se elimina su carpeta (edición, proxies, copias). Los videos ENLAZADOS no se tocan.
+    if ((g = /^\/proyectos\/([a-z0-9-]+)$/.exec(p)) && m === 'DELETE') {
+      const dir = projDir(g[1])
+      if (!isSlug(g[1]) || !(await loadMeta(g[1])) || !path.resolve(dir).startsWith(PROJ + path.sep)) return send(res, 404, { error: 'Proyecto no encontrado' })
+      await fsp.rm(dir, { recursive: true, force: true })
+      return send(res, 200, { ok: true })
+    }
+
     if ((g = /^\/proyectos\/([a-z0-9-]+)$/.exec(p)) && m === 'GET') {
       const info = isSlug(g[1]) ? await projectInfo(g[1]) : null
       return info ? send(res, 200, info) : send(res, 404, { error: 'Proyecto no encontrado' })
