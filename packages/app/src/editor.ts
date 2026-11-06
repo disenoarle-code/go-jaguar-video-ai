@@ -55,28 +55,33 @@ export async function bootEditor(slug: string) {
 
   // --- guardado en la carpeta del proyecto (autoguardado + botón) -----------------------------------------
   let lastSavedRev = store.revision
+  let lastJson = JSON.stringify(store.project), savedJson = lastJson
   const saveEl = $('savestate')
   const showSaved = (ok: boolean) => { saveEl.textContent = ok ? '✓ Guardado' : 'Guardando…'; saveEl.style.color = ok ? '' : '#e8b152' }
   showSaved(true)
   let autosaveTimer = 0
   async function guardar(avisar = false) {
-    const rev = store.revision
+    const rev = store.revision, snapJson = JSON.stringify(store.project)
     try {
       const r = await fetch(`/api/proyectos/${slug}/proyecto`, { method: 'PUT', body: serialize(store.project) })
       if (!r.ok) throw new Error('El servidor no pudo guardar')
       lastSavedRev = rev
-      showSaved(store.revision === rev)
+      savedJson = snapJson
+      showSaved(JSON.stringify(store.project) === snapJson)
       if (avisar) notify('Guardado')
     } catch (e) { notify('No se pudo guardar: ' + (e as Error).message) }
   }
   store.onChange(() => {
     if (document.activeElement !== nameEl) nameEl.value = store.project.name
+    const json = JSON.stringify(store.project)      // seleccionar o mover el cabezal no cambia la edición: no se guarda
+    if (json === lastJson) return
+    lastJson = json
     showSaved(false)
     clearTimeout(autosaveTimer)
     autosaveTimer = window.setTimeout(() => { void guardar() }, 1200)
   })
   $('back').onclick = async () => { await guardar(); location.hash = `#/p/${slug}` }
-  window.addEventListener('beforeunload', e => { if (store.revision !== lastSavedRev) e.preventDefault() })
+  window.addEventListener('beforeunload', e => { if (JSON.stringify(store.project) !== savedJson) e.preventDefault() })
 
   // --- exportar a MP4 (lo hace el servidor con ffmpeg; aquí solo se eligen las opciones) ---
   $('export').onclick = () => { void openExport() }
@@ -144,6 +149,8 @@ export async function bootEditor(slug: string) {
   $('zin').onclick = () => tl.zoom(1.4)
   $('zout').onclick = () => tl.zoom(1 / 1.4)
   $('zfit').onclick = () => tl.fit()
+  const zoomR = $<HTMLInputElement>('zoomr')
+  zoomR.oninput = () => { const target = 2 * Math.pow(300, Number(zoomR.value) / 100); tl.zoom(target / tl.pps) }
 
   function deleteSelected() {
     const s = sel(); if (!s) return
@@ -367,6 +374,8 @@ export async function bootEditor(slug: string) {
     player.tick()
     if (tl.dirty || player.playing) tl.draw()
     timeEl.textContent = `${tc(player.time())} / ${tc(duration(store.project))}`
+    const zv = (100 * Math.log(tl.pps / 2)) / Math.log(300)
+    if (document.activeElement !== zoomR && Math.abs(Number(zoomR.value) - zv) > 0.4) zoomR.value = String(zv)
     if (player.playing !== shownPlaying) { shownPlaying = player.playing; $('play').innerHTML = ico(shownPlaying ? 'pause' : 'play') }
     ;($('undo') as HTMLButtonElement).disabled = !store.canUndo
     ;($('redo') as HTMLButtonElement).disabled = !store.canRedo
