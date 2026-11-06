@@ -2,7 +2,7 @@ import { isTextLayer, type Project, type TextLayer } from '@gojaguar/core'
 import { H, W } from './constants'
 
 const ease = (x: number) => 1 - Math.pow(1 - Math.min(Math.max(x, 0), 1), 3)
-const FONT = (o: TextLayer) => `700 ${o.size}px -apple-system, "Segoe UI", system-ui, sans-serif`
+const FONT = (o: TextLayer) => `700 ${o.size}px Figtree, "Segoe UI", system-ui, sans-serif`
 
 export interface Rect { x: number; y: number; w: number; h: number }
 
@@ -58,7 +58,7 @@ export function drawOverlays(ctx: CanvasRenderingContext2D, p: Project, t: numbe
     ctx.restore()
     if (o.id === selectedId) {
       ctx.save()
-      ctx.strokeStyle = '#4da3ff'; ctx.lineWidth = 2; ctx.setLineDash([8, 6])
+      ctx.strokeStyle = '#e8b152'; ctx.lineWidth = 2; ctx.setLineDash([8, 6])
       ctx.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8)
       ctx.restore()
     }

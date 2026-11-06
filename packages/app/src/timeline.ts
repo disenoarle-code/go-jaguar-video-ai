@@ -257,7 +257,7 @@ export class Timeline {
     const c = this.ctx, w = this.w
     const p = this.store.project
     c.clearRect(0, 0, w, TL_HEIGHT)
-    c.fillStyle = '#14151b'; c.fillRect(0, 0, w, TL_HEIGHT)
+    c.fillStyle = '#191917'; c.fillRect(0, 0, w, TL_HEIGHT)
 
     // seguir el playhead durante la reproducción
     if (this.player.playing) {
@@ -266,7 +266,7 @@ export class Timeline {
     }
 
     for (const k of Object.keys(ROWS) as (keyof typeof ROWS)[]) {
-      c.fillStyle = '#1b1d26'; c.fillRect(LEFT, ROWS[k].y, w - LEFT, ROWS[k].h)
+      c.fillStyle = '#232321'; c.fillRect(LEFT, ROWS[k].y, w - LEFT, ROWS[k].h)
     }
     this.drawRuler()
 
@@ -283,7 +283,7 @@ export class Timeline {
       const x = this.t2x(tx)
       c.fillStyle = '#ffd24d'; c.fillRect(x - 1.5, ROWS.video.y - 2, 3, ROWS.video.h + 4)
       const g = placed.find(q => q.clip.id === dragging.id)!
-      c.globalAlpha = 0.65; c.fillStyle = '#4da3ff'
+      c.globalAlpha = 0.65; c.fillStyle = '#e8b152'
       const gw = (g.end - g.start) * this.pps
       c.fillRect(this.mouse.x - gw / 2, ROWS.video.y + 4, gw, ROWS.video.h - 8)
       c.globalAlpha = 1
@@ -305,14 +305,14 @@ export class Timeline {
     }
 
     // gutter de etiquetas (tapa lo que se desplaza debajo)
-    c.fillStyle = '#14151b'; c.fillRect(0, 0, LEFT, TL_HEIGHT)
-    c.fillStyle = '#8b90a3'; c.font = '11px -apple-system, system-ui, sans-serif'; c.textBaseline = 'middle'
+    c.fillStyle = '#191917'; c.fillRect(0, 0, LEFT, TL_HEIGHT)
+    c.fillStyle = '#a39e92'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
     for (const k of Object.keys(ROWS) as (keyof typeof ROWS)[]) c.fillText(ROWS[k].label, 10, ROWS[k].y + ROWS[k].h / 2)
   }
 
   private drawRuler() {
     const c = this.ctx
-    c.fillStyle = '#10111a'; c.fillRect(LEFT, 0, this.w - LEFT, RULER_H)
+    c.fillStyle = '#151513'; c.fillRect(LEFT, 0, this.w - LEFT, RULER_H)
     const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120]
     const major = steps.find(s => s * this.pps >= 70) ?? 120
     const minor = major / 5
@@ -322,10 +322,10 @@ export class Timeline {
       const x = Math.round(this.t2x(t)) + .5
       if (x < LEFT) continue
       const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-6
-      c.strokeStyle = isMajor ? '#6c7186' : '#3a3d4d'
+      c.strokeStyle = isMajor ? '#7d786d' : '#46463f'
       c.beginPath(); c.moveTo(x, RULER_H - (isMajor ? 12 : 6)); c.lineTo(x, RULER_H); c.stroke()
       if (isMajor) {
-        c.fillStyle = '#9aa0b5'
+        c.fillStyle = '#a39e92'
         const m = Math.floor(t / 60), s = t % 60
         c.fillText(`${m}:${s.toFixed(major < 1 ? 1 : 0).padStart(major < 1 ? 4 : 2, '0')}`, x + 3, 3)
       }
@@ -343,7 +343,7 @@ export class Timeline {
     c.save()
     c.globalAlpha = ghost ? 0.35 : 1
     c.beginPath(); c.rect(Math.max(x0, LEFT), V.y, x1 - Math.max(x0, LEFT), V.h); c.clip()
-    c.fillStyle = '#2b3550'; c.fillRect(x0, V.y, x1 - x0, V.h)
+    c.fillStyle = '#3a3a36'; c.fillRect(x0, V.y, x1 - x0, V.h)
     if (a) {
       const tw = THUMB_W * (V.h / THUMB_H)
       for (let tx = x0; tx < x1; tx += tw) {
@@ -354,7 +354,7 @@ export class Timeline {
       }
     }
     c.fillStyle = 'rgba(8,9,14,.55)'; c.fillRect(x0, V.y, Math.min(150, x1 - x0), 18)
-    c.fillStyle = '#fff'; c.font = '11px -apple-system, system-ui, sans-serif'; c.textBaseline = 'middle'
+    c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
     c.fillText(`${pl.clip.id}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}${pl.clip.volume !== 1 ? `  🔊${pl.clip.volume}` : ''}`, x0 + 6, V.y + 9)
     c.restore()
 
@@ -380,11 +380,11 @@ export class Timeline {
 
     // bordes
     for (const r of [V, A]) {
-      c.strokeStyle = sel ? '#4da3ff' : 'rgba(255,255,255,.25)'; c.lineWidth = sel ? 2 : 1
+      c.strokeStyle = sel ? '#e8b152' : 'rgba(255,255,255,.25)'; c.lineWidth = sel ? 2 : 1
       c.strokeRect(x0 + .5, r.y + .5, x1 - x0 - 1, r.h - 1)
     }
     if (sel) {
-      c.fillStyle = '#4da3ff'
+      c.fillStyle = '#e8b152'
       for (const xx of [x0, x1 - 5]) c.fillRect(xx, V.y + V.h / 2 - 12, 5, 24)
     }
   }
@@ -397,9 +397,9 @@ export class Timeline {
     const l = Math.max(x0, LEFT)
     c.save()
     c.beginPath(); c.rect(l, R.y, x1 - l, R.h); c.clip()
-    c.fillStyle = o.type === 'subtitle' ? '#2f6fc4' : '#c4366a'
+    c.fillStyle = o.type === 'subtitle' ? '#8a6324' : '#c4366a'
     c.beginPath(); c.roundRect(x0, R.y + 2, x1 - x0, R.h - 4, 5); c.fill()
-    c.fillStyle = '#fff'; c.font = '11px -apple-system, system-ui, sans-serif'; c.textBaseline = 'middle'
+    c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
     c.fillText(o.text, x0 + 8, R.y + R.h / 2)
     if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 3, x1 - x0 - 2, R.h - 6, 5); c.stroke() }
     c.restore()

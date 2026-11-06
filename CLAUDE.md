@@ -1,4 +1,4 @@
-# Editor Gojaguar — instrucciones para Claude
+# Go Jaguar Video AI — instrucciones para Claude
 
 Editor de video local que tú (Claude) controlas con comandos. El usuario ve los cambios en vivo en el panel del navegador y puede corregirlos a mano.
 

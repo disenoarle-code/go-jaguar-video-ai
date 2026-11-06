@@ -1,7 +1,7 @@
 /** Cliente de la API local (server/api.ts). */
 export interface Herramientas { ffmpeg: boolean; ffprobe: boolean; whisper: boolean; whisperModel: boolean; hwaccel: string | null }
 export interface Miniatura { poster: string | null; video: string | null; listo: boolean }
-export interface ProyectoResumen { slug: string; name: string; createdAt: string; procesado: boolean; tieneEditor: boolean; material: number; referencias: number; duracion: number; preview: (Miniatura & { tipo: 'edicion' | 'material' }) | null }
+export interface ProyectoResumen { slug: string; name: string; createdAt: string; ultimaEdicion: string; procesado: boolean; tieneEditor: boolean; material: number; referencias: number; duracion: number; preview: (Miniatura & { tipo: 'edicion' | 'material' }) | null }
 export type Modo = 'enlace' | 'copia'
 export interface Referencia { id: string; nombre: string; size: number; agregada: string; modo: Modo; existe: boolean; ruta: string; perfilDeEstilo: boolean; preview: Miniatura }
 export interface ArchivoInfo { name: string; size: number; lastModified: number }
@@ -23,7 +23,7 @@ const post = (url: string, data?: unknown, method = 'POST') =>
 
 export const api = {
   estado: () => fetch('/api/estado').then(j<{ biblioteca: string; herramientas: Herramientas; proyectos: ProyectoResumen[]; referencias: Referencia[] }>),
-  crearProyecto: (name: string, idioma: string) => post('/api/proyectos', { name, idioma }).then(j<{ slug: string; name: string }>),
+  crearProyecto: (name: string) => post('/api/proyectos', { name }).then(j<{ slug: string; name: string }>),
   proyecto: (slug: string) => fetch(`/api/proyectos/${slug}`).then(j<ProyectoInfo>),
   procesar: (slug: string) => post(`/api/proyectos/${slug}/procesar`).then(j<{ jobId: string }>),
   trabajo: (id: string) => fetch(`/api/trabajos/${encodeURIComponent(id)}`).then(j<Trabajo>),

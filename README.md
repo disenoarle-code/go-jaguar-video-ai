@@ -1,4 +1,4 @@
-# Editor Gojaguar
+# Go Jaguar Video AI
 
 Editor de video pensado para que Claude lo controle con pocos tokens y el usuario pueda corregir todo a mano. Se usa dentro de Claude Code (ver [CLAUDE.md](CLAUDE.md)).
 

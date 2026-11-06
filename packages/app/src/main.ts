@@ -2,6 +2,7 @@ import './style.css'
 import { bootEditor } from './editor'
 import { renderHome, renderProject } from './views'
 
+void document.fonts?.load('400 14px Figtree'); void document.fonts?.load('700 14px Figtree')
 const isEditor = (h: string) => h.startsWith('#/editor/')
 const modeAtLoad = isEditor(location.hash)
 

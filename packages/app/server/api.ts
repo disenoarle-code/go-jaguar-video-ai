@@ -257,7 +257,9 @@ async function listProjects() {
     const info = await projectInfo(slug); if (!info) continue
     const { material, assets, name, createdAt, procesado, tieneEditor, referencias, vistaFinal } = info
     const preview = vistaFinal ? { ...vistaFinal, tipo: 'edicion' as const } : material[0] ? { ...material[0].preview, tipo: 'material' as const } : null
-    out.push({ slug, name, createdAt, procesado: !!procesado, tieneEditor, material: material.length, preview, referencias: referencias.length, duracion: (assets ?? []).reduce((s, a) => s + a.duration, 0) })
+    const edit = path.join(projDir(slug), 'proyecto.gojaguar')
+    const ultimaEdicion = (await exists(edit)) ? (await fsp.stat(edit)).mtime.toISOString() : createdAt
+    out.push({ slug, name, createdAt, ultimaEdicion, procesado: !!procesado, tieneEditor, material: material.length, preview, referencias: referencias.length, duracion: (assets ?? []).reduce((s, a) => s + a.duration, 0) })
   }
   return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
@@ -557,7 +559,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       let slug = slugify(nombre), i = 2
       while (await exists(projDir(slug))) slug = `${slugify(nombre)}-${i++}`
       for (const sub of ['material', 'proxies', 'transcripciones', 'analisis', 'salidas']) await fsp.mkdir(path.join(projDir(slug), sub), { recursive: true })
-      const meta: ProjectMeta = { name: nombre, slug, createdAt: new Date().toISOString(), idioma: idioma || 'es', referencias: [] }
+      const meta: ProjectMeta = { name: nombre, slug, createdAt: new Date().toISOString(), idioma: idioma || 'auto', referencias: [] }
       await writeJson(path.join(projDir(slug), 'proyecto.json'), meta)
       return send(res, 200, meta)
     }

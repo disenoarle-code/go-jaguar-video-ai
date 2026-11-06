@@ -4,6 +4,7 @@ const root = () => document.getElementById('shell')!
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
 const VIDEO = /\.(mp4|mov|m4v|mkv|webm|avi)$/i
 const go = (hash: string) => { location.hash = hash }
+const BRAND = '<a class="brand" href="#/"><img src="/logo.svg" alt="Go Jaguar" /><span>Video AI</span></a>'
 
 /** Confirmación dentro de la página (el confirm() del navegador no aparece en algunos visores y cancela solo). */
 function confirmar(titulo: string, textoHtml: string, ok = 'Borrar', peligro = true): Promise<boolean> {
@@ -63,13 +64,12 @@ const tarjetas = (ps: ProyectoResumen[]) => ps.map(p => `
       <div class="chips">
         ${p.procesado ? '<span class="chip ok">Editado</span>' : `<span class="chip">${p.material ? `${p.material} video${p.material > 1 ? 's' : ''}` : 'Sin material'}</span>`}
         ${p.duracion ? `<span class="chip">${fmtDur(p.duracion)}</span>` : ''}
-        ${p.preview?.tipo === 'edicion' ? '<span class="chip">vista previa de la edición</span>' : ''}
       </div>
-      <div class="dim small">${new Date(p.createdAt).toLocaleDateString()}</div>
+      <div class="dim small">Última edición - ${new Date(p.ultimaEdicion).toLocaleDateString()}</div>
     </button>
   </div>`).join('')
 
-const prevSig = (ps: ProyectoResumen[]) => JSON.stringify(ps.map(p => [p.slug, p.preview?.video, p.preview?.poster, p.preview?.listo, p.duracion, p.procesado, p.material]))
+const prevSig = (ps: ProyectoResumen[]) => JSON.stringify(ps.map(p => [p.slug, p.preview?.video, p.preview?.poster, p.preview?.listo, p.duracion, p.procesado, p.material, p.ultimaEdicion]))
 
 // ------------------------------------------------------------------------------------------------
 // HOME: proyectos
@@ -86,7 +86,7 @@ export async function renderHome() {
   root().innerHTML = `
   <div class="page">
     <div class="home-head">
-      <div><h1>Editor Gojaguar</h1><p class="dim">Tus proyectos</p></div>
+      <div>${BRAND}<p class="dim tus">Tus proyectos</p></div>
       <button class="primary big" id="nuevo">+ Nuevo proyecto</button>
     </div>
     ${faltan.length ? `<div class="warn">Falta instalar: ${faltan.join(' · ')}. Pídele a Claude: “instala lo que falta”.</div>` : ''}
@@ -98,7 +98,6 @@ export async function renderHome() {
     <form class="modal-box" id="form">
       <h2>Nuevo proyecto</h2>
       <label>Nombre del proyecto<input id="pn" type="text" placeholder="Ej: Video de objeciones" required autofocus /></label>
-      <label>Idioma del video<select id="pi"><option value="es">Español</option><option value="pt">Português</option><option value="en">English</option><option value="auto">Detectar</option></select></label>
       <div class="row"><button type="button" id="cancel">Cancelar</button><button class="primary" type="submit">Crear</button></div>
     </form>
   </div>`
@@ -109,8 +108,7 @@ export async function renderHome() {
   document.getElementById('form')!.addEventListener('submit', async e => {
     e.preventDefault()
     const name = (document.getElementById('pn') as HTMLInputElement).value
-    const idioma = (document.getElementById('pi') as HTMLSelectElement).value
-    try { const p = await api.crearProyecto(name, idioma); go(`#/p/${p.slug}`) } catch (err) { alert((err as Error).message) }
+    try { const p = await api.crearProyecto(name); go(`#/p/${p.slug}`) } catch (err) { alert((err as Error).message) }
   })
   const bindCards = () => {
     root().querySelectorAll<HTMLElement>('.cardlink').forEach(c => { c.onclick = () => go(`#/p/${c.dataset.slug}`) })
@@ -161,6 +159,7 @@ export async function renderProject(slug: string) {
 
   root().innerHTML = `
   <div class="page">
+    ${BRAND}
     <div class="proj-top">
       <button id="back">← Proyectos</button>
       <h1>${esc(info.name)}</h1>
