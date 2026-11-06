@@ -1,0 +1,225 @@
+import type { LoadedAsset } from './media'
+import { drawOverlays } from './overlays'
+import { duration, layout, locate, type Store } from '@gojaguar/core'
+import { H, W } from './constants'
+
+/**
+ * Motor de vista previa: NO renderiza nada. Cada frame se calcula en vivo:
+ * timeline -> (clip, tiempo fuente) -> frame decodificado (WebCodecs) -> canvas.
+ * Audio: Web Audio agendado según el timeline (recortes y velocidad en vivo).
+ */
+export class Player {
+  readonly canvas: HTMLCanvasElement
+  readonly ctx: CanvasRenderingContext2D
+  readonly actx = new AudioContext()
+  assets = new Map<string, LoadedAsset>()
+  /** Audio estirado conservando el tono, por (asset, velocidad). */
+  private stretched = new Map<string, AudioBuffer>()
+  private computing = new Set<string>()
+  private worker = new Worker(new URL('./stretch.worker.ts', import.meta.url), { type: 'module' })
+  private stretchTimer = 0
+  audioStatus = ''
+
+  playhead = 0
+  hover: number | null = null      // scrub con el mouse sobre el timeline
+  override: number | null = null   // tiempo forzado (p. ej. mientras se recorta)
+  playing = false
+  dirty = true
+
+  private t0 = 0
+  private ctxStart = 0
+  private nodes: AudioScheduledSourceNode[] = []
+  private layer = new OffscreenCanvas(W, H)
+  private layerCtx = this.layer.getContext('2d')!
+  /** Frame actualmente dibujado (asset:índice). Público para el benchmark. */
+  layerKey = ''
+  private wanted: { asset: LoadedAsset; idx: number; key: string } | null = null
+  private pumping = false
+  fps = { shown: 0, last: performance.now(), n: 0 }
+  onTime: (t: number) => void = () => {}
+
+  constructor(canvas: HTMLCanvasElement, private store: Store) {
+    this.canvas = canvas
+    canvas.width = W; canvas.height = H
+    this.ctx = canvas.getContext('2d')!
+    store.onChange(() => {
+      this.playhead = Math.min(this.playhead, duration(store.project))
+      if (this.playing) this.scheduleAudio(this.time())
+      this.dirty = true
+      clearTimeout(this.stretchTimer)
+      this.stretchTimer = window.setTimeout(() => this.ensureStretched(), 350)
+    })
+    this.worker.onmessage = e => this.onStretched(e.data)
+  }
+
+  private skey = (assetId: string, speed: number) => `${assetId}@${speed}`
+  private jobs = new Map<string, { assetId: string; speed: number; sr: number; t0: number }>()
+
+  /** Prepara (en segundo plano) el audio de cada velocidad usada, sin cambiar el tono. */
+  ensureStretched() {
+    for (const c of this.store.project.clips) {
+      if (c.speed === 1) continue
+      const key = this.skey(c.assetId, c.speed)
+      const a = this.assets.get(c.assetId)
+      if (!a?.audio || this.stretched.has(key) || this.computing.has(key)) continue
+      this.computing.add(key)
+      const left = a.audio.getChannelData(0).slice()
+      const right = (a.audio.numberOfChannels > 1 ? a.audio.getChannelData(1) : a.audio.getChannelData(0)).slice()
+      this.jobs.set(key, { assetId: c.assetId, speed: c.speed, sr: a.audio.sampleRate, t0: performance.now() })
+      this.audioStatus = `procesando audio ×${c.speed}…`
+      this.worker.postMessage({ id: key, left, right, tempo: c.speed }, [left.buffer as ArrayBuffer, right.buffer as ArrayBuffer])
+    }
+  }
+
+  private onStretched(m: { id: string; progress?: number; left?: Float32Array; right?: Float32Array }) {
+    const job = this.jobs.get(m.id)
+    if (!job) return
+    if (m.progress !== undefined) { this.audioStatus = `procesando audio ×${job.speed}… ${Math.round(m.progress * 100)}%`; return }
+    const buf = this.actx.createBuffer(2, m.left!.length, job.sr)
+    buf.copyToChannel(m.left as Float32Array<ArrayBuffer>, 0); buf.copyToChannel(m.right as Float32Array<ArrayBuffer>, 1)
+    this.stretched.set(m.id, buf)
+    this.computing.delete(m.id); this.jobs.delete(m.id)
+    this.audioStatus = this.computing.size ? this.audioStatus : `audio ×${job.speed} listo (${((performance.now() - job.t0) / 1000).toFixed(1)}s)`
+    if (this.playing) this.scheduleAudio(this.time())
+  }
+
+  /** Tiempo que se muestra ahora mismo en la vista previa. */
+  time() {
+    if (this.playing) return this.t0 + (this.actx.currentTime - this.ctxStart)
+    return this.override ?? this.hover ?? this.playhead
+  }
+
+  seek(t: number) {
+    this.playhead = Math.min(Math.max(t, 0), duration(this.store.project))
+    if (this.playing) this.scheduleAudio(this.playhead)
+    this.dirty = true
+    this.onTime(this.playhead)
+  }
+
+  async play() {
+    const dur = duration(this.store.project)
+    if (!dur) return
+    await this.actx.resume()
+    if (this.playhead >= dur - 0.05) this.playhead = 0
+    this.hover = null
+    this.playing = true
+    this.scheduleAudio(this.playhead)
+  }
+
+  pause() {
+    if (!this.playing) return
+    this.playhead = Math.min(this.time(), duration(this.store.project))
+    this.playing = false
+    this.stopAudio()
+    this.dirty = true
+    this.onTime(this.playhead)
+  }
+
+  toggle() { this.playing ? this.pause() : void this.play() }
+
+  private stopAudio() {
+    for (const n of this.nodes) { try { n.stop() } catch { /* ya parado */ } n.disconnect() }
+    this.nodes = []
+  }
+
+  private scheduleAudio(from: number) {
+    this.stopAudio()
+    this.t0 = from
+    this.ctxStart = this.actx.currentTime + 0.05
+    const placed = layout(this.store.project)
+    placed.forEach(({ clip, start, end }, i) => {
+      if (end <= from) return
+      const a = this.assets.get(clip.assetId)
+      if (!a?.audio) return
+      const inClip = Math.max(from - start, 0)            // segundos de línea de tiempo ya consumidos
+      const st = clip.speed === 1 ? null : this.stretched.get(this.skey(clip.assetId, clip.speed))
+      // Con audio estirado: se lee a velocidad 1 (tono intacto). Mientras se procesa: respaldo con playbackRate.
+      const bufScale = st ? 1 / clip.speed : 1
+      const buffer = st ?? a.audio
+      const rate = st ? 1 : clip.speed
+      const offset = (clip.srcIn + inClip * clip.speed) * bufScale
+      const bufLen = (clip.srcOut - clip.srcIn) * bufScale - inClip * clip.speed * bufScale
+      if (bufLen <= 0) return
+      const realDur = bufLen / rate
+      const when = this.ctxStart + Math.max(start - from, 0)
+      const src = this.actx.createBufferSource()
+      src.buffer = buffer
+      src.playbackRate.value = rate
+      const g = this.actx.createGain()
+      // Fundido mínimo solo donde el audio NO es continuo con el clip vecino (evita chasquidos).
+      const prev = placed[i - 1]?.clip, next = placed[i + 1]?.clip
+      const contigPrev = prev && prev.assetId === clip.assetId && Math.abs(prev.srcOut - clip.srcIn) < 1e-3 && prev.speed === clip.speed
+      const contigNext = next && next.assetId === clip.assetId && Math.abs(next.srcIn - clip.srcOut) < 1e-3 && next.speed === clip.speed
+      const F = 0.006
+      if (realDur > 4 * F) {
+        g.gain.setValueAtTime(contigPrev || inClip > 0 ? clip.volume : 0, when)
+        if (!contigPrev && inClip === 0) g.gain.linearRampToValueAtTime(clip.volume, when + F)
+        g.gain.setValueAtTime(clip.volume, when + realDur - F)
+        if (!contigNext) g.gain.linearRampToValueAtTime(0, when + realDur)
+      } else g.gain.value = clip.volume
+      src.connect(g).connect(this.actx.destination)
+      src.start(when, offset, bufLen)
+      this.nodes.push(src)
+    })
+  }
+
+  /** Llamado en cada requestAnimationFrame. Devuelve true si hubo que repintar. */
+  tick(): boolean {
+    if (this.playing) {
+      const t = this.time()
+      if (t >= duration(this.store.project)) { this.pause(); this.seek(duration(this.store.project)); }
+      else this.onTime(t)
+      this.dirty = true
+    }
+    if (!this.dirty) return false
+    this.dirty = false
+    this.draw(this.time())
+    return true
+  }
+
+  private draw(t: number) {
+    const loc = locate(this.store.project, t)
+    if (loc) {
+      const asset = this.assets.get(loc.placed.clip.assetId)
+      if (asset) {
+        const idx = asset.source.idxAt(loc.srcTime)
+        const key = `${asset.info.id}:${idx}`
+        if (key !== this.layerKey) {
+          const f = asset.source.peek(idx)
+          if (f) { this.blit(f); this.layerKey = key }
+          else { this.wanted = { asset, idx, key }; void this.pump() }
+        }
+        if (this.playing) asset.source.prefetch(idx, 6)
+      }
+    } else {
+      this.layerCtx.fillStyle = '#000'; this.layerCtx.fillRect(0, 0, W, H); this.layerKey = ''
+    }
+    this.ctx.drawImage(this.layer, 0, 0)
+    const sel = this.store.selection
+    drawOverlays(this.ctx, this.store.project, t, sel?.type === 'layer' ? sel.id : null)
+    this.fps.n++
+    const now = performance.now()
+    if (now - this.fps.last > 1000) { this.fps.shown = this.fps.n; this.fps.n = 0; this.fps.last = now }
+  }
+
+  private blit(f: VideoFrame) {
+    try { this.layerCtx.drawImage(f, 0, 0, W, H) } catch { /* frame cerrado por el LRU */ }
+  }
+
+  private async pump() {
+    if (this.pumping) return
+    this.pumping = true
+    try {
+      while (this.wanted && this.wanted.key !== this.layerKey) {
+        const w = this.wanted
+        const f = await w.asset.source.getFrame(w.idx)
+        this.blit(f)
+        this.layerKey = w.key
+        this.dirty = true
+      }
+    } finally { this.pumping = false }
+  }
+
+  /** Captura de la vista previa actual (para que Claude "mire" un frame). */
+  snapshotDataUrl() { return this.canvas.toDataURL('image/jpeg', 0.7) }
+}

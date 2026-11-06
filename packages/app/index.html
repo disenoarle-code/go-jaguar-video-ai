@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Editor Gojaguar · prototipo</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <b>Editor Gojaguar</b>
+      <input id="pname" type="text" aria-label="Nombre del proyecto" />
+      <button id="save" title="Ctrl/Cmd+S">💾 Guardar</button><button id="open">📂 Abrir</button><button id="new">Nuevo</button>
+      <input id="filepick" type="file" accept=".gojaguar,application/json" hidden />
+      <span id="note" class="dim"></span>
+      <span id="stats" class="dim right"></span>
+    </header>
+    <main>
+      <section id="stage">
+        <div class="canvaswrap"><canvas id="preview"></canvas><div id="loading">Cargando…</div></div>
+        <div class="bar">
+          <button id="play" title="Espacio">▶</button>
+          <span id="time" class="mono">0:00.00</span>
+          <span class="sep"></span>
+          <button id="undo" title="Ctrl/Cmd+Z">↶</button>
+          <button id="redo" title="Ctrl/Cmd+Shift+Z">↷</button>
+          <span class="sep"></span>
+          <button id="split" title="S">✂ Cortar</button>
+          <button id="del" title="Supr">🗑 Borrar</button>
+          <button id="addsub">+ Subtítulo</button>
+          <button id="addgfx">+ Gráfico</button>
+          <span class="grow"></span>
+          <button id="zout">−</button><button id="zin">+</button><button id="zfit">Ajustar</button>
+        </div>
+      </section>
+      <aside id="inspector"></aside>
+    </main>
+    <section id="tl"><canvas id="timeline"></canvas></section>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

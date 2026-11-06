@@ -1,0 +1,20 @@
+{
+  "name": "editor-gojaguar",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @gojaguar/app",
+    "test": "vitest run",
+    "check": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/app",
+    "proxy": "node packages/app/scripts/make-proxy.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.0",
+    "@types/node": "^26.6.6"
+  }
+}

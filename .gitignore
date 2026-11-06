@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+# Videos y derivados pesados: no van al repositorio
+media/originales/*
+media/proxies/*
+media/transcripciones/*
+media/manifest.json
+!media/**/.gitkeep
