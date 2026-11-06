@@ -1,13 +1,15 @@
-import type { ClipFx } from '@gojaguar/core'
+import type { TransitionKind, ZoomKind } from '@gojaguar/core'
 
-/** Nombre, color y duración del "golpe" de cada efecto (para mostrarlos en la línea de tiempo y el panel). */
-export const FX_INFO: Record<ClipFx, { name: string; short: string; color: string; ink: string; hit: number; hint: string }> = {
-  push:       { name: 'Zoom lento',            short: 'Zoom lento',  color: '#3f8f8b', ink: '#fff',    hit: 0,    hint: 'Se acerca despacio durante todo el clip.' },
-  punch:      { name: 'Golpe de zoom',         short: 'Golpe',       color: '#e8b152', ink: '#1d1d1b', hit: 0.35, hint: 'Entra con zoom fuerte y se asienta en 0,35 s.' },
-  slide:      { name: 'Deslizar',              short: 'Deslizar',    color: '#6dbb72', ink: '#1d1d1b', hit: 0.22, hint: 'La imagen entra de lado y se centra en 0,22 s.' },
-  punchflash: { name: 'Golpe + destello',      short: 'Golpe+flash', color: '#d9778b', ink: '#1d1d1b', hit: 0.3,  hint: 'Golpe de zoom con un destello blanco corto.' },
-  dropflash:  { name: 'Entrada fuerte',        short: 'Drop',        color: '#f8f4ec', ink: '#1d1d1b', hit: 0.5,  hint: 'Zoom grande y destello fuerte, para la entrada de la música.' },
+/** Nombres, colores y explicación de cada zoom (efecto del clip). */
+export const ZOOM_INFO: Record<ZoomKind, { name: string; color: string; hint: string }> = {
+  push: { name: 'Zoom lento', color: '#3f8f8b', hint: 'Se acerca poco a poco durante todo el clip.' },
+  pull: { name: 'Alejar', color: '#5f86b8', hint: 'Empieza cerca y se aleja poco a poco durante todo el clip.' },
+  punch: { name: 'Golpe de zoom', color: '#e8b152', hint: 'Entra con un zoom fuerte y se asienta.' },
 }
 
-/** Efectos que ocurren en el CORTE entre dos clips (se dibujan como pastilla ahí); el resto son zooms del clip. */
-export const TRANSITIONS = new Set<ClipFx>(['slide', 'punchflash', 'dropflash'])
+/** Nombres, colores y explicación de cada transición (en el corte entre dos clips). */
+export const TRANSITION_INFO: Record<TransitionKind, { name: string; color: string; hint: string }> = {
+  slide: { name: 'Deslizar', color: '#6dbb72', hint: 'La imagen sale hacia un lado y la siguiente entra desde el otro.' },
+  flash: { name: 'Destello', color: '#d9778b', hint: 'Un destello blanco justo en el corte.' },
+  dip: { name: 'Fundido a negro', color: '#8d8a82', hint: 'La imagen se oscurece hacia el corte y vuelve a aparecer.' },
+}

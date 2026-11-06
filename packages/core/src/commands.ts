@@ -1,8 +1,10 @@
 import { MIN_DUR, clipDur, compactTracks, duration, freeTrack, layout, overlayDur } from './timeline'
+import { LIMITS, TRANSITION_DEFAULTS, ZOOM_DEFAULTS } from './fx'
 import type { Store } from './store'
 import {
   DEFAULT_TRANSFORM, isTextLayer,
-  CLIP_FX, type AssetInfo, type Clip, type ClipFx, type Layer, type Project, type TextLayer, type Transform,
+  TRANSITION_KINDS, ZOOM_KINDS,
+  type AssetInfo, type Clip, type Layer, type Project, type TextLayer, type Transform, type Transition, type ZoomFx,
 } from './types'
 
 /** Capa nueva sin id; el transform puede ser parcial. */
@@ -16,13 +18,14 @@ export type LayerPatch = { transform?: Partial<Transform>; [k: string]: unknown 
  */
 export type Cmd =
   | { op: 'import_asset'; asset: AssetInfo }
-  | { op: 'add_clip'; asset: string; src_in?: number; src_out?: number; effect?: ClipFx; dir?: 1 | -1 }
+  | { op: 'add_clip'; asset: string; src_in?: number; src_out?: number }
   | { op: 'add_overlay'; asset: string; start: number; track?: number; src_in?: number; src_out?: number; x?: number; y?: number; scale?: number; volume?: number }
   | { op: 'clip_to_overlay'; clip: string; start: number; track?: number }
   | { op: 'update_overlay'; id: string; patch: OverlayPatch }
   | { op: 'delete_overlay'; id: string }
   | { op: 'set_track'; track: string; locked?: boolean; hidden?: boolean; muted?: boolean }
-  | { op: 'set_effect'; clip: string; effect: ClipFx | null; dir?: 1 | -1 }
+  | { op: 'set_zoom'; clip: string; zoom: ZoomFx | null }
+  | { op: 'set_transition'; clip: string; transition: Transition | null }
   | { op: 'set_music'; asset: string; src_in?: number; volume?: number; fade_out?: number }
   | { op: 'clear_music' }
   | { op: 'set_format'; width: number; height: number; fps?: number }
@@ -70,7 +73,7 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       const srcIn = clamp(cmd.src_in ?? 0, 0, a.duration)
       const srcOut = clamp(cmd.src_out ?? a.duration, srcIn, a.duration)
       if (srcOut - srcIn < MIN_DUR) return 'tramo demasiado corto'
-      const c: Clip = { id: store.newId('c'), assetId: a.id, srcIn, srcOut, speed: 1, volume: 1, ...(cmd.effect ? { fx: cmd.effect, fxDir: cmd.dir } : {}) }
+      const c: Clip = { id: store.newId('c'), assetId: a.id, srcIn, srcOut, speed: 1, volume: 1 }
       p.clips.push(c)
       return `${c.id} añadido (${a.name} ${f2(srcIn)}–${f2(srcOut)})`
     }
@@ -131,12 +134,28 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       if (!s.locked && !s.hidden && !s.muted) delete t[cmd.track]
       return `pista ${cmd.track}: ${[s.locked && 'bloqueada', s.hidden && 'oculta', s.muted && 'silenciada'].filter(Boolean).join(', ') || 'normal'}`
     }
-    case 'set_effect': {
+    case 'set_zoom': {
       const c = p.clips.find(x => x.id === cmd.clip)
       if (!c) return 'clip no encontrado'
-      if (cmd.effect && !CLIP_FX.includes(cmd.effect)) return `efecto desconocido (${CLIP_FX.join(', ')})`
-      if (cmd.effect) { c.fx = cmd.effect; c.fxDir = cmd.dir ?? c.fxDir } else { delete c.fx; delete c.fxDir }
-      return `${c.id} efecto ${cmd.effect ?? 'ninguno'}`
+      if (!cmd.zoom) { delete c.zoom; return `${c.id} sin zoom` }
+      if (!ZOOM_KINDS.includes(cmd.zoom.kind)) return `zoom desconocido (${ZOOM_KINDS.join(', ')})`
+      const d = ZOOM_DEFAULTS[cmd.zoom.kind]
+      c.zoom = { kind: cmd.zoom.kind, amount: clamp(cmd.zoom.amount ?? d.amount, ...LIMITS.zoomAmount),
+        ...(cmd.zoom.kind === 'punch' ? { duration: clamp(cmd.zoom.duration ?? d.duration ?? 0.35, ...LIMITS.zoomDuration) } : {}) }
+      return `${c.id} zoom ${c.zoom.kind} ${Math.round(c.zoom.amount * 100)}%`
+    }
+    case 'set_transition': {
+      // `clip` es el clip que ENTRA; la transición también es la salida del anterior
+      const i = p.clips.findIndex(x => x.id === cmd.clip)
+      if (i < 0) return 'clip no encontrado'
+      if (i === 0) return 'el primer clip no tiene corte antes'
+      const c = p.clips[i]
+      if (!cmd.transition) { delete c.transition; return `corte ${p.clips[i - 1].id}|${c.id} sin transición` }
+      if (!TRANSITION_KINDS.includes(cmd.transition.kind)) return `transición desconocida (${TRANSITION_KINDS.join(', ')})`
+      const d = TRANSITION_DEFAULTS[cmd.transition.kind]
+      c.transition = { kind: cmd.transition.kind, duration: clamp(cmd.transition.duration ?? d.duration, ...LIMITS.trDuration),
+        intensity: clamp(cmd.transition.intensity ?? d.intensity, ...LIMITS.trIntensity), ...(cmd.transition.kind === 'slide' ? { dir: cmd.transition.dir === -1 ? -1 as const : 1 as const } : {}) }
+      return `corte ${p.clips[i - 1].id}|${c.id}: ${c.transition.kind} ${c.transition.duration}s`
     }
     case 'set_music': {
       const a = p.assets.find(x => x.id === cmd.asset)
@@ -154,6 +173,7 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       if (!hit) return 'no se puede cortar ahí (borde del clip)'
       const srcAt = hit.clip.srcIn + (cmd.at - hit.start) * hit.clip.speed
       const right: Clip = { ...hit.clip, id: store.newId('c'), srcIn: srcAt }
+      delete right.zoom; delete right.transition     // el zoom y la transición de entrada se quedan en la mitad izquierda
       hit.clip.srcOut = srcAt
       p.clips.splice(p.clips.indexOf(hit.clip) + 1, 0, right)
       return `corte en ${f2(cmd.at)}s → ${hit.clip.id} | ${right.id}`
@@ -168,12 +188,14 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
         if (to < end) pieces.push([Math.max(start, to), end])
         pieces.forEach(([a, b], i) => {
           if (b - a < MIN_DUR) return
-          out.push({
+          const piece: Clip = {
             ...clip,
             id: i === 0 ? clip.id : store.newId('c'),
             srcIn: clip.srcIn + (a - start) * clip.speed,
             srcOut: clip.srcIn + (b - start) * clip.speed,
-          })
+          }
+          if (i > 0) { delete piece.zoom; delete piece.transition }     // las piezas nuevas no repiten zoom ni transición
+          out.push(piece)
         })
       }
       p.clips = out
@@ -286,12 +308,12 @@ export function describe(store: Store): string {
       && placed[j + 1].clip.assetId === placed[i].clip.assetId
       && placed[j + 1].clip.speed === placed[i].clip.speed
       && placed[j + 1].clip.volume === placed[i].clip.volume
-      && placed[j + 1].clip.fx === placed[i].clip.fx) j++
+      && JSON.stringify([placed[j + 1].clip.zoom, placed[j + 1].clip.transition]) === JSON.stringify([placed[i].clip.zoom, placed[i].clip.transition])) j++
     const a = store.asset(placed[i].clip.assetId)
     const first = placed[i], last = placed[j]
     const n = j - i + 1
     lines.push(n === 1
-      ? `${first.clip.id} [${tc(first.start)}–${tc(first.end)}] ${a?.name ?? first.clip.assetId} src ${f2(first.clip.srcIn)}–${f2(first.clip.srcOut)} x${first.clip.speed} vol${first.clip.volume}${first.clip.fx ? ` fx:${first.clip.fx}` : ''}`
+      ? `${first.clip.id} [${tc(first.start)}–${tc(first.end)}] ${a?.name ?? first.clip.assetId} src ${f2(first.clip.srcIn)}–${f2(first.clip.srcOut)} x${first.clip.speed} vol${first.clip.volume}${first.clip.zoom ? ` zoom:${first.clip.zoom.kind}(${first.clip.zoom.amount})` : ''}${first.clip.transition ? ` entra:${first.clip.transition.kind}(${first.clip.transition.duration}s)` : ''}`
       : `${first.clip.id}…${last.clip.id} [${tc(first.start)}–${tc(last.end)}] ${n} clips ${a?.name ?? first.clip.assetId} x${first.clip.speed} vol${first.clip.volume}`)
     i = j + 1
   }

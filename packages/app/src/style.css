@@ -257,3 +257,8 @@ header .grow { flex:1; }
 #app .pool-filter button { background:transparent; border:0; padding:0; font-size:12px; color:var(--dim); border-radius:0; }
 #app .pool-filter button:hover { color:#fff; } #app .pool-filter button.on { color:#fff; }
 .pool-title { display:none; }
+
+/* Secciones del panel del clip (Zoom, Transición de entrada y de salida) */
+#inspector h3.sec { margin:16px 0 6px; padding-top:12px; border-top:1px solid #33332f; color:#cfc9bb; }
+#inspector label .val { float:right; color:var(--txt); font-variant-numeric:tabular-nums; }
+#inspector .hint.dimmer { opacity:.75; margin-top:4px; }

@@ -1,5 +1,5 @@
 import { PEAK_RATE, THUMB_H, THUMB_W } from './media'
-import { FX_INFO, TRANSITIONS } from './fxinfo'
+import { TRANSITION_INFO, ZOOM_INFO } from './fxinfo'
 import type { Player } from './player'
 import { MIN_DUR, clipDur, compactTracks, duration, exec, freeTrack, isTextLayer, layout, overlayDur, overlayEnd, trackCount, type OverlayClip, type Placed, type Store, type TextLayer } from '@gojaguar/core'
 
@@ -634,13 +634,13 @@ export class Timeline {
       }
     }
     // etiqueta de zoom (los zooms son "animaciones" del clip; las transiciones van como pastilla en el corte)
-    const fx = pl.clip.fx
-    if (fx && !TRANSITIONS.has(fx) && w > 60) {
-      const label = FX_INFO[fx].name
+    const zm = pl.clip.zoom
+    if (zm && w > 60) {
+      const label = ZOOM_INFO[zm.kind].name
       c.font = '10px Figtree, system-ui, sans-serif'
       const tw2 = Math.min(c.measureText(label).width + 20, w - 8)
       c.fillStyle = 'rgba(20,20,18,.78)'; c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 5); c.fill()
-      c.fillStyle = FX_INFO[fx].color; c.beginPath(); c.arc(x0 + 12, V.y + HEAD + 12, 3, 0, Math.PI * 2); c.fill()
+      c.fillStyle = ZOOM_INFO[zm.kind].color; c.beginPath(); c.arc(x0 + 12, V.y + HEAD + 12, 3, 0, Math.PI * 2); c.fill()
       c.save(); c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 5); c.clip()
       c.fillStyle = '#fff'; c.fillText(label, x0 + 18, V.y + HEAD + 12); c.restore()
     }
@@ -655,8 +655,11 @@ export class Timeline {
     }
   }
 
-  /** Pastilla de transición en el corte (entre el clip anterior y este), como en CapCut. */
-  private chipPos(pl: Placed) { return { cx: this.t2x(pl.start), cy: ROWS.video.y + ROWS.video.h / 2, r: 12 } }
+  /** Pastilla de transición en el corte: su ancho es la duración (la mitad cae en cada clip), como en CapCut. */
+  private chipPos(pl: Placed) {
+    const tr = pl.clip.transition, w = Math.max(20, (tr?.duration ?? 0) * this.pps)
+    return { cx: this.t2x(pl.start), cy: ROWS.video.y + ROWS.video.h / 2, w, h: 28 }
+  }
   /** El corte está "ocupado" si uno de sus dos clips vecinos está seleccionado: ahí van las asas de recorte, no la transición. */
   private cutBusy(placed: Placed[], i: number) {
     const s = this.store.selection
@@ -668,8 +671,7 @@ export class Timeline {
     const placed = layout(this.store.project), V = ROWS.video
     if (y < V.y || y > V.y + V.h) return null
     for (let i = 1; i < placed.length; i++) {
-      const fx = placed[i].clip.fx
-      if ((fx && TRANSITIONS.has(fx)) || this.cutBusy(placed, i)) continue
+      if (placed[i].clip.transition || this.cutBusy(placed, i)) continue
       if (Math.abs(x - this.t2x(placed[i].start)) <= 10 && Math.abs(y - (V.y + V.h / 2)) <= 16) return placed[i]
     }
     return null
@@ -678,9 +680,9 @@ export class Timeline {
     if (this.locked('main')) return null
     const placed = layout(this.store.project)
     for (let i = 1; i < placed.length; i++) {
-      const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx) || this.cutBusy(placed, i)) continue
-      const { cx, cy, r } = this.chipPos(placed[i])
-      if (Math.abs(x - cx) <= r && Math.abs(y - cy) <= 16) return placed[i]
+      if (!placed[i].clip.transition || this.cutBusy(placed, i)) continue
+      const { cx, cy, w, h } = this.chipPos(placed[i])
+      if (Math.abs(x - cx) <= w / 2 && Math.abs(y - cy) <= h / 2) return placed[i]
     }
     return null
   }
@@ -701,26 +703,27 @@ export class Timeline {
       c.beginPath(); c.moveTo(sx, RULER_H); c.lineTo(sx, this.height); c.stroke(); c.restore()
     }
     for (let i = 1; i < placed.length; i++) {
-      const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx)) continue
-      const { cx, cy, r } = this.chipPos(placed[i])
-      if (cx < LEFT + r || cx > this.w + r) continue
-      const info = FX_INFO[fx], sel = this.store.selection?.type === 'clip' && this.store.selection.id === placed[i].clip.id
+      const tr = placed[i].clip.transition; if (!tr) continue
+      const { cx, cy, w, h } = this.chipPos(placed[i])
+      if (cx + w / 2 < LEFT || cx - w / 2 > this.w) continue
+      const info = TRANSITION_INFO[tr.kind], sel = this.store.selection?.type === 'clip' && (this.store.selection.id === placed[i].clip.id || this.store.selection.id === placed[i - 1].clip.id)
       c.save()
       c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 4
-      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - 10, cy - 14, 20, 28, 3); c.fill()
+      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - w / 2, cy - h / 2, w, h, 3); c.fill()
       c.shadowBlur = 0
-      if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(cx - 13, cy - 17, 26, 34, 5); c.stroke() }
-      c.fillStyle = info.color; c.beginPath(); c.roundRect(cx - 10, cy + 10, 20, 4, 2); c.fill()
+      if (sel) { c.strokeStyle = '#e8b152'; c.lineWidth = 2; c.beginPath(); c.roundRect(cx - w / 2 - 2, cy - h / 2 - 2, w + 4, h + 4, 5); c.stroke() }
+      c.fillStyle = info.color; c.beginPath(); c.roundRect(cx - w / 2, cy + h / 2 - 4, w, 4, 2); c.fill()
       c.fillStyle = '#1d1d1b'; c.strokeStyle = '#1d1d1b'; c.lineWidth = 1.8; c.lineCap = 'round'; c.lineJoin = 'round'
-      if (fx === 'slide') {            // flechas ⇄
-        const d = (placed[i].clip.fxDir ?? 1) > 0 ? 1 : -1
+      if (tr.kind === 'slide') {            // flechas ⇄ (hacia donde entra la imagen)
+        const d = (tr.dir ?? 1) > 0 ? 1 : -1
         c.beginPath(); c.moveTo(cx - 6 * d, cy - 2.5); c.lineTo(cx + 6 * d, cy - 2.5); c.moveTo(cx + 3 * d, cy - 5.5); c.lineTo(cx + 6 * d, cy - 2.5); c.lineTo(cx + 3 * d, cy + 0.5)
         c.moveTo(cx + 6 * d, cy + 3.5); c.lineTo(cx - 6 * d, cy + 3.5); c.stroke()
-      } else {                          // destello ✦
-        const k = fx === 'dropflash' ? 7.5 : 6
+      } else if (tr.kind === 'flash') {      // destello ✦
         c.beginPath()
-        for (let a = 0; a < 8; a++) { const rr = a % 2 === 0 ? k : k * 0.35, ang = (a * Math.PI) / 4 - Math.PI / 2; c.lineTo(cx + rr * Math.cos(ang), cy + rr * Math.sin(ang)) }
+        for (let a = 0; a < 8; a++) { const rr = a % 2 === 0 ? 6.5 : 2.3, ang = (a * Math.PI) / 4 - Math.PI / 2; c.lineTo(cx + rr * Math.cos(ang), cy - 1 + rr * Math.sin(ang)) }
         c.closePath(); c.fill()
+      } else {                               // fundido a negro: círculo medio lleno
+        c.beginPath(); c.arc(cx, cy - 1, 6, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.arc(cx, cy - 1, 6, Math.PI / 2, (3 * Math.PI) / 2); c.closePath(); c.fill()
       }
       c.restore()
     }

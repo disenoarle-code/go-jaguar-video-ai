@@ -7,7 +7,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { layout, mainDuration, overlayDur, duration, type Project } from '@gojaguar/core'
+import { layout, mainDuration, overlayDur, duration, parseProject, type Clip, type Project, type Transition } from '@gojaguar/core'
 
 export interface ExportOpts { resolucion: 'original' | '720' | '480'; calidad: 'rapida' | 'buena' | 'maxima'; nombre?: string }
 export interface ExportJob {
@@ -36,17 +36,34 @@ function probeAudio(file: string): Promise<boolean> {
   })
 }
 
-/** Efecto de un clip como expresiones de zoompan (misma fórmula que fxAt del core). */
-function fxExpr(fx: string | undefined, dir: number, D: number, fps: number, last: boolean) {
-  const t = `on/${fps}`
-  const ease = (d: number) => `pow(max(0,1-${t}/${d}),2)`
-  let z = '1', x = 'iw/2-(iw/zoom/2)', flash = 0
-  if (fx === 'push') z = `1+${last ? 0.22 : 0.14}*${t}/${num(D)}`
-  else if (fx === 'punch') z = `1+0.22*${ease(0.35)}+0.05*${t}/${num(D)}`
-  else if (fx === 'slide') { z = `1.22+0.06*${t}/${num(D)}`; x = `iw/2-(iw/zoom/2)+${dir}*(iw-iw/zoom)/2*${ease(0.22)}` }
-  else if (fx === 'punchflash') { z = `1+0.2*${ease(0.3)}+0.05*${t}/${num(D)}`; flash = 0.55 }
-  else if (fx === 'dropflash') { z = `1+0.35*${ease(0.5)}+0.06*${t}/${num(D)}`; flash = 0.9 }
-  return { z, x, flash }
+/**
+ * Zoom + transiciones de un clip como expresiones de zoompan/eq. Misma fórmula que fxAt del core (packages/core/src/fx.ts):
+ * la transición del corte se reparte mitad en la salida del clip anterior y mitad en la entrada de este.
+ */
+function fxExpr(clip: Clip, next: Clip | undefined, D: number, fps: number) {
+  const t = `on/${fps}`, tn = `n/${fps}`        // zoompan cuenta fotogramas con "on"; eq con "n"
+  const ease = (u: string) => `pow(max(0,1-(${u})),2)`
+  const zs: string[] = [], ss: string[] = [], fs: string[] = []
+  const zm = clip.zoom
+  if (zm) {
+    if (zm.kind === 'push') zs.push(`${num(zm.amount)}*${t}/${num(D)}`)
+    else if (zm.kind === 'pull') zs.push(`${num(zm.amount)}*(1-${t}/${num(D)})`)
+    else zs.push(`${num(zm.amount)}*${ease(`${t}/${num(zm.duration ?? 0.35)}`)}+0.05*${t}/${num(D)}`)
+  }
+  const side = (tr: Transition | undefined, kind: 'in' | 'out') => {
+    if (!tr) return
+    const h = num(tr.duration / 2), k = num(tr.intensity)
+    const e = (tv: string) => ease(kind === 'in' ? `${tv}/${h}` : `(${num(D)}-${tv})/${h}`)
+    if (tr.kind === 'slide') { zs.push(`${num(0.22 * tr.intensity)}*${e(t)}`); ss.push(`${kind === 'in' ? 1 : -1}*${tr.dir ?? 1}*${e(t)}`) }
+    else if (tr.kind === 'flash') fs.push(`${num(0.9 * tr.intensity)}*${e(tn)}`)
+    else fs.push(`-${k}*${e(tn)}`)
+  }
+  side(clip.transition, 'in'); side(next?.transition, 'out')
+  return {
+    z: zs.length ? `1+${zs.join('+')}` : '1',
+    x: 'iw/2-(iw/zoom/2)' + (ss.length ? `+(iw-iw/zoom)/2*(${ss.join('+')})` : ''),
+    flash: fs.length ? `clip(${fs.join('+')},-1,1)` : '',
+  }
 }
 
 export async function buildExport(project: Project, root: string, opts: ExportOpts) {
@@ -76,9 +93,9 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   for (const [i, pl] of placed.entries()) {
     const c = pl.clip, D = pl.end - pl.start, file = await srcOf(c.assetId)
     const k = addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, file)
-    const fx = fxExpr(c.fx, c.fxDir ?? 1, D, fps, i === placed.length - 1)
+    const fx = fxExpr(c, placed[i + 1]?.clip, D, fps)
     if (!ts('main').hidden) {
-    const eq = fx.flash ? `,eq=brightness='${fx.flash}*pow(max(0,1-n/${fps}/0.15),2)':eval=frame` : ''
+    const eq = fx.flash ? `,eq=brightness='${fx.flash}':eval=frame` : ''
     vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
       + `zoompan=z='${fx.z}':x='${fx.x}':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=${fps}${eq},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v${i}]`)
     vlabels.push(`[v${i}]`)
@@ -130,7 +147,7 @@ export async function startExport(slug: string, projectFile: string, outDir: str
   jobs.set(job.id, job)
   void (async () => {
     try {
-      const raw = JSON.parse(await fsp.readFile(projectFile, 'utf8')).project as Project
+      const raw = parseProject(await fsp.readFile(projectFile, 'utf8'))     // también abre y migra proyectos de versiones anteriores
       const b = await buildExport(raw, root, opts)
       await fsp.mkdir(outDir, { recursive: true })
       const safe = (opts.nombre ?? slug).normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || slug

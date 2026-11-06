@@ -8,7 +8,22 @@ export interface ProjectFile { format: 'gojaguar'; version: number; savedAt: str
  * Migraciones: la clave N convierte un proyecto de la versión N a la N+1.
  * Al subir PROJECT_VERSION, añade aquí la función correspondiente.
  */
-export const migrations: Record<number, (p: any) => any> = {}
+export const migrations: Record<number, (p: any) => any> = {
+  // v1 → v2: el "efecto" único de cada clip se separa en zoom (efecto) y transición (en el corte)
+  1: (p: any) => {
+    const last = (p.clips ?? []).length - 1
+    ;(p.clips ?? []).forEach((c: any, i: number) => {
+      const fx = c.fx, dir = c.fxDir === -1 ? -1 : 1
+      if (fx === 'push') c.zoom = { kind: 'push', amount: i === last ? 0.22 : 0.14 }
+      else if (fx === 'punch') c.zoom = { kind: 'punch', amount: 0.22, duration: 0.35 }
+      else if (fx === 'slide') c.transition = { kind: 'slide', duration: 0.44, intensity: 1, dir }
+      else if (fx === 'punchflash') { c.zoom = { kind: 'punch', amount: 0.2, duration: 0.3 }; c.transition = { kind: 'flash', duration: 0.3, intensity: 0.6 } }
+      else if (fx === 'dropflash') { c.zoom = { kind: 'punch', amount: 0.35, duration: 0.5 }; c.transition = { kind: 'flash', duration: 0.3, intensity: 1 } }
+      delete c.fx; delete c.fxDir
+    })
+    return p
+  },
+}
 
 /** Aplica las migraciones from → to (la tabla se puede inyectar para probar el mecanismo). */
 export function migrateProject(project: any, from: number, to: number, table = migrations): any {

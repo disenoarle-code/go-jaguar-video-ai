@@ -1,8 +1,8 @@
 import {
   Store, describe, duration, exec, execBatch, layout, parseProject, serialize,
-  CLIP_FX, type AssetInfo, type ClipFx, type Cmd, type Project, type TextLayer,
+  TRANSITION_DEFAULTS, TRANSITION_KINDS, ZOOM_DEFAULTS, ZOOM_KINDS, type AssetInfo, type Cmd, type TransitionKind, type ZoomKind, type Project, type TextLayer,
 } from '@gojaguar/core'
-import { FX_INFO, TRANSITIONS } from './fxinfo'
+import { TRANSITION_INFO, ZOOM_INFO } from './fxinfo'
 import { H, W } from './constants'
 import { ico } from './icons'
 import { runBench } from './bench'
@@ -220,27 +220,27 @@ export async function bootEditor(slug: string) {
     closeCutMenu()
     const clip = store.project.clips.find(c => c.id === clipId); if (!clip) return
     const m = document.createElement('div'); m.className = 'cutmenu'
-    const opts: { label: string; fx: ClipFx | null; dir?: 1 | -1 }[] = [
-      { label: 'Deslizar · entra desde la derecha', fx: 'slide', dir: -1 },
-      { label: 'Deslizar · entra desde la izquierda', fx: 'slide', dir: 1 },
-      { label: 'Golpe + destello', fx: 'punchflash' },
-      { label: 'Entrada fuerte', fx: 'dropflash' },
+    const opts: { label: string; kind: TransitionKind; dir?: 1 | -1 }[] = [
+      { label: 'Deslizar · entra desde la derecha', kind: 'slide', dir: -1 },
+      { label: 'Deslizar · entra desde la izquierda', kind: 'slide', dir: 1 },
+      { label: 'Destello', kind: 'flash' },
+      { label: 'Fundido a negro', kind: 'dip' },
     ]
-    const has = !!clip.fx && TRANSITIONS.has(clip.fx)
+    const cur = clip.transition
     m.innerHTML = `<h4>Transición en el corte</h4>`
     for (const o of opts) {
       const b = document.createElement('button'); b.textContent = o.label
-      if (clip.fx === o.fx && (o.dir === undefined || clip.fxDir === o.dir)) b.classList.add('on')
+      if (cur?.kind === o.kind && (o.dir === undefined || cur.dir === o.dir)) b.classList.add('on')
       b.onclick = () => {
-        exec(store, { op: 'set_effect', clip: clipId, effect: o.fx, dir: o.dir })
+        exec(store, { op: 'set_transition', clip: clipId, transition: { kind: o.kind, ...TRANSITION_DEFAULTS[o.kind], dir: o.dir } })
         closeCutMenu()
         const pl = layout(store.project).find(x => x.clip.id === clipId)   // muestra el resultado un instante
-        if (pl) { player.seek(Math.max(0, pl.start - 0.5)); void player.play(); setTimeout(() => { if (player.playing && player.time() < pl.start + 1.2) player.pause() }, 1700) }
+        if (pl) { player.seek(Math.max(0, pl.start - 0.6)); void player.play(); setTimeout(() => { if (player.playing && player.time() < pl.start + 1.2) player.pause() }, 1800) }
       }
       m.append(b)
     }
-    if (has) { const b = document.createElement('button'); b.textContent = 'Quitar transición'; b.className = 'danger'; b.onclick = () => { exec(store, { op: 'set_effect', clip: clipId, effect: null }); closeCutMenu() }; m.append(b) }
-    if (clip.fx && !TRANSITIONS.has(clip.fx)) m.insertAdjacentHTML('beforeend', '<p class="hint">Reemplaza el zoom de este clip.</p>')
+    if (cur) { const b = document.createElement('button'); b.textContent = 'Quitar transición'; b.className = 'danger'; b.onclick = () => { exec(store, { op: 'set_transition', clip: clipId, transition: null }); closeCutMenu() }; m.append(b) }
+    m.insertAdjacentHTML('beforeend', '<p class="hint">Duración e intensidad: selecciona uno de los dos clips.</p>')
     document.body.append(m); cutMenu = m
     const w = m.offsetWidth, h = m.offsetHeight
     m.style.left = Math.min(Math.max(8, cx - w / 2), window.innerWidth - w - 8) + 'px'
@@ -271,7 +271,8 @@ export async function bootEditor(slug: string) {
     const clip = s?.type === 'clip' ? p.clips.find(c => c.id === s.id) : undefined
     const lay = s?.type === 'layer' ? p.layers.find(o => o.id === s.id) : undefined
     const ov = s?.type === 'overlay' ? p.overlays?.find(o => o.id === s.id) : undefined
-    const key = s ? `${s.type}:${s.id}:${clip?.fx ?? ''}:${clip?.fxDir ?? ''}` : 'none'
+    const nextClip = clip ? p.clips[p.clips.indexOf(clip) + 1] : undefined
+    const key = s ? `${s.type}:${s.id}:${clip?.zoom?.kind ?? ''}:${clip?.transition?.kind ?? ''}:${clip?.transition?.dir ?? ''}:${nextClip?.transition?.kind ?? ''}:${nextClip?.transition?.dir ?? ''}` : 'none'
     if (key === lastKey && key !== 'none') return
     if (lastKey.startsWith('overlay') && key.startsWith('overlay') && insp.contains(document.activeElement)) return   // no pisar lo que se está escribiendo
     if (key === 'none' && lastKey === 'none') { updatePool(); return }
@@ -281,25 +282,53 @@ export async function bootEditor(slug: string) {
       const id = clip.id
       const C = (pr: Project) => pr.clips.find(c => c.id === id)!
       insp.insertAdjacentHTML('beforeend', `<h3>Clip ${id}</h3>`)
-      // efecto del clip (zoom, deslizar, destello…)
-      const fxSel = document.createElement('select')
-      const opt = (f: ClipFx) => `<option value="${f}">${FX_INFO[f].name}</option>`
-      fxSel.innerHTML = '<option value="">Ninguno</option>'
-        + `<optgroup label="Zoom del clip">${CLIP_FX.filter(f => !TRANSITIONS.has(f)).map(opt).join('')}</optgroup>`
-        + `<optgroup label="Transición (en el corte, al entrar este clip)">${CLIP_FX.filter(f => TRANSITIONS.has(f)).map(opt).join('')}</optgroup>`
-      fxSel.value = clip.fx ?? ''
-      fxSel.onchange = () => { exec(store, { op: 'set_effect', clip: id, effect: (fxSel.value || null) as ClipFx | null, dir: clip.fxDir ?? 1 }) }
-      field('Zoom o transición', fxSel)
-      if (clip.fx) insp.insertAdjacentHTML('beforeend', `<p class="hint" style="margin:6px 0 0">${FX_INFO[clip.fx].hint}</p>`)
-      if (clip.fx === 'slide') {
-        const dSel = document.createElement('select')
-        dSel.innerHTML = '<option value="-1">Entra desde la derecha</option><option value="1">Entra desde la izquierda</option>'
-        dSel.value = String(clip.fxDir ?? 1)
-        dSel.onchange = () => { exec(store, { op: 'set_effect', clip: id, effect: 'slide', dir: Number(dSel.value) as 1 | -1 }) }
-        field('Dirección', dSel)
+      const idx = p.clips.indexOf(clip), prevClip = p.clips[idx - 1]
+      const section = (title: string) => insp.insertAdjacentHTML('beforeend', `<h3 class="sec">${title}</h3>`)
+      const select = (opts: [string, string][], value: string, onchange: (v: string) => void) => {
+        const el = document.createElement('select'); el.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join(''); el.value = value; el.onchange = () => onchange(el.value); return el
       }
-      const see = document.createElement('button'); see.textContent = 'Ver este clip'; see.style.marginTop = '10px'
-      see.onclick = () => { const pl = layout(store.project).find(x => x.clip.id === id); if (pl) { player.seek(pl.start); void player.play() } }
+      /** Deslizador con el valor a la vista (se edita en vivo y es UNA entrada de deshacer). */
+      const slider = (label: string, value: number, min: number, max: number, step: number, fmt: (n: number) => string, set: (pr: Project, n: number) => void) => {
+        const l = document.createElement('label'); l.innerHTML = `${label} <span class="val">${fmt(value)}</span>`
+        const el = input('range', value, (pr, v) => set(pr, parseFloat(v)), { min: String(min), max: String(max), step: String(step) })
+        el.addEventListener('input', () => { l.querySelector('.val')!.textContent = fmt(parseFloat(el.value)) })
+        insp.append(l, el)
+      }
+      const pct = (n: number) => `${Math.round(n * 100)} %`, sec = (n: number) => `${n.toFixed(2).replace(/\.?0+$/, '')} s`
+
+      // ---- ZOOM (efecto del clip) ----
+      section('Zoom')
+      field('Efecto', select([['', 'Ninguno'], ...ZOOM_KINDS.map((k): [string, string] => [k, ZOOM_INFO[k].name])], clip.zoom?.kind ?? '', v =>
+        exec(store, { op: 'set_zoom', clip: id, zoom: v ? { kind: v as ZoomKind, ...ZOOM_DEFAULTS[v as ZoomKind] } : null }))) 
+      if (clip.zoom) {
+        insp.insertAdjacentHTML('beforeend', `<p class="hint">${ZOOM_INFO[clip.zoom.kind].hint}</p>`)
+        slider('Intensidad', clip.zoom.amount, 0.02, 0.8, 0.01, pct, (pr, n) => { const z = C(pr).zoom; if (z) z.amount = n })
+        if (clip.zoom.kind === 'punch') slider('Duración del golpe', clip.zoom.duration ?? 0.35, 0.05, 1.5, 0.05, sec, (pr, n) => { const z = C(pr).zoom; if (z) z.duration = n })
+      }
+
+      // ---- TRANSICIONES: la del corte es UNA sola; aquí se ve como entrada de este clip y como salida del anterior ----
+      const transitionSection = (title: string, owner: typeof clip | undefined, note: string) => {
+        section(title)
+        if (!owner) { insp.insertAdjacentHTML('beforeend', `<p class="hint">${note}</p>`); return }
+        const oid = owner.id, tr = owner.transition
+        const O = (pr: Project) => pr.clips.find(c => c.id === oid)!
+        field('Tipo', select([['', 'Ninguna'], ...TRANSITION_KINDS.map((k): [string, string] => [k, TRANSITION_INFO[k].name])], tr?.kind ?? '', v =>
+          exec(store, { op: 'set_transition', clip: oid, transition: v ? { kind: v as TransitionKind, ...TRANSITION_DEFAULTS[v as TransitionKind], dir: tr?.dir ?? 1 } : null })))
+        if (tr) {
+          insp.insertAdjacentHTML('beforeend', `<p class="hint">${TRANSITION_INFO[tr.kind].hint}</p>`)
+          slider('Duración total', tr.duration, 0.1, 2, 0.05, sec, (pr, n) => { const t = O(pr).transition; if (t) t.duration = n })
+          slider('Intensidad', tr.intensity, 0.1, 1.5, 0.05, pct, (pr, n) => { const t = O(pr).transition; if (t) t.intensity = n })
+          if (tr.kind === 'slide') field('Dirección', select([['-1', 'Entra desde la derecha'], ['1', 'Entra desde la izquierda']], String(tr.dir ?? 1), v =>
+            exec(store, { op: 'set_transition', clip: oid, transition: { ...tr, dir: Number(v) as 1 | -1 } })))
+        }
+        insp.insertAdjacentHTML('beforeend', `<p class="hint dimmer">${note}</p>`)
+      }
+      transitionSection('Transición de entrada', idx > 0 ? clip : undefined, idx > 0 ? `Es la misma que la salida del clip ${prevClip.id}.` : 'Es el primer clip: no hay corte antes.')
+      transitionSection('Transición de salida', nextClip, nextClip ? `Es la misma que la entrada del clip ${nextClip.id}.` : 'Es el último clip: no hay corte después.')
+
+      section('Clip')
+      const see = document.createElement('button'); see.textContent = 'Ver este clip'; see.style.marginBottom = '4px'
+      see.onclick = () => { const pl = layout(store.project).find(x => x.clip.id === id); if (pl) { player.seek(Math.max(0, pl.start - 0.5)); void player.play() } }
       insp.append(see)
       field('Velocidad (×)', input('number', clip.speed, (pr, v) => { const n = parseFloat(v); if (n > 0) C(pr).speed = Math.min(Math.max(n, 0.1), 8) }, { step: '0.1', min: '0.1', max: '8' }))
       field('Volumen', input('range', clip.volume, (pr, v) => { C(pr).volume = parseFloat(v) }, { min: '0', max: '2', step: '0.05' }))

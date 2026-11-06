@@ -1,5 +1,5 @@
 /** Versión actual del formato de archivo .gojaguar. Súbela al cambiar el esquema y añade una migración. */
-export const PROJECT_VERSION = 1
+export const PROJECT_VERSION = 2
 
 export interface Format { width: number; height: number; fps: number }
 
@@ -15,9 +15,18 @@ export interface AssetInfo {
   height: number
 }
 
-/** Efecto de movimiento/transición de un clip (ver fx.ts). */
-export type ClipFx = 'push' | 'punch' | 'slide' | 'punchflash' | 'dropflash'
-export const CLIP_FX: ClipFx[] = ['push', 'punch', 'slide', 'punchflash', 'dropflash']
+/** Zoom: un EFECTO del clip. `push` se acerca, `pull` se aleja (durante todo el clip), `punch` entra con un golpe de zoom y se asienta. */
+export type ZoomKind = 'push' | 'pull' | 'punch'
+export const ZOOM_KINDS: ZoomKind[] = ['push', 'pull', 'punch']
+export interface ZoomFx { kind: ZoomKind; amount: number; duration?: number }   // amount: cuánto zoom (0,14 = 14 %); duration: solo punch
+
+/**
+ * Transición: vive en el CORTE entre dos clips. Se guarda en el clip que entra, pero es una sola:
+ * la mitad de su duración ocurre al final del clip anterior (salida) y la otra mitad al inicio del siguiente (entrada).
+ */
+export type TransitionKind = 'slide' | 'flash' | 'dip'
+export const TRANSITION_KINDS: TransitionKind[] = ['slide', 'flash', 'dip']
+export interface Transition { kind: TransitionKind; duration: number; intensity: number; dir?: 1 | -1 }
 
 /** Tramo de un archivo fuente en la pista principal (magnética: sin huecos). */
 export interface Clip {
@@ -25,7 +34,8 @@ export interface Clip {
   assetId: string
   srcIn: number; srcOut: number   // segundos del archivo fuente
   speed: number; volume: number
-  fx?: ClipFx; fxDir?: 1 | -1
+  zoom?: ZoomFx
+  transition?: Transition        // la del corte ANTES de este clip (entrada de este y salida del anterior)
 }
 
 /** Pista de música: un archivo de audio que suena desde el inicio de la línea de tiempo. */

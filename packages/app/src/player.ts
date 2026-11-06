@@ -239,7 +239,8 @@ export class Player {
   private draw(t: number) {
     const tracks = this.store.project.tracks ?? {}
     const loc = tracks.main?.hidden ? null : locate(this.store.project, t)
-    this.fx = loc ? fxAt(loc.placed.clip.fx, loc.placed.clip.fxDir, t - loc.placed.start, loc.placed.end - loc.placed.start, loc.placed.clip === this.store.project.clips[this.store.project.clips.length - 1]) : { zoom: 1, shift: 0, flash: 0 }
+    const cl = this.store.project.clips
+    this.fx = loc ? fxAt(loc.placed.clip, cl[cl.indexOf(loc.placed.clip) + 1], t - loc.placed.start, loc.placed.end - loc.placed.start) : { zoom: 1, shift: 0, flash: 0 }
     if (loc) {
       const asset = this.assets.get(loc.placed.clip.assetId)
       if (asset) {
@@ -258,7 +259,7 @@ export class Player {
     }
     this.ctx.drawImage(this.layer, 0, 0)
     this.drawOverlayVideos(t)
-    if (this.fx.flash > 0.005) { this.ctx.fillStyle = `rgba(255,255,255,${this.fx.flash})`; this.ctx.fillRect(0, 0, W, H) }
+    if (Math.abs(this.fx.flash) > 0.005) { this.ctx.fillStyle = this.fx.flash > 0 ? `rgba(255,255,255,${this.fx.flash})` : `rgba(0,0,0,${-this.fx.flash})`; this.ctx.fillRect(0, 0, W, H) }   // destello blanco o fundido a negro
     const sel = this.store.selection
     const tr = this.store.project.tracks
     const proj = tr?.subtitle?.hidden || tr?.graphic?.hidden ? { ...this.store.project, layers: this.store.project.layers.filter(l => !tr?.[l.type]?.hidden) } : this.store.project
