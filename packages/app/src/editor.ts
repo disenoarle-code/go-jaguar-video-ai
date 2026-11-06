@@ -89,7 +89,7 @@ export async function bootEditor(slug: string) {
 
   function deleteSelected() {
     const s = sel(); if (!s) return
-    exec(store, s.type === 'clip' ? { op: 'delete_clip', id: s.id } : { op: 'delete_layer', id: s.id })
+    exec(store, s.type === 'clip' ? { op: 'delete_clip', id: s.id } : s.type === 'overlay' ? { op: 'delete_overlay', id: s.id } : { op: 'delete_layer', id: s.id })
     store.select(null)
   }
 
@@ -136,6 +136,31 @@ export async function bootEditor(slug: string) {
     player.dirty = true
   })
   window.addEventListener('mouseup', () => { if (pdrag) { store.endTx(); pdrag = null } })
+
+  // --- panel Material: archivos del proyecto para poner sobre la línea de tiempo (clic = en el cabezal, o arrastrar) ---
+  let bin: HTMLElement | null = null
+  const closeBin = () => { bin?.remove(); bin = null }
+  $('addmat').onclick = e => {
+    e.stopPropagation()
+    if (bin) { closeBin(); return }
+    const m = document.createElement('div'); m.className = 'cutmenu bin'
+    m.innerHTML = '<h4>Material · clic para agregar en el cabezal, o arrástralo a una pista</h4>'
+    const assets = store.project.assets
+    if (!assets.length) m.insertAdjacentHTML('beforeend', '<p class="hint">Este proyecto aún no tiene archivos preparados.</p>')
+    for (const a of assets) {
+      const b = document.createElement('button'); b.draggable = true; b.className = 'binitem'
+      b.innerHTML = `<span>${a.kind === 'audio' ? '♪' : '▶'}</span><b>${a.name.replace(/[<&]/g, '')}</b><i>${tc(a.duration)}</i>`
+      b.onclick = () => { exec(store, { op: 'add_overlay', asset: a.id, start: player.playhead }); const o = store.project.overlays?.at(-1); if (o) store.select({ type: 'overlay', id: o.id }) }
+      b.ondragstart = ev => { ev.dataTransfer!.setData('text/gojaguar-asset', a.id); ev.dataTransfer!.effectAllowed = 'copy' }
+      m.append(b)
+    }
+    document.body.append(m); bin = m
+    const r = $('addmat').getBoundingClientRect(), w = m.offsetWidth
+    m.style.left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8) + 'px'
+    m.style.top = Math.max(8, r.top - m.offsetHeight - 8) + 'px'
+  }
+  window.addEventListener('mousedown', e => { if (bin && !bin.contains(e.target as Node) && e.target !== $('addmat')) closeBin() }, true)
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') closeBin() })
 
   // --- menú de transición al tocar un corte entre dos clips ---------------------------------
   let cutMenu: HTMLElement | null = null
@@ -194,8 +219,10 @@ export async function bootEditor(slug: string) {
     const p = store.project
     const clip = s?.type === 'clip' ? p.clips.find(c => c.id === s.id) : undefined
     const lay = s?.type === 'layer' ? p.layers.find(o => o.id === s.id) : undefined
+    const ov = s?.type === 'overlay' ? p.overlays?.find(o => o.id === s.id) : undefined
     const key = s ? `${s.type}:${s.id}:${clip?.fx ?? ''}:${clip?.fxDir ?? ''}` : 'none'
     if (key === lastKey && key !== 'none') return
+    if (lastKey.startsWith('overlay') && key.startsWith('overlay') && insp.contains(document.activeElement)) return   // no pisar lo que se está escribiendo
     if (key === 'none' && lastKey === 'none') { const pre = insp.querySelector('pre'); if (pre) pre.textContent = describe(store); return }
     lastKey = key
     insp.innerHTML = ''
@@ -226,6 +253,20 @@ export async function bootEditor(slug: string) {
       field('Velocidad (×)', input('number', clip.speed, (pr, v) => { const n = parseFloat(v); if (n > 0) C(pr).speed = Math.min(Math.max(n, 0.1), 8) }, { step: '0.1', min: '0.1', max: '8' }))
       field('Volumen', input('range', clip.volume, (pr, v) => { C(pr).volume = parseFloat(v) }, { min: '0', max: '2', step: '0.05' }))
       const b = document.createElement('button'); b.textContent = 'Borrar clip (ripple)'; b.style.marginTop = '14px'; b.onclick = deleteSelected
+      insp.append(b)
+    } else if (ov) {
+      const id = ov.id, O = (pr: Project) => pr.overlays!.find(o => o.id === id)!
+      const asset = store.asset(ov.assetId)
+      insp.insertAdjacentHTML('beforeend', `<h3>${ov.kind === 'video' ? 'Video superpuesto' : 'Audio'} · pista ${ov.track + (ov.kind === 'video' ? 1 : 0)}</h3><p class="hint" style="margin:0">${(asset?.name ?? '').replace(/[<&]/g, '')}</p>`)
+      field('Volumen', input('range', ov.volume, (pr, v) => { O(pr).volume = parseFloat(v) }, { min: '0', max: '2', step: '0.05' }))
+      field('Inicio (s)', input('number', ov.start.toFixed(2), (pr, v) => { O(pr).start = Math.max(0, parseFloat(v) || 0) }, { step: '0.1', min: '0' }))
+      if (ov.kind === 'video') {
+        field('Tamaño', input('range', ov.transform.scale, (pr, v) => { O(pr).transform.scale = parseFloat(v) }, { min: '0.1', max: '2', step: '0.01' }))
+        field('Posición horizontal', input('range', ov.transform.x, (pr, v) => { O(pr).transform.x = parseFloat(v) }, { min: '0', max: '1', step: '0.01' }))
+        field('Posición vertical', input('range', ov.transform.y, (pr, v) => { O(pr).transform.y = parseFloat(v) }, { min: '0', max: '1', step: '0.01' }))
+        field('Opacidad', input('range', ov.transform.opacity, (pr, v) => { O(pr).transform.opacity = parseFloat(v) }, { min: '0', max: '1', step: '0.05' }))
+      }
+      const b = document.createElement('button'); b.textContent = 'Quitar de la línea de tiempo'; b.style.marginTop = '14px'; b.onclick = deleteSelected
       insp.append(b)
     } else if (lay && (lay.type === 'subtitle' || lay.type === 'graphic')) {
       const id = lay.id

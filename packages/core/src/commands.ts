@@ -1,4 +1,4 @@
-import { MIN_DUR, clipDur, duration, layout } from './timeline'
+import { MIN_DUR, clipDur, duration, freeTrack, layout, overlayDur } from './timeline'
 import type { Store } from './store'
 import {
   DEFAULT_TRANSFORM, isTextLayer,
@@ -7,6 +7,7 @@ import {
 
 /** Capa nueva sin id; el transform puede ser parcial. */
 export type NewLayer = (Layer extends infer L ? L extends Layer ? Omit<L, 'id' | 'transform'> & { transform?: Partial<Transform> } : never : never)
+export type OverlayPatch = { start?: number; track?: number; srcIn?: number; srcOut?: number; speed?: number; volume?: number; transform?: Partial<Transform> }
 export type LayerPatch = { transform?: Partial<Transform>; [k: string]: unknown }
 
 /**
@@ -16,6 +17,9 @@ export type LayerPatch = { transform?: Partial<Transform>; [k: string]: unknown 
 export type Cmd =
   | { op: 'import_asset'; asset: AssetInfo }
   | { op: 'add_clip'; asset: string; src_in?: number; src_out?: number; effect?: ClipFx; dir?: 1 | -1 }
+  | { op: 'add_overlay'; asset: string; start: number; track?: number; src_in?: number; src_out?: number; x?: number; y?: number; scale?: number; volume?: number }
+  | { op: 'update_overlay'; id: string; patch: OverlayPatch }
+  | { op: 'delete_overlay'; id: string }
   | { op: 'set_effect'; clip: string; effect: ClipFx | null; dir?: 1 | -1 }
   | { op: 'set_music'; asset: string; src_in?: number; volume?: number; fade_out?: number }
   | { op: 'clear_music' }
@@ -67,6 +71,39 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       const c: Clip = { id: store.newId('c'), assetId: a.id, srcIn, srcOut, speed: 1, volume: 1, ...(cmd.effect ? { fx: cmd.effect, fxDir: cmd.dir } : {}) }
       p.clips.push(c)
       return `${c.id} añadido (${a.name} ${f2(srcIn)}–${f2(srcOut)})`
+    }
+    case 'add_overlay': {
+      const a = p.assets.find(x => x.id === cmd.asset)
+      if (!a) return 'asset no encontrado'
+      const kind: 'audio' | 'video' = a.kind === 'audio' ? 'audio' : 'video'
+      const srcIn = clamp(cmd.src_in ?? 0, 0, a.duration)
+      const srcOut = clamp(cmd.src_out ?? a.duration, srcIn, a.duration)
+      if (srcOut - srcIn < MIN_DUR) return 'tramo demasiado corto'
+      const start = Math.max(cmd.start, 0)
+      const track = freeTrack(p, kind, start, start + (srcOut - srcIn), cmd.track ?? 1)
+      const o = { id: store.newId('o'), assetId: a.id, kind, track, start, srcIn, srcOut, speed: 1, volume: clamp(cmd.volume ?? 1, 0, 4),
+        transform: { ...DEFAULT_TRANSFORM, x: cmd.x ?? 0.5, y: cmd.y ?? 0.5, scale: cmd.scale ?? (kind === 'video' ? 0.5 : 1) } }
+      ;(p.overlays ??= []).push(o)
+      return `${o.id} ${kind} en pista ${track} desde ${f2(start)}s (${a.name})`
+    }
+    case 'update_overlay': {
+      const o = p.overlays?.find(x => x.id === cmd.id)
+      if (!o) return 'clip superpuesto no encontrado'
+      const { transform, ...rest } = cmd.patch
+      const a = p.assets.find(x => x.id === o.assetId)
+      Object.assign(o, rest)
+      if (a) { o.srcIn = clamp(o.srcIn, 0, a.duration); o.srcOut = clamp(o.srcOut, o.srcIn + MIN_DUR * o.speed, a.duration) }
+      o.start = Math.max(o.start, 0); o.speed = clamp(o.speed, 0.1, 8); o.volume = clamp(o.volume, 0, 4)
+      if (transform) o.transform = { ...o.transform, ...transform }
+      if (cmd.patch.start !== undefined || cmd.patch.track !== undefined || cmd.patch.srcIn !== undefined || cmd.patch.srcOut !== undefined || cmd.patch.speed !== undefined)
+        o.track = freeTrack(p, o.kind, o.start, o.start + overlayDur(o), cmd.patch.track ?? o.track, o.id)   // si pisa a otro, se abre otra pista
+      return `${o.id} actualizado (pista ${o.track}, ${f2(o.start)}s)`
+    }
+    case 'delete_overlay': {
+      const n = p.overlays?.length ?? 0
+      p.overlays = (p.overlays ?? []).filter(x => x.id !== cmd.id)
+      if (store.selection?.id === cmd.id) store.selection = null
+      return n === p.overlays.length ? 'clip superpuesto no encontrado' : `${cmd.id} eliminado`
     }
     case 'set_effect': {
       const c = p.clips.find(x => x.id === cmd.clip)
@@ -215,7 +252,7 @@ const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(
 export function describe(store: Store): string {
   const p = store.project
   const placed = layout(p)
-  const lines = [`"${p.name}" ${p.format.width}x${p.format.height}@${p.format.fps} · ${tc(duration(p))} · ${p.clips.length} clips · ${p.layers.length} capas${p.music ? ` · música ${store.asset(p.music.assetId)?.name ?? p.music.assetId} desde ${f2(p.music.srcIn)}s` : ''}`]
+  const lines = [`"${p.name}" ${p.format.width}x${p.format.height}@${p.format.fps} · ${tc(duration(p))} · ${p.clips.length} clips · ${p.layers.length} capas${p.overlays?.length ? ` · ${p.overlays.length} superpuestos` : ''}${p.music ? ` · música ${store.asset(p.music.assetId)?.name ?? p.music.assetId} desde ${f2(p.music.srcIn)}s` : ''}`]
   let i = 0
   while (i < placed.length) {
     let j = i
@@ -232,6 +269,8 @@ export function describe(store: Store): string {
       : `${first.clip.id}…${last.clip.id} [${tc(first.start)}–${tc(last.end)}] ${n} clips ${a?.name ?? first.clip.assetId} x${first.clip.speed} vol${first.clip.volume}`)
     i = j + 1
   }
+  for (const o of [...(p.overlays ?? [])].sort((a, b) => a.kind.localeCompare(b.kind) || a.track - b.track || a.start - b.start))
+    lines.push(`${o.id} ${o.kind === 'video' ? 'video' : 'audio'} pista ${o.track} [${tc(o.start)}–${tc(o.start + overlayDur(o))}] ${store.asset(o.assetId)?.name ?? o.assetId} src ${f2(o.srcIn)}–${f2(o.srcOut)} vol${o.volume}${o.kind === 'video' ? ` @(${f2(o.transform.x)},${f2(o.transform.y)}) ×${f2(o.transform.scale)}` : ''}`)
   for (const l of [...p.layers].sort((a, b) => a.start - b.start)) {
     const t = l.transform
     lines.push(`${l.id} ${l.type} [${tc(l.start)}–${tc(l.end)}] ${isTextLayer(l) ? `"${l.text}" ` : ''}@(${f2(t.x)},${f2(t.y)})`)

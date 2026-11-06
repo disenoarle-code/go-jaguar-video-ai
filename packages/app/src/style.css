@@ -165,3 +165,9 @@ button.cardlink { display:flex; justify-content:flex-start; align-items:stretch;
 .cutmenu h4 { margin:0 0 2px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
 .cutmenu button { text-align:left; border-radius:8px; } .cutmenu button.on { border-color:var(--acc); color:var(--acc); }
 .cutmenu .hint { margin:2px 0 0; font-size:11px; color:var(--dim); }
+
+/* Panel Material del editor y altura de la línea de tiempo con varias pistas */
+#tl { max-height:46vh; overflow-y:auto; }
+.cutmenu.bin { max-height:50vh; overflow:auto; min-width:300px; }
+.binitem { display:grid; grid-template-columns:18px 1fr auto; gap:8px; align-items:center; text-align:left; }
+.binitem b { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .binitem i { font-style:normal; color:var(--dim); font-size:11px; }

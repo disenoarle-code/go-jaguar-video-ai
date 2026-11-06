@@ -62,6 +62,22 @@ export type LayerType = Layer['type']
 
 export const isTextLayer = (l: Layer): l is TextLayer => l.type === 'subtitle' || l.type === 'graphic'
 
+/**
+ * Clip superpuesto, colocado libremente en el tiempo (a diferencia de la pista principal, que es magnética).
+ * `track` 1, 2, 3… numera las pistas de su tipo: pistas de video por ENCIMA de la principal y pistas de audio extra.
+ * Si dos clips del mismo tipo se solapan en el tiempo, uno va a otra pista (se abre una nueva).
+ */
+export interface OverlayClip {
+  id: string
+  assetId: string
+  kind: 'video' | 'audio'
+  track: number
+  start: number                   // segundos en la línea de tiempo
+  srcIn: number; srcOut: number   // segundos del archivo fuente
+  speed: number; volume: number
+  transform: Transform            // posición/tamaño/opacidad (solo video)
+}
+
 export interface Project {
   version: number
   name: string
@@ -70,6 +86,7 @@ export interface Project {
   clips: Clip[]
   layers: Layer[]
   music?: Music
+  overlays?: OverlayClip[]
   nextId: number
 }
 

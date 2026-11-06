@@ -1,16 +1,17 @@
 import { PEAK_RATE, THUMB_H, THUMB_W } from './media'
 import { FX_INFO, TRANSITIONS } from './fxinfo'
 import type { Player } from './player'
-import { MIN_DUR, clipDur, duration, exec, isTextLayer, layout, type Placed, type Store, type TextLayer } from '@gojaguar/core'
+import { MIN_DUR, clipDur, duration, exec, freeTrack, isTextLayer, layout, overlayDur, overlayEnd, trackCount, type OverlayClip, type Placed, type Store, type TextLayer } from '@gojaguar/core'
 
 const LEFT = 78, RULER_H = 26
-const ROWS = {
+interface Row { y: number; h: number; label: string }
+/** Filas fijas; sus posiciones se recalculan en relayout() según cuántas pistas superpuestas haya. */
+const ROWS: Record<'subtitle' | 'graphic' | 'video' | 'music', Row> = {
   subtitle: { y: 30, h: 26, label: 'Subtítulos' },
   graphic: { y: 60, h: 26, label: 'Gráficos' },
   video: { y: 92, h: 88, label: 'Video' },
   music: { y: 186, h: 40, label: 'Música' },
-} as const
-export const TL_HEIGHT = 234
+}
 const EDGE = 7
 const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
 
@@ -18,6 +19,7 @@ type Drag =
   | { k: 'seek' }
   | { k: 'trim'; edge: 'in' | 'out'; id: string; x0: number; in0: number; out0: number; start0: number }
   | { k: 'clip'; id: string; x0: number; moved: boolean; target: number }
+  | { k: 'ovc'; id: string; mode: 'move' | 'l' | 'r'; x0: number; start0: number; in0: number; out0: number }
   | { k: 'ov'; id: string; mode: 'move' | 'l' | 'r'; x0: number; s0: number; e0: number; moved: boolean }
 
 export class Timeline {
@@ -28,6 +30,9 @@ export class Timeline {
   private w = 0
   private drag: Drag | null = null
   private hoverX: number | null = null
+  private vLanes: Row[] = []      // pistas de video superpuestas (índice 0 = pista 1)
+  private aLanes: Row[] = []      // pistas de audio extra
+  private height = 234
   private mouse = { x: 0, y: 0 }
   /** Corte al que el cabezal quedó "pegado" (imán), para dibujar la guía. */
   private snapAt: number | null = null
@@ -46,6 +51,8 @@ export class Timeline {
     canvas.addEventListener('mouseleave', () => { if (!this.drag) { this.hoverX = null; this.snapAt = null; this.hoverCut = null; player.hover = null; player.dirty = true; this.dirty = true } })
     canvas.addEventListener('dblclick', e => this.onDbl(e))
     canvas.addEventListener('wheel', e => this.onWheel(e), { passive: false })
+    canvas.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('text/gojaguar-asset')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } })
+    canvas.addEventListener('drop', e => this.onDropAsset(e))
     this.resize()
   }
 
@@ -53,9 +60,9 @@ export class Timeline {
     const dpr = window.devicePixelRatio || 1
     this.w = this.canvas.parentElement!.clientWidth
     this.canvas.style.width = this.w + 'px'
-    this.canvas.style.height = TL_HEIGHT + 'px'
+    this.canvas.style.height = this.height + 'px'
     this.canvas.width = Math.floor(this.w * dpr)
-    this.canvas.height = Math.floor(TL_HEIGHT * dpr)
+    this.canvas.height = Math.floor(this.height * dpr)
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     this.dirty = true
   }
@@ -85,9 +92,47 @@ export class Timeline {
   }
 
   // --- hit testing ----------------------------------------------------------
-  private rowAt(y: number): keyof typeof ROWS | 'ruler' | null {
+  /** Coloca las filas: textos, pistas de video superpuestas (la más alta arriba), video principal, música y pistas de audio. Siempre hay una pista vacía de más como destino. */
+  private relayout() {
+    const p = this.store.project
+    const nv = trackCount(p, 'video') + 1, na = trackCount(p, 'audio') + 1
+    let y = 30
+    ROWS.subtitle.y = y; y += 30
+    ROWS.graphic.y = y; y += 32
+    this.vLanes = []
+    for (let k = nv; k >= 1; k--) { this.vLanes[k - 1] = { y, h: 46, label: `Video ${k + 1}` }; y += 50 }
+    ROWS.video.y = y; y += ROWS.video.h + 6
+    ROWS.music.y = y; y += ROWS.music.h + 6
+    this.aLanes = []
+    for (let k = 1; k <= na; k++) { this.aLanes[k - 1] = { y, h: 36, label: `Audio ${k}` }; y += 40 }
+    const h = y + 4
+    if (h !== this.height) { this.height = h; this.resize() }
+  }
+
+  private rowAt(y: number): keyof typeof ROWS | 'ruler' | 'vlane' | 'alane' | null {
     if (y < RULER_H) return 'ruler'
     for (const k of Object.keys(ROWS) as (keyof typeof ROWS)[]) if (y >= ROWS[k].y && y < ROWS[k].y + ROWS[k].h) return k
+    if (this.vLanes.some(r => y >= r.y && y < r.y + r.h)) return 'vlane'
+    if (this.aLanes.some(r => y >= r.y && y < r.y + r.h)) return 'alane'
+    return null
+  }
+  /** Pista (1, 2…) que corresponde a la altura `y` para un tipo. Por encima/debajo de las pistas existentes devuelve la extrema. */
+  private laneAt(y: number, kind: 'video' | 'audio'): number | null {
+    const lanes = kind === 'video' ? this.vLanes : this.aLanes
+    if (!lanes.length) return null
+    for (let i = 0; i < lanes.length; i++) if (y >= lanes[i].y - 2 && y < lanes[i].y + lanes[i].h + 2) return i + 1
+    if (kind === 'video') return y < lanes[lanes.length - 1].y ? lanes.length : 1
+    return y > lanes[lanes.length - 1].y ? lanes.length : 1
+  }
+  /** Clip superpuesto bajo el mouse en su pista. */
+  private hitOverlayClip(x: number, y: number, kind: 'video' | 'audio'): { o: OverlayClip; zone: 'l' | 'r' | 'move' } | null {
+    const lanes = kind === 'video' ? this.vLanes : this.aLanes
+    for (const o of [...(this.store.project.overlays ?? [])].reverse()) {
+      const R = o.kind === kind ? lanes[o.track - 1] : null
+      if (!R || y < R.y || y >= R.y + R.h) continue
+      const x0 = this.t2x(o.start), x1 = this.t2x(overlayEnd(o))
+      if (x >= x0 && x <= x1) return { o, zone: x - x0 < EDGE ? 'l' : x1 - x < EDGE ? 'r' : 'move' }
+    }
     return null
   }
   private hitClip(x: number): { p: Placed; zone: 'in' | 'out' | 'body' } | null {
@@ -110,6 +155,7 @@ export class Timeline {
     const pts = [0, this.player.playhead]
     for (const p of layout(this.store.project)) pts.push(p.start, p.end)
     for (const o of this.store.project.layers) if (o.id !== ignoreId) pts.push(o.start, o.end)
+    for (const o of this.store.project.overlays ?? []) if (o.id !== ignoreId) pts.push(o.start, overlayEnd(o))
     const tol = 8 / this.pps
     let best = t, bd = tol
     for (const q of pts) if (Math.abs(q - t) < bd) { bd = Math.abs(q - t); best = q }
@@ -156,6 +202,15 @@ export class Timeline {
 
     if (row === 'music') { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
 
+    if (row === 'vlane' || row === 'alane') {
+      const h = this.hitOverlayClip(x, y, row === 'vlane' ? 'video' : 'audio')
+      if (!h) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
+      this.store.select({ type: 'overlay', id: h.o.id })
+      this.store.beginTx()
+      this.drag = { k: 'ovc', id: h.o.id, mode: h.zone, x0: x, start0: h.o.start, in0: h.o.srcIn, out0: h.o.srcOut }
+      return
+    }
+
     if (row === 'subtitle' || row === 'graphic') {
       const h = this.hitOverlay(x, row)
       if (!h) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
@@ -190,6 +245,31 @@ export class Timeline {
 
     this.dirty = true
     if (d.k === 'seek') { this.player.seek(this.magnet(Math.min(this.x2t(x), this.total()))); return }
+
+    if (d.k === 'ovc') {
+      const dt = (x - d.x0) / this.pps, y = this.mouse.y
+      const dur = this.store.asset(this.store.project.overlays?.find(q => q.id === d.id)?.assetId ?? '')?.duration ?? Infinity
+      this.store.live(pr => {
+        const o = pr.overlays!.find(q => q.id === d.id)!
+        if (d.mode === 'move') {
+          const len = overlayDur(o)
+          let st = Math.max(0, d.start0 + dt)
+          const sn = this.snap(st, d.id), en = this.snap(st + len, d.id)
+          st = sn !== st ? sn : en !== st + len ? en - len : st
+          o.start = Math.max(0, st)
+          o.track = freeTrack(pr, o.kind, o.start, o.start + len, this.laneAt(y, o.kind) ?? o.track, o.id)   // si pisa a otro, se abre otra pista
+        } else if (d.mode === 'l') {
+          let nin = Math.min(Math.max(d.in0 + dt * o.speed, 0), d.out0 - MIN_DUR * o.speed)
+          let delta = (nin - d.in0) / o.speed
+          if (d.start0 + delta < 0) { delta = -d.start0; nin = d.in0 + delta * o.speed }
+          o.srcIn = nin; o.start = d.start0 + delta
+        } else {
+          o.srcOut = Math.max(Math.min(d.out0 + dt * o.speed, dur), d.in0 + MIN_DUR * o.speed)
+        }
+        if (d.mode !== 'move') o.track = freeTrack(pr, o.kind, o.start, o.start + overlayDur(o), o.track, o.id)
+      })
+      return
+    }
 
     if (d.k === 'trim') {
       const dt = (x - d.x0) / this.pps
@@ -242,11 +322,24 @@ export class Timeline {
     this.drag = null
     this.snapAt = null
     this.player.override = null
-    if (d.k === 'trim' || d.k === 'ov') this.store.endTx()
+    if (d.k === 'trim' || d.k === 'ov' || d.k === 'ovc') this.store.endTx()
     if (d.k === 'clip' && d.moved) {
       if (d.target !== this.store.project.clips.findIndex(c => c.id === d.id)) exec(this.store, { op: 'move_clip', id: d.id, to_index: d.target })
     }
     this.player.dirty = true; this.dirty = true
+  }
+
+  /** Soltar un archivo del panel Material: se coloca donde se suelta; si cae en una pista de su tipo, ahí (o en la siguiente libre). */
+  private onDropAsset(e: DragEvent) {
+    const id = e.dataTransfer?.getData('text/gojaguar-asset'); if (!id) return
+    e.preventDefault()
+    const { x, y } = this.pos(e); const a = this.store.asset(id)
+    if (x < LEFT || !a) return
+    const kind: 'video' | 'audio' = a.kind === 'audio' ? 'audio' : 'video', row = this.rowAt(y)
+    const track = (row === 'vlane' && kind === 'video') || (row === 'alane' && kind === 'audio') ? this.laneAt(y, kind) ?? undefined : undefined
+    const t = this.magnet(this.x2t(x)); this.snapAt = null
+    exec(this.store, { op: 'add_overlay', asset: id, start: t, track })
+    const o = this.store.project.overlays?.at(-1); if (o) this.store.select({ type: 'overlay', id: o.id })
   }
 
   private onDbl(e: MouseEvent) {
@@ -279,16 +372,21 @@ export class Timeline {
       const h = this.hitOverlay(x, row)
       return h ? (h.zone === 'move' ? 'grab' : 'ew-resize') : 'cell'
     }
+    if (row === 'vlane' || row === 'alane') {
+      const h = this.hitOverlayClip(x, y, row === 'vlane' ? 'video' : 'audio')
+      return h ? (h.zone === 'move' ? 'grab' : 'ew-resize') : 'default'
+    }
     return 'default'
   }
 
   // --- dibujo -----------------------------------------------------------------
   draw() {
     this.dirty = false
+    this.relayout()
     const c = this.ctx, w = this.w
     const p = this.store.project
-    c.clearRect(0, 0, w, TL_HEIGHT)
-    c.fillStyle = '#191917'; c.fillRect(0, 0, w, TL_HEIGHT)
+    c.clearRect(0, 0, w, this.height)
+    c.fillStyle = '#191917'; c.fillRect(0, 0, w, this.height)
 
     // seguir el playhead durante la reproducción
     if (this.player.playing) {
@@ -299,6 +397,7 @@ export class Timeline {
     for (const k of Object.keys(ROWS) as (keyof typeof ROWS)[]) {
       c.fillStyle = '#232321'; c.fillRect(LEFT, ROWS[k].y, w - LEFT, ROWS[k].h)
     }
+    for (const r of [...this.vLanes, ...this.aLanes]) { c.fillStyle = '#212120'; c.fillRect(LEFT, r.y, w - LEFT, r.h) }
     this.drawRuler()
 
     const placed = layout(p)
@@ -308,6 +407,7 @@ export class Timeline {
     for (const o of p.layers) if (isTextLayer(o)) this.drawOverlay(o)
     this.drawTransitions(placed)
     this.drawMusic()
+    this.drawOverlayClips()
 
     // indicador de destino al reordenar
     if (dragging) {
@@ -325,22 +425,23 @@ export class Timeline {
     // línea de hover (scrub)
     if (this.hoverX !== null && !this.drag && !this.player.playing) {
       c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = 1
-      c.beginPath(); c.moveTo(this.hoverX + .5, RULER_H - 6); c.lineTo(this.hoverX + .5, TL_HEIGHT); c.stroke()
+      c.beginPath(); c.moveTo(this.hoverX + .5, RULER_H - 6); c.lineTo(this.hoverX + .5, this.height); c.stroke()
     }
 
     // playhead
     const ph = this.t2x(this.player.playing ? this.player.time() : this.player.playhead)
     if (ph >= LEFT - 1) {
       c.strokeStyle = '#ff4d4d'; c.lineWidth = 2
-      c.beginPath(); c.moveTo(ph, 0); c.lineTo(ph, TL_HEIGHT); c.stroke()
+      c.beginPath(); c.moveTo(ph, 0); c.lineTo(ph, this.height); c.stroke()
       c.fillStyle = '#ff4d4d'
       c.beginPath(); c.moveTo(ph - 6, 0); c.lineTo(ph + 6, 0); c.lineTo(ph, 10); c.closePath(); c.fill()
     }
 
     // gutter de etiquetas (tapa lo que se desplaza debajo)
-    c.fillStyle = '#191917'; c.fillRect(0, 0, LEFT, TL_HEIGHT)
+    c.fillStyle = '#191917'; c.fillRect(0, 0, LEFT, this.height)
     c.fillStyle = '#a39e92'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
     for (const k of Object.keys(ROWS) as (keyof typeof ROWS)[]) c.fillText(ROWS[k].label, 10, ROWS[k].y + ROWS[k].h / 2)
+    for (const r of [...this.vLanes, ...this.aLanes]) c.fillText(r.label, 10, r.y + r.h / 2)
   }
 
   private drawRuler() {
@@ -471,7 +572,7 @@ export class Timeline {
     if (this.snapAt !== null) {     // guía del imán
       const sx = this.t2x(this.snapAt)
       c.save(); c.strokeStyle = 'rgba(255,255,255,.9)'; c.lineWidth = 1.5; c.setLineDash([4, 3])
-      c.beginPath(); c.moveTo(sx, RULER_H); c.lineTo(sx, ROWS.music.y + ROWS.music.h); c.stroke(); c.restore()
+      c.beginPath(); c.moveTo(sx, RULER_H); c.lineTo(sx, this.height); c.stroke(); c.restore()
     }
     for (let i = 1; i < placed.length; i++) {
       const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx)) continue
@@ -496,6 +597,53 @@ export class Timeline {
         c.closePath(); c.fill()
       }
       c.restore()
+    }
+  }
+
+  /** Clips superpuestos (video y audio) en sus pistas. */
+  private drawOverlayClips() {
+    const c = this.ctx
+    for (const o of this.store.project.overlays ?? []) {
+      const R = (o.kind === 'video' ? this.vLanes : this.aLanes)[o.track - 1]; if (!R) continue
+      const x0 = this.t2x(o.start) + 0.5, x1 = this.t2x(overlayEnd(o)) - 0.5
+      if (x1 < LEFT || x0 > this.w) continue
+      const w = Math.max(x1 - x0, 2), a = this.player.assets.get(o.assetId)
+      const sel = this.store.selection?.type === 'overlay' && this.store.selection.id === o.id
+      const name = this.store.asset(o.assetId)?.name ?? o.id
+      c.save(); c.beginPath(); c.roundRect(x0, R.y, w, R.h, 5); c.clip()
+      c.font = '10px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
+      if (o.kind === 'video') {
+        const HEAD = 14, TH = R.h - HEAD
+        c.fillStyle = '#0d4f53'; c.fillRect(x0, R.y, w, R.h)
+        if (a) {
+          const tw = THUMB_W * (TH / THUMB_H)
+          for (let tx = x0; tx < x1; tx += tw) {
+            if (tx + tw < LEFT || tx > this.w) continue
+            const src = o.srcIn + ((tx + tw / 2 - x0) / this.pps) * o.speed
+            const th = a.thumbs[Math.min(Math.floor(src), a.thumbs.length - 1)]
+            if (th) c.drawImage(th, tx, R.y + HEAD, tw, TH)
+          }
+        }
+        c.fillStyle = '#0f6a6f'; c.fillRect(x0, R.y, w, HEAD)
+        c.fillStyle = '#fff'; c.fillText(`${name}  ${tc(overlayDur(o))}`, Math.max(x0, LEFT) + 6, R.y + HEAD / 2)
+      } else {
+        c.fillStyle = '#143a66'; c.fillRect(x0, R.y, w, R.h)
+        const pk = this.player.musicPeaks.get(o.assetId)
+        if (pk) {
+          c.fillStyle = '#2f86e0'; const mid = R.y + R.h / 2 + 5
+          for (let x = Math.max(Math.floor(x0), LEFT); x < Math.min(x1, this.w); x++) {
+            const t = o.srcIn + ((x - x0) / this.pps) * o.speed, i0 = Math.floor(t * 100), i1 = Math.max(i0 + 1, Math.floor((t + o.speed / this.pps) * 100))
+            let mx = 0; for (let i = i0; i < i1 && i < pk.length; i++) if (pk[i] > mx) mx = pk[i]
+            const h = Math.min(1, mx * o.volume) * (R.h - 14); c.fillRect(x, mid - h / 2, 1, Math.max(h, 1))
+          }
+        }
+        c.fillStyle = '#fff'; c.fillText('♪ ' + name, Math.max(x0, LEFT) + 6, R.y + 8)
+      }
+      c.restore()
+      if (sel) {
+        c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 1, w - 2, R.h - 2, 5); c.stroke()
+        c.fillStyle = '#fff'; for (const xx of [x0 + 1, x1 - 7]) { c.beginPath(); c.roundRect(xx, R.y + R.h / 2 - 9, 6, 18, 3); c.fill() }
+      }
     }
   }
 

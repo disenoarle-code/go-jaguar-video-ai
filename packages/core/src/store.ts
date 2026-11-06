@@ -1,6 +1,6 @@
 import type { AssetInfo, Project } from './types'
 
-export type Selection = { type: 'clip' | 'layer'; id: string } | null
+export type Selection = { type: 'clip' | 'layer' | 'overlay'; id: string } | null
 
 /** Estado del proyecto + historial. Sin dependencias del navegador. */
 export class Store {

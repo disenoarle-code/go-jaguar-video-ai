@@ -1,6 +1,6 @@
 import type { LoadedAsset } from './media'
 import { drawOverlays } from './overlays'
-import { duration, fxAt, layout, locate, type FxState, type Store } from '@gojaguar/core'
+import { duration, fxAt, layout, locate, overlayEnd, type FxState, type Store } from '@gojaguar/core'
 import { H, W, setCanvasSize } from './constants'
 
 /**
@@ -190,6 +190,20 @@ export class Player {
       src.start(when, offset, bufLen)
       this.nodes.push(src)
     })
+    // clips superpuestos (video con su audio, o pistas de audio): cada uno suena en su lugar del tiempo
+    for (const o of this.store.project.overlays ?? []) {
+      if (overlayEnd(o) <= from) continue
+      const buf = o.kind === 'video' ? this.assets.get(o.assetId)?.audio : this.music.get(o.assetId)
+      if (!buf || o.volume <= 0) continue
+      const inO = Math.max(from - o.start, 0)
+      const len = (o.srcOut - o.srcIn) - inO * o.speed
+      if (len <= 0) continue
+      const src = this.actx.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.speed
+      const g = this.actx.createGain(); g.gain.value = o.volume
+      src.connect(g).connect(this.actx.destination)
+      src.start(this.ctxStart + Math.max(o.start - from, 0), Math.min(o.srcIn + inO * o.speed, buf.duration - 0.01), len)
+      this.nodes.push(src)
+    }
     // música: suena desde el inicio de la línea de tiempo, con fundido al final
     const m = this.store.project.music, mb = m && this.music.get(m.assetId)
     if (m && mb) {
@@ -241,12 +255,33 @@ export class Player {
       this.layerCtx.fillStyle = '#000'; this.layerCtx.fillRect(0, 0, W, H); this.layerKey = ''
     }
     this.ctx.drawImage(this.layer, 0, 0)
+    this.drawOverlayVideos(t)
     if (this.fx.flash > 0.005) { this.ctx.fillStyle = `rgba(255,255,255,${this.fx.flash})`; this.ctx.fillRect(0, 0, W, H) }
     const sel = this.store.selection
     drawOverlays(this.ctx, this.store.project, t, sel?.type === 'layer' ? sel.id : null)
     this.fps.n++
     const now = performance.now()
     if (now - this.fps.last > 1000) { this.fps.shown = this.fps.n; this.fps.n = 0; this.fps.last = now }
+  }
+
+  /** Videos superpuestos: de la pista más baja a la más alta, con su posición, tamaño, opacidad y esquinas redondeadas. */
+  private drawOverlayVideos(t: number) {
+    const ovs = (this.store.project.overlays ?? []).filter(o => o.kind === 'video' && t >= o.start && t < overlayEnd(o)).sort((a, b) => a.track - b.track)
+    for (const o of ovs) {
+      const asset = this.assets.get(o.assetId); if (!asset) continue
+      const idx = asset.source.idxAt(o.srcIn + (t - o.start) * o.speed)
+      if (this.playing) asset.source.prefetch(idx, 6)
+      const f = asset.source.peek(idx)
+      if (!f) { void asset.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}); continue }
+      const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight
+      const k = Math.min(W / fw, H / fh) * o.transform.scale, w = fw * k, h = fh * k
+      const x = o.transform.x * W - w / 2, y = o.transform.y * H - h / 2
+      this.ctx.save()
+      this.ctx.globalAlpha = o.transform.opacity
+      this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.06); this.ctx.clip()
+      try { this.ctx.drawImage(f, x, y, w, h) } catch { /* frame cerrado por el LRU */ }
+      this.ctx.restore()
+    }
   }
 
   /** Dibuja el frame ajustado al lienzo (sin deformar): videos verticales quedan con barras. */
