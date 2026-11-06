@@ -102,8 +102,7 @@ Antes de cambiar código: `npm test` y `npm run check` deben pasar.
 
 ## Límites actuales (no prometas lo que no existe)
 
-- Las pistas superpuestas (`overlays`) se ven y suenan en el editor, pero el render a MP4 que hago con ffmpeg aún no las incluye: al renderizar hay que añadirlas (video encima con su transform, audio mezclado).
-- No hay exportación a MP4 desde el editor todavía (E3): el MP4 final se renderiza con ffmpeg a partir de la misma edición (cortes + `fx` + música). El editor muestra y reproduce música y efectos en vivo; aún no tiene capa de imágenes. Falta que la vista previa de "Proyectos" use música y efectos.
+- **El video se exporta desde la app** (botón **Exportar** del editor: resolución, calidad, progreso, descargar). El servidor renderiza la edición actual con ffmpeg (`server/exportar.ts`: cortes, zoom/transiciones, superpuestos, audio de clips, música). **Nunca le envíes el video al usuario por el chat ni lo renderices tú a mano**; si algo falta en la exportación, se arregla en `exportar.ts`.
 - 3D, zoom y subtítulos animados viven solo en `experiments/estilo-3d`; no son capas del editor.
 - El análisis de referencias lo haces tú (Claude) cuando el usuario pide la edición completa; la app no lo hace sola.
 - Recorte de fondo (Apple Vision) solo en Mac: `experiments/estilo-3d/scripts/matte.swift`.

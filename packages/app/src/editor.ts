@@ -55,6 +55,9 @@ export async function bootEditor(slug: string) {
 
   // --- guardado en la carpeta del proyecto (autoguardado + botón) -----------------------------------------
   let lastSavedRev = store.revision
+  const saveEl = $('savestate')
+  const showSaved = (ok: boolean) => { saveEl.textContent = ok ? '✓ Guardado' : 'Guardando…'; saveEl.style.color = ok ? '' : '#e8b152' }
+  showSaved(true)
   let autosaveTimer = 0
   async function guardar(avisar = false) {
     const rev = store.revision
@@ -62,17 +65,71 @@ export async function bootEditor(slug: string) {
       const r = await fetch(`/api/proyectos/${slug}/proyecto`, { method: 'PUT', body: serialize(store.project) })
       if (!r.ok) throw new Error('El servidor no pudo guardar')
       lastSavedRev = rev
+      showSaved(store.revision === rev)
       if (avisar) notify('Guardado')
     } catch (e) { notify('No se pudo guardar: ' + (e as Error).message) }
   }
   store.onChange(() => {
     if (document.activeElement !== nameEl) nameEl.value = store.project.name
+    showSaved(false)
     clearTimeout(autosaveTimer)
     autosaveTimer = window.setTimeout(() => { void guardar() }, 1200)
   })
-  $('save').onclick = () => guardar(true)
   $('back').onclick = async () => { await guardar(); location.hash = `#/p/${slug}` }
   window.addEventListener('beforeunload', e => { if (store.revision !== lastSavedRev) e.preventDefault() })
+
+  // --- exportar a MP4 (lo hace el servidor con ffmpeg; aquí solo se eligen las opciones) ---
+  $('export').onclick = () => { void openExport() }
+  async function openExport() {
+    await guardar()
+    const f = store.project.format, short = Math.min(f.width, f.height)
+    const dim = (s: number) => { const k = Math.min(s / short, 1); return `${Math.round(f.width * k / 2) * 2}×${Math.round(f.height * k / 2) * 2}` }
+    const modal = document.createElement('div'); modal.className = 'modal'
+    const box = document.createElement('div'); box.className = 'modal-box exp'; modal.append(box); document.body.append(modal)
+    const close = () => { modal.remove() }
+    const esc = (t: string) => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+    const mb = (n: number) => n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1e3)} KB`
+    const prev = await fetch(`/api/proyectos/${slug}/exportaciones`).then(r => r.json()).catch(() => []) as { name: string; size: number; url: string }[]
+
+    const form = () => {
+      box.innerHTML = `<h2>Exportar video</h2>
+        <label>Nombre del archivo</label><input type="text" id="x-name" value="${esc(store.project.name)}" />
+        <label>Resolución</label><select id="x-res"><option value="original">Original · ${f.width}×${f.height}</option><option value="720">720p · ${dim(720)}</option><option value="480">480p · ${dim(480)} (más liviano)</option></select>
+        <label>Calidad</label><select id="x-cal"><option value="rapida">Rápida · se hace en menos tiempo</option><option value="buena" selected>Buena · recomendada</option><option value="maxima">Máxima · tarda más, archivo más grande</option></select>
+        <p class="dim small">MP4 (H.264 + AAC) · ${f.fps} fps · ${tc(duration(store.project))} · incluye cortes, zooms, transiciones, superpuestos y música.</p>
+        ${prev.length ? `<p class="dim small" style="margin-bottom:4px">Exportaciones anteriores</p><div class="prev">${prev.map(p => `<a href="/${p.url}" download="${esc(p.name)}">${esc(p.name)} <i>${mb(p.size)}</i></a>`).join('')}</div>` : ''}
+        <div class="row"><button id="x-no">Cancelar</button><button class="primary" id="x-go">Exportar</button></div>`
+      box.querySelector<HTMLElement>('#x-no')!.onclick = close
+      box.querySelector<HTMLElement>('#x-go')!.onclick = start
+    }
+    const val = (id: string) => (box.querySelector(`#${id}`) as HTMLInputElement).value
+    async function start() {
+      const body = { nombre: val('x-name'), resolucion: val('x-res'), calidad: val('x-cal') }
+      box.innerHTML = '<h2>Exportando…</h2><p class="dim" id="x-det">Preparando…</p><div class="bar2"><i id="x-bar" style="width:0%"></i></div><div class="row"><button class="danger" id="x-cancel">Cancelar exportación</button></div>'
+      let job = await fetch(`/api/proyectos/${slug}/exportar`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }).then(r => r.json())
+      if (job.error) { box.innerHTML = `<h2>No se pudo exportar</h2><p class="warn">${esc(job.error)}</p><div class="row"><button id="x-no">Cerrar</button></div>`; box.querySelector<HTMLElement>('#x-no')!.onclick = close; return }
+      box.querySelector<HTMLElement>('#x-cancel')!.onclick = () => { void fetch(`/api/exportaciones/${encodeURIComponent(job.id)}/cancelar`, { method: 'POST' }) }
+      while (job.status === 'running' && document.body.contains(modal)) {
+        await new Promise(r => setTimeout(r, 600))
+        job = await fetch(`/api/exportaciones/${encodeURIComponent(job.id)}`).then(r => r.json())
+        const bar = box.querySelector<HTMLElement>('#x-bar'), det = box.querySelector<HTMLElement>('#x-det')
+        if (bar) bar.style.width = `${Math.round(job.pct * 100)}%`
+        if (det) det.textContent = `${job.detail ?? 'Renderizando…'} ${Math.round(job.pct * 100)}%`
+      }
+      if (job.status === 'done') {
+        box.innerHTML = `<h2>✓ Video listo</h2><video src="/${job.url}" controls playsinline></video>
+          <p class="dim small">${esc(job.url.split('/').pop() ?? '')} · ${mb(job.size)}</p>
+          <div class="row"><button id="x-show">Mostrar en la carpeta</button><a class="btn primary" href="/${job.url}" download="${esc(decodeURIComponent(job.url.split('/').pop() ?? 'video.mp4'))}">Descargar</a><button id="x-no">Cerrar</button></div>`
+        box.querySelector<HTMLElement>('#x-no')!.onclick = close
+        box.querySelector<HTMLElement>('#x-show')!.onclick = () => { void fetch(`/api/proyectos/${slug}/mostrar`, { method: 'POST', body: JSON.stringify({ file: decodeURIComponent(job.url.split('/').pop() ?? '') }) }) }
+      } else if (document.body.contains(modal)) {
+        box.innerHTML = `<h2>${job.status === 'cancelado' ? 'Exportación cancelada' : 'No se pudo exportar'}</h2>${job.status === 'cancelado' ? '' : `<p class="warn">${esc(job.error ?? 'Error')}</p>`}<div class="row"><button id="x-back">Volver</button><button id="x-no">Cerrar</button></div>`
+        box.querySelector<HTMLElement>('#x-no')!.onclick = close; box.querySelector<HTMLElement>('#x-back')!.onclick = form
+      }
+    }
+    modal.onclick = e => { if (e.target === modal && !box.querySelector('#x-cancel')) close() }
+    form()
+  }
 
   // --- barra de herramientas ---------------------------------------------------
   const sel = () => store.selection

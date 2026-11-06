@@ -171,3 +171,13 @@ button.cardlink { display:flex; justify-content:flex-start; align-items:stretch;
 .cutmenu.bin { max-height:50vh; overflow:auto; min-width:300px; }
 .binitem { display:grid; grid-template-columns:18px 1fr auto; gap:8px; align-items:center; text-align:left; }
 .binitem b { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .binitem i { font-style:normal; color:var(--dim); font-size:11px; }
+
+/* Exportar */
+header #export { margin-left:8px; } #savestate { font-size:12px; margin-left:10px; }
+.modal-box.exp { width:min(440px,92vw); } .modal-box.exp label { display:block; margin:12px 0 4px; font-size:11px; color:var(--dim); }
+.modal-box.exp input[type=text], .modal-box.exp select { width:100%; background:#151513; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; }
+.modal-box.exp video { width:100%; max-height:46vh; border-radius:12px; background:#000; margin-top:6px; }
+.modal-box.exp .bar2 { height:10px; background:#151513; border-radius:6px; overflow:hidden; margin:12px 0; } .bar2 i { display:block; height:100%; background:var(--acc); transition:width .4s; }
+.modal-box.exp .prev { display:grid; gap:4px; max-height:96px; overflow:auto; } .prev a { color:var(--txt); font-size:12px; text-decoration:none; } .prev a i { color:var(--dim); font-style:normal; margin-left:6px; } .prev a:hover { color:var(--acc); }
+.modal-box.exp .row { margin-top:16px; display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+a.btn { display:inline-block; text-decoration:none; border-radius:6px; padding:5px 12px; border:1px solid var(--line); color:var(--txt); } a.btn.primary { background:var(--acc); color:#1d1d1b; border-color:var(--acc); font-weight:600; }

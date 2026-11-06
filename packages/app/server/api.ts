@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { analizarRitmo, type Ritmo } from './ritmo'
+import { activeExport, cancelExport, getExport, startExport, type ExportOpts } from './exportar'
 import { fileURLToPath } from 'node:url'
 import { Store, createProject, exec, execBatch, serialize, type AssetInfo, type Cmd } from '@gojaguar/core'
 
@@ -726,6 +727,42 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
 
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/solicitudes$/.exec(p)) && m === 'GET') {
       return send(res, 200, isSlug(g[1]) ? await solicitudesDe(g[1]) : [])
+    }
+
+    // --- exportar a MP4 (la edición actual, con efectos, superpuestos y música) ---
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/exportar$/.exec(p)) && m === 'POST') {
+      const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
+      if (!meta) return send(res, 404, { error: 'Proyecto no encontrado' })
+      const body = JSON.parse((await readBody(req)) || '{}') as Partial<ExportOpts>
+      const opts: ExportOpts = {
+        resolucion: (['original', '720', '480'] as const).includes(body.resolucion as never) ? body.resolucion! : 'original',
+        calidad: (['rapida', 'buena', 'maxima'] as const).includes(body.calidad as never) ? body.calidad! : 'buena',
+        nombre: (body.nombre ?? meta.name).slice(0, 80),
+      }
+      const f = path.join(projDir(g[1]), 'proyecto.gojaguar')
+      if (!(await exists(f))) return send(res, 400, { error: 'Este proyecto aún no tiene edición' })
+      return send(res, 200, await startExport(g[1], f, path.join(projDir(g[1]), 'salidas'), ROOT, opts))
+    }
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/exportar$/.exec(p)) && m === 'GET') {
+      return send(res, 200, activeExport(g[1]) ?? null)
+    }
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/exportaciones$/.exec(p)) && m === 'GET') {
+      const dir = path.join(projDir(g[1]), 'salidas'), out = []
+      for (const f of await listFiles(dir)) if (f.name.endsWith('.mp4') && !f.name.startsWith('vista-previa') && !f.name.endsWith('.part.mp4'))
+        out.push({ name: f.name, size: f.size, fecha: f.mtime, url: `api/files/proyectos/${g[1]}/salidas/${encodeURIComponent(f.name)}` })
+      return send(res, 200, out.sort((a, b) => b.fecha.localeCompare(a.fecha)))
+    }
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/mostrar$/.exec(p)) && m === 'POST') {
+      const { file } = JSON.parse((await readBody(req)) || '{}') as { file?: string }
+      const abs = path.join(projDir(g[1]), 'salidas', safeName(file ?? ''))
+      if (!isSlug(g[1]) || !file || !(await exists(abs))) return send(res, 404, { error: 'Archivo no encontrado' })
+      if (process.platform === 'darwin') await run('open', ['-R', abs]); else if (process.platform === 'win32') await run('explorer', ['/select,', abs]); else await run('xdg-open', [path.dirname(abs)])
+      return send(res, 200, { ok: true })
+    }
+    if ((g = /^\/exportaciones\/(.+)\/cancelar$/.exec(p)) && m === 'POST') { cancelExport(decodeURIComponent(g[1])); return send(res, 200, { ok: true }) }
+    if ((g = /^\/exportaciones\/(.+)$/.exec(p)) && m === 'GET') {
+      const j = getExport(decodeURIComponent(g[1]))
+      return j ? send(res, 200, j) : send(res, 404, { error: 'Exportación no encontrada' })
     }
 
     if ((g = /^\/trabajos\/(.+)\/cancelar$/.exec(p)) && m === 'POST') {
