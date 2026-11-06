@@ -432,23 +432,26 @@ export class Timeline {
 
   /** Pastilla de transición en el corte (entre el clip anterior y este), como en CapCut. */
   private chipPos(pl: Placed) { return { cx: this.t2x(pl.start), cy: ROWS.video.y + ROWS.video.h / 2, r: 12 } }
+  /** El corte está "ocupado" si uno de sus dos clips vecinos está seleccionado: ahí van las asas de recorte, no la transición. */
+  private cutBusy(placed: Placed[], i: number) {
+    const s = this.store.selection
+    return s?.type === 'clip' && (s.id === placed[i].clip.id || s.id === placed[i - 1].clip.id)
+  }
   /** Corte entre dos clips que aún NO tiene transición (zona de la pastilla "+"). */
   private hitCut(x: number, y: number): Placed | null {
-    if (this.store.selection?.type === 'clip') return null     // con un clip seleccionado (ajustando tiempos) no se ofrecen transiciones
     const placed = layout(this.store.project), V = ROWS.video
     if (y < V.y || y > V.y + V.h) return null
     for (let i = 1; i < placed.length; i++) {
       const fx = placed[i].clip.fx
-      if (fx && TRANSITIONS.has(fx)) continue
+      if ((fx && TRANSITIONS.has(fx)) || this.cutBusy(placed, i)) continue
       if (Math.abs(x - this.t2x(placed[i].start)) <= 10 && Math.abs(y - (V.y + V.h / 2)) <= 16) return placed[i]
     }
     return null
   }
   private hitTransition(x: number, y: number): Placed | null {
-    if (this.store.selection?.type === 'clip') return null
     const placed = layout(this.store.project)
     for (let i = 1; i < placed.length; i++) {
-      const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx)) continue
+      const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx) || this.cutBusy(placed, i)) continue
       const { cx, cy, r } = this.chipPos(placed[i])
       if (Math.abs(x - cx) <= r && Math.abs(y - cy) <= 16) return placed[i]
     }
