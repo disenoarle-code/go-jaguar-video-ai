@@ -3,6 +3,7 @@ import {
   type Cmd, type Project, type TextLayer,
 } from '@gojaguar/core'
 import { H, W } from './constants'
+import { ico } from './icons'
 import { runBench } from './bench'
 import { loadAsset } from './media'
 import { hitOverlay } from './overlays'
@@ -14,7 +15,7 @@ const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(
 
 export async function bootEditor(slug: string) {
   const res = await fetch(`/api/proyectos/${slug}/proyecto`)
-  if (!res.ok) { $('loading').innerHTML = `${(await res.json().catch(() => ({ error: 'Error' }))).error}<br><a href="#/p/${slug}">← Volver al proyecto</a>`; return }
+  if (!res.ok) { $('loading').innerHTML = `${(await res.json().catch(() => ({ error: 'Error' }))).error}<br><a href="#/p/${slug}">${ico('arrow-left')} Volver al proyecto</a>`; return }
   const store = new Store(parseProject(await res.text()))
   store.load(store.project)   // el estado inicial no es deshacible
   const player = new Player($('preview') as HTMLCanvasElement, store)
@@ -185,12 +186,12 @@ export async function bootEditor(slug: string) {
 
   // --- bucle principal ---------------------------------------------------------
   const timeEl = $('time'), statsEl = $('stats')
-  let n = 0
+  let n = 0, shownPlaying = false
   function frame() {
     player.tick()
     if (tl.dirty || player.playing) tl.draw()
     timeEl.textContent = `${tc(player.time())} / ${tc(duration(store.project))}`
-    $('play').textContent = player.playing ? '⏸' : '▶'
+    if (player.playing !== shownPlaying) { shownPlaying = player.playing; $('play').innerHTML = ico(shownPlaying ? 'pause' : 'play') }
     ;($('undo') as HTMLButtonElement).disabled = !store.canUndo
     ;($('redo') as HTMLButtonElement).disabled = !store.canRedo
     if (++n % 20 === 0) {

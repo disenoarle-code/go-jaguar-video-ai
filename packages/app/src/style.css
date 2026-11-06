@@ -129,3 +129,13 @@ header { background:rgba(29,29,27,.95); }
 .tus::before { content:''; width:34px; height:1px; background:var(--acc); }
 .chip.ok { border-color:#6b5122; color:var(--acc); }
 .warn { background:#2a2417; border-color:#6b5122; }
+
+/* ---------- Íconos 2D (vector, blancos) ---------- */
+.ico { width:1.15em; height:1.15em; flex:none; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; vertical-align:-.2em; }
+button { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+button.cardlink { display:flex; justify-content:flex-start; align-items:stretch; }
+.trash { color:#fff; padding:5px 7px; } .trash .ico { width:17px; height:17px; }
+.miss { display:inline-flex; align-items:center; gap:4px; } .miss .ico { width:12px; height:12px; }
+.steps .ic { display:inline-flex; justify-content:center; } .steps .ic .ico { width:16px; height:16px; }
+.spin .ico { animation:giro 1s linear infinite; } @keyframes giro { to { transform:rotate(360deg); } }
+#play, #undo, #redo, #zin, #zout { padding:7px 12px; } #play .ico { width:16px; height:16px; }

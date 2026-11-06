@@ -12,9 +12,9 @@
   <div id="app" hidden>
     <header>
       <a class="brand small" href="#/"><img src="/logo.svg" alt="Go Jaguar" /><span>Video AI</span></a>
-      <button id="back">← Proyectos</button>
+      <button id="back" data-ico="arrow-left">Proyectos</button>
       <input id="pname" type="text" aria-label="Nombre del proyecto" />
-      <button id="save" title="Ctrl/Cmd+S">💾 Guardar</button>
+      <button id="save" data-ico="save" title="Ctrl/Cmd+S">Guardar</button>
       <span id="note" class="dim"></span>
       <span id="stats" class="dim right"></span>
     </header>
@@ -22,18 +22,18 @@
       <section id="stage">
         <div class="canvaswrap"><canvas id="preview"></canvas><div id="loading">Cargando…</div></div>
         <div class="bar">
-          <button id="play" title="Espacio">▶</button>
+          <button id="play" data-ico="play" title="Espacio"></button>
           <span id="time" class="mono">0:00.00</span>
           <span class="sep"></span>
-          <button id="undo" title="Ctrl/Cmd+Z">↶</button>
-          <button id="redo" title="Ctrl/Cmd+Shift+Z">↷</button>
+          <button id="undo" data-ico="undo" title="Ctrl/Cmd+Z"></button>
+          <button id="redo" data-ico="redo" title="Ctrl/Cmd+Shift+Z"></button>
           <span class="sep"></span>
-          <button id="split" title="S">✂ Cortar</button>
-          <button id="del" title="Supr">🗑 Borrar</button>
-          <button id="addsub">+ Subtítulo</button>
-          <button id="addgfx">+ Gráfico</button>
+          <button id="split" data-ico="scissors" title="S">Cortar</button>
+          <button id="del" data-ico="trash" title="Supr">Borrar</button>
+          <button id="addsub" data-ico="plus">Subtítulo</button>
+          <button id="addgfx" data-ico="plus">Gráfico</button>
           <span class="grow"></span>
-          <button id="zout">−</button><button id="zin">+</button><button id="zfit">Ajustar</button>
+          <button id="zout" data-ico="minus" title="Alejar"></button><button id="zin" data-ico="plus" title="Acercar"></button><button id="zfit">Ajustar</button>
         </div>
       </section>
       <aside id="inspector"></aside>

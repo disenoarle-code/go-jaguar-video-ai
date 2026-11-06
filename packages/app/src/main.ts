@@ -1,5 +1,6 @@
 import './style.css'
 import { bootEditor } from './editor'
+import { applyIcons } from './icons'
 import { renderHome, renderProject } from './views'
 
 void document.fonts?.load('400 14px Figtree'); void document.fonts?.load('700 14px Figtree')
@@ -21,4 +22,5 @@ function route() {
 
 // Entrar o salir del editor recarga la página (limpia listeners y el motor de video).
 window.addEventListener('hashchange', () => { if (isEditor(location.hash) || modeAtLoad) location.reload(); else route() })
+applyIcons()
 route()

@@ -355,7 +355,7 @@ export class Timeline {
     }
     c.fillStyle = 'rgba(8,9,14,.55)'; c.fillRect(x0, V.y, Math.min(150, x1 - x0), 18)
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
-    c.fillText(`${pl.clip.id}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}${pl.clip.volume !== 1 ? `  🔊${pl.clip.volume}` : ''}`, x0 + 6, V.y + 9)
+    c.fillText(`${pl.clip.id}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}${pl.clip.volume !== 1 ? `  vol ${pl.clip.volume}` : ''}`, x0 + 6, V.y + 9)
     c.restore()
 
     // audio + waveform

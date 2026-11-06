@@ -1,3 +1,4 @@
+import { ico } from './icons'
 import { api, fmtDur, fmtSize, subir, type ArchivoInfo, type Miniatura, type ProyectoInfo, type ProyectoResumen, type Referencia, type Trabajo } from './api'
 
 const root = () => document.getElementById('shell')!
@@ -25,25 +26,24 @@ const thumb = (pv: Miniatura) => pv.video
   ? `<video src="/${pv.video}" ${pv.poster ? `poster="/${pv.poster}"` : ''} controls preload="none" playsinline></video>`
   : `<div class="ph">${pv.poster ? `<img src="/${pv.poster}" alt="">` : ''}<span>${pv.poster ? 'Preparando video…' : 'Preparando miniatura…'}</span></div>`
 
-const modoChip = (modo: 'enlace' | 'copia', existe: boolean) => !existe
-  ? '<span class="miss" title="Moviste o borraste el original">⚠ no encontrado</span>'
-  : modo === 'enlace' ? '<span class="dim small" title="Está en su carpeta original; no ocupa espacio extra">🔗 enlazado</span>'
-  : '<span class="dim small" title="Se copió dentro del proyecto y ocupa espacio">📁 copia</span>'
+/** Solo se avisa si el original no está; si está bien, no se muestra nada (enlace o copia da igual al usuario). */
+const modoChip = (_modo: 'enlace' | 'copia', existe: boolean) => !existe
+  ? `<span class="miss" title="Moviste o borraste el original">${ico('warning')} no encontrado</span>` : ''
 
 const tilesMat = (m: ProyectoInfo['material']) => m.length ? m.map(f => `
   <div class="tile ${f.existe ? '' : 'missing'}"><div class="thumb">${thumb(f.preview)}</div>
     <div class="cap"><span class="nm" title="${esc(f.name)}">${esc(f.name)}</span>
       <span class="dim small">${fmtSize(f.size)}</span>${modoChip(f.modo, f.existe)}
       ${!f.existe && f.modo === 'enlace' ? `<button class="mini" data-ubicar="${esc(f.id)}">Ubicar</button>` : ''}
-      <button class="trash" data-del="${esc(f.id)}" data-nombre="${esc(f.name)}" data-modo="${f.modo}" title="${f.modo === 'enlace' ? 'Quitar del proyecto (tu archivo no se borra)' : 'Borrar la copia del proyecto'}">🗑</button></div>
+      <button class="trash" data-del="${esc(f.id)}" data-nombre="${esc(f.name)}" data-modo="${f.modo}" title="${f.modo === 'enlace' ? 'Quitar del proyecto (tu archivo no se borra)' : 'Borrar la copia del proyecto'}">${ico('trash')}</button></div>
   </div>`).join('') : '<p class="dim">Aún no agregas videos.</p>'
 
 const tilesRef = (refs: Referencia[], linked: Set<string>) => refs.length ? refs.map(r => `
   <div class="tile ${linked.has(r.id) ? 'sel' : ''} ${r.existe ? '' : 'missing'}"><div class="thumb">${thumb(r.preview)}</div>
     <div class="cap"><label class="nm" title="${esc(r.nombre)}"><input type="checkbox" data-ref="${esc(r.id)}" ${linked.has(r.id) ? 'checked' : ''}/> ${esc(r.nombre)}</label>
-      <span class="dim small">${fmtSize(r.size)}${r.perfilDeEstilo ? ' · estilo ✓' : ''}</span>${modoChip(r.modo, r.existe)}
+      <span class="dim small">${fmtSize(r.size)}${r.perfilDeEstilo ? ` · estilo ${ico('check')}` : ''}</span>${modoChip(r.modo, r.existe)}
       ${!r.existe && r.modo === 'enlace' ? `<button class="mini" data-ubicarref="${esc(r.id)}">Ubicar</button>` : ''}
-      <button class="trash" data-delref="${esc(r.id)}" data-nombre="${esc(r.nombre)}" data-modo="${r.modo}" title="${r.modo === 'enlace' ? 'Quitar de la biblioteca (tu archivo no se borra)' : 'Borrar la copia de la biblioteca'}">🗑</button></div>
+      <button class="trash" data-delref="${esc(r.id)}" data-nombre="${esc(r.nombre)}" data-modo="${r.modo}" title="${r.modo === 'enlace' ? 'Quitar de la biblioteca (tu archivo no se borra)' : 'Borrar la copia de la biblioteca'}">${ico('trash')}</button></div>
   </div>`).join('') : '<p class="dim">Aún no hay referencias. Agrega una abajo.</p>'
 
 const signature = (info: ProyectoInfo, refs: Referencia[]) =>
@@ -57,7 +57,7 @@ const cardThumb = (pv: ProyectoResumen['preview']) => !pv
 
 const tarjetas = (ps: ProyectoResumen[]) => ps.map(p => `
   <div class="card">
-    <button class="trash cardtrash" data-delproj="${p.slug}" data-nombre="${esc(p.name)}" title="Borrar proyecto">🗑</button>
+    <button class="trash cardtrash" data-delproj="${p.slug}" data-nombre="${esc(p.name)}" title="Borrar proyecto">${ico('trash')}</button>
     <div class="thumb">${cardThumb(p.preview)}</div>
     <button class="cardlink" data-slug="${p.slug}">
       <div class="card-title">${esc(p.name)}</div>
@@ -138,7 +138,7 @@ export async function renderHome() {
 // ------------------------------------------------------------------------------------------------
 // PROYECTO: material + referencias
 // ------------------------------------------------------------------------------------------------
-const icon = (s: string) => ({ pending: '○', running: '◐', done: '✓', error: '✕', skipped: '–' })[s] ?? '○'
+const icon = (s: string) => ({ pending: ico('circle'), running: `<span class="spin">${ico('loader')}</span>`, done: ico('check'), error: ico('x'), skipped: ico('minus') })[s] ?? ico('circle')
 
 function jobHtml(j: Trabajo) {
   return `<ul class="steps">${j.steps.map(s => `
@@ -153,7 +153,7 @@ export async function renderProject(slug: string) {
   root().innerHTML = '<div class="page"><p class="dim">Cargando…</p></div>'
   let info: ProyectoInfo, refs: Referencia[]
   try { [info, refs] = await Promise.all([api.proyecto(slug), api.referencias()]) }
-  catch (e) { root().innerHTML = `<div class="page"><button id="back">← Proyectos</button><div class="warn">${esc((e as Error).message)}</div></div>`; document.getElementById('back')!.onclick = () => go('#/'); return }
+  catch (e) { root().innerHTML = `<div class="page"><button id="back">${ico('arrow-left')} Proyectos</button><div class="warn">${esc((e as Error).message)}</div></div>`; document.getElementById('back')!.onclick = () => go('#/'); return }
 
   const linked = new Set(info.referencias)
 
@@ -161,7 +161,7 @@ export async function renderProject(slug: string) {
   <div class="page">
     ${BRAND}
     <div class="proj-top">
-      <button id="back">← Proyectos</button>
+      <button id="back">${ico('arrow-left')} Proyectos</button>
       <h1>${esc(info.name)}</h1>
       <span class="grow"></span>
       ${info.tieneEditor ? '<button class="primary" id="abrir">Abrir editor</button>' : ''}
@@ -169,7 +169,7 @@ export async function renderProject(slug: string) {
 
     <section>
       <h2><span class="num">1</span> Material <small class="dim">los videos que vas a editar</small></h2>
-      <div class="drop" id="dropMat"><p>Arrastra aquí tus videos</p><p class="dim small">o</p><button class="primary" id="pickMat">Elegir archivos</button><p class="dim small">Se enlazan donde ya están: no se copian ni ocupan espacio extra.</p></div>
+      <div class="drop" id="dropMat"><p>Arrastra aquí tus videos</p><p class="dim small">o</p><button class="primary" id="pickMat">Elegir archivos</button></div>
       <div class="tiles" id="matList">${tilesMat(info.material)}</div>
       <div id="upl"></div>
       <button class="primary big wide" id="recortar" ${info.material.length ? '' : 'disabled'}>Recorta silencios y errores</button>
@@ -317,7 +317,7 @@ export async function renderProject(slug: string) {
     } else {
       estadoCompleta = 'libre'
       btn.disabled = !(cur.info.procesado && cur.info.referencias.length)
-      if (x?.estado === 'hecho') infoEl.innerHTML = '✓ Listo. Pulsa <b>Abrir editor</b> para ver y corregir el resultado.'
+      if (x?.estado === 'hecho') infoEl.innerHTML = `${ico('check')} Listo. Pulsa <b>Abrir editor</b> para ver y corregir el resultado.`
       if (x?.estado === 'error') infoEl.textContent = 'Claude no pudo terminar: ' + (x.nota ?? 'error')
     }
   }
