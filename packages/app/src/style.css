@@ -159,3 +159,9 @@ button.cardlink { display:flex; justify-content:flex-start; align-items:stretch;
 .legend .lg { display:grid; grid-template-columns:12px 1fr; gap:2px 8px; align-items:center; font-size:11px; }
 .legend .lg i { width:12px; height:12px; border-radius:3px; grid-row:1 / span 2; }
 .legend .lg span { color:var(--dim); grid-column:2; }
+
+/* Menú de transición (al tocar un corte) */
+.cutmenu { position:fixed; z-index:50; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:6px; min-width:230px; box-shadow:0 10px 30px rgba(0,0,0,.5); }
+.cutmenu h4 { margin:0 0 2px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
+.cutmenu button { text-align:left; border-radius:8px; } .cutmenu button.on { border-color:var(--acc); color:var(--acc); }
+.cutmenu .hint { margin:2px 0 0; font-size:11px; color:var(--dim); }

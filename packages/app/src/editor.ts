@@ -137,6 +137,42 @@ export async function bootEditor(slug: string) {
   })
   window.addEventListener('mouseup', () => { if (pdrag) { store.endTx(); pdrag = null } })
 
+  // --- menú de transición al tocar un corte entre dos clips ---------------------------------
+  let cutMenu: HTMLElement | null = null
+  const closeCutMenu = () => { cutMenu?.remove(); cutMenu = null }
+  tl.onCutClick = (clipId, cx, cy) => {
+    closeCutMenu()
+    const clip = store.project.clips.find(c => c.id === clipId); if (!clip) return
+    const m = document.createElement('div'); m.className = 'cutmenu'
+    const opts: { label: string; fx: ClipFx | null; dir?: 1 | -1 }[] = [
+      { label: 'Deslizar · entra desde la derecha', fx: 'slide', dir: -1 },
+      { label: 'Deslizar · entra desde la izquierda', fx: 'slide', dir: 1 },
+      { label: 'Golpe + destello', fx: 'punchflash' },
+      { label: 'Entrada fuerte', fx: 'dropflash' },
+    ]
+    const has = !!clip.fx && TRANSITIONS.has(clip.fx)
+    m.innerHTML = `<h4>Transición en el corte</h4>`
+    for (const o of opts) {
+      const b = document.createElement('button'); b.textContent = o.label
+      if (clip.fx === o.fx && (o.dir === undefined || clip.fxDir === o.dir)) b.classList.add('on')
+      b.onclick = () => {
+        exec(store, { op: 'set_effect', clip: clipId, effect: o.fx, dir: o.dir })
+        closeCutMenu()
+        const pl = layout(store.project).find(x => x.clip.id === clipId)   // muestra el resultado un instante
+        if (pl) { player.seek(Math.max(0, pl.start - 0.5)); void player.play(); setTimeout(() => { if (player.playing && player.time() < pl.start + 1.2) player.pause() }, 1700) }
+      }
+      m.append(b)
+    }
+    if (has) { const b = document.createElement('button'); b.textContent = 'Quitar transición'; b.className = 'danger'; b.onclick = () => { exec(store, { op: 'set_effect', clip: clipId, effect: null }); closeCutMenu() }; m.append(b) }
+    if (clip.fx && !TRANSITIONS.has(clip.fx)) m.insertAdjacentHTML('beforeend', '<p class="hint">Reemplaza el zoom de este clip.</p>')
+    document.body.append(m); cutMenu = m
+    const w = m.offsetWidth, h = m.offsetHeight
+    m.style.left = Math.min(Math.max(8, cx - w / 2), window.innerWidth - w - 8) + 'px'
+    m.style.top = Math.max(8, cy - h - 8) + 'px'
+  }
+  window.addEventListener('mousedown', e => { if (cutMenu && !cutMenu.contains(e.target as Node)) closeCutMenu() }, true)
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') closeCutMenu() })
+
   // --- inspector -----------------------------------------------------------------
   const insp = $('inspector')
   let lastKey = ''

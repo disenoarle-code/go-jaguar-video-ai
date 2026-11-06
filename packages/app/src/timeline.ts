@@ -29,6 +29,11 @@ export class Timeline {
   private drag: Drag | null = null
   private hoverX: number | null = null
   private mouse = { x: 0, y: 0 }
+  /** Corte al que el cabezal quedó "pegado" (imán), para dibujar la guía. */
+  private snapAt: number | null = null
+  private hoverCut: string | null = null      // clip cuyo corte de entrada está bajo el mouse (sin transición)
+  /** Lo llama al tocar el corte entre dos clips (el editor abre el menú de transición). */
+  onCutClick: (clipId: string, clientX: number, clientY: number) => void = () => {}
 
   constructor(private canvas: HTMLCanvasElement, private store: Store, private player: Player) {
     this.ctx = canvas.getContext('2d')!
@@ -38,7 +43,7 @@ export class Timeline {
     canvas.addEventListener('mousedown', e => this.onDown(e))
     window.addEventListener('mouseup', () => this.onUp())
     window.addEventListener('mousemove', e => { if (this.drag) this.onMove(e) })
-    canvas.addEventListener('mouseleave', () => { if (!this.drag) { this.hoverX = null; player.hover = null; player.dirty = true; this.dirty = true } })
+    canvas.addEventListener('mouseleave', () => { if (!this.drag) { this.hoverX = null; this.snapAt = null; this.hoverCut = null; player.hover = null; player.dirty = true; this.dirty = true } })
     canvas.addEventListener('dblclick', e => this.onDbl(e))
     canvas.addEventListener('wheel', e => this.onWheel(e), { passive: false })
     this.resize()
@@ -53,6 +58,15 @@ export class Timeline {
     this.canvas.height = Math.floor(TL_HEIGHT * dpr)
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     this.dirty = true
+  }
+
+  /** Imán: si el tiempo cae a pocos píxeles de un corte entre clips (o del inicio/fin), se ajusta a él. */
+  private magnet(t: number): number {
+    const reach = 9 / this.pps
+    let best = t, bd = reach
+    for (const c of [0, ...layout(this.store.project).map(q => q.end)]) { const d = Math.abs(c - t); if (d <= bd) { bd = d; best = c } }
+    this.snapAt = best !== t ? best : null
+    return best
   }
 
   private t2x = (t: number) => LEFT + t * this.pps - this.scrollX
@@ -112,14 +126,19 @@ export class Timeline {
     const { x, y } = this.pos(e)
     if (x < LEFT) return
     const row = this.rowAt(y)
-    const t = Math.min(this.x2t(x), this.total())
+    const t = this.magnet(Math.min(this.x2t(x), this.total()))
     this.player.hover = null
 
     if (row === 'ruler') { this.drag = { k: 'seek' }; this.player.seek(t); return }
 
     if (row === 'video') {
-      const tr = this.hitTransition(x, y)
-      if (tr) { this.store.select({ type: 'clip', id: tr.clip.id }); this.player.seek(tr.start + 0.01); return }
+      const tr = this.hitTransition(x, y) ?? this.hitCut(x, y)
+      if (tr) {
+        this.store.select({ type: 'clip', id: tr.clip.id }); this.player.seek(tr.start + 0.01)
+        const r = this.canvas.getBoundingClientRect()
+        this.onCutClick(tr.clip.id, r.left + this.t2x(tr.start), r.top + ROWS.video.y)
+        return
+      }
     }
     if (row === 'video') {
       const h = this.hitClip(x)
@@ -157,17 +176,20 @@ export class Timeline {
     if (!d) {
       // Scrub: el cursor "navega" el video sin tocar el playhead.
       if (x >= LEFT && !this.player.playing) {
-        this.hoverX = x
-        this.player.hover = Math.min(this.x2t(x), Math.max(this.total() - 1e-3, 0))
+        const t = this.magnet(this.x2t(x))
+        this.hoverX = this.snapAt !== null ? this.t2x(this.snapAt) : x
+        this.player.hover = Math.min(t, Math.max(this.total() - 1e-3, 0))
         this.player.dirty = true
-      } else { this.hoverX = null; this.player.hover = null; this.player.dirty = true }
-      this.canvas.style.cursor = this.cursorAt(x, y)
+      } else { this.hoverX = null; this.snapAt = null; this.player.hover = null; this.player.dirty = true }
+      const cut = x >= LEFT ? this.hitCut(x, y) : null
+      this.hoverCut = cut?.clip.id ?? null
+      this.canvas.style.cursor = cut || this.hitTransition(x, y) ? 'pointer' : this.cursorAt(x, y)
       this.dirty = true
       return
     }
 
     this.dirty = true
-    if (d.k === 'seek') { this.player.seek(Math.min(this.x2t(x), this.total())); return }
+    if (d.k === 'seek') { this.player.seek(this.magnet(Math.min(this.x2t(x), this.total()))); return }
 
     if (d.k === 'trim') {
       const dt = (x - d.x0) / this.pps
@@ -218,6 +240,7 @@ export class Timeline {
     const d = this.drag
     if (!d) return
     this.drag = null
+    this.snapAt = null
     this.player.override = null
     if (d.k === 'trim' || d.k === 'ov') this.store.endTx()
     if (d.k === 'clip' && d.moved) {
@@ -409,6 +432,17 @@ export class Timeline {
 
   /** Pastilla de transición en el corte (entre el clip anterior y este), como en CapCut. */
   private chipPos(pl: Placed) { return { cx: this.t2x(pl.start), cy: ROWS.video.y + ROWS.video.h / 2, r: 12 } }
+  /** Corte entre dos clips que aún NO tiene transición (zona de la pastilla "+"). */
+  private hitCut(x: number, y: number): Placed | null {
+    const placed = layout(this.store.project), V = ROWS.video
+    if (y < V.y || y > V.y + V.h) return null
+    for (let i = 1; i < placed.length; i++) {
+      const fx = placed[i].clip.fx
+      if (fx && TRANSITIONS.has(fx)) continue
+      if (Math.abs(x - this.t2x(placed[i].start)) <= 10 && Math.abs(y - (V.y + V.h / 2)) <= 16) return placed[i]
+    }
+    return null
+  }
   private hitTransition(x: number, y: number): Placed | null {
     const placed = layout(this.store.project)
     for (let i = 1; i < placed.length; i++) {
@@ -420,6 +454,20 @@ export class Timeline {
   }
   private drawTransitions(placed: Placed[]) {
     const c = this.ctx
+    const hc = this.hoverCut && !this.drag ? placed.find(q => q.clip.id === this.hoverCut) : null
+    if (hc) {
+      const { cx, cy } = this.chipPos(hc)
+      c.save(); c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 4
+      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - 10, cy - 14, 20, 28, 5); c.fill(); c.shadowBlur = 0
+      c.strokeStyle = '#1d1d1b'; c.lineWidth = 2; c.lineCap = 'round'
+      c.beginPath(); c.moveTo(cx - 5, cy); c.lineTo(cx + 5, cy); c.moveTo(cx, cy - 5); c.lineTo(cx, cy + 5); c.stroke()
+      c.restore()
+    }
+    if (this.snapAt !== null) {     // guía del imán
+      const sx = this.t2x(this.snapAt)
+      c.save(); c.strokeStyle = 'rgba(255,255,255,.9)'; c.lineWidth = 1.5; c.setLineDash([4, 3])
+      c.beginPath(); c.moveTo(sx, RULER_H); c.lineTo(sx, ROWS.music.y + ROWS.music.h); c.stroke(); c.restore()
+    }
     for (let i = 1; i < placed.length; i++) {
       const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx)) continue
       const { cx, cy, r } = this.chipPos(placed[i])
