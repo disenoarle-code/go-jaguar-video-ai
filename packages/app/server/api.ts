@@ -717,6 +717,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       return send(res, 200, await crearSolicitud(meta.slug, 'completa', meta.referencias, (recomendacion ?? '').trim().slice(0, 2000) || undefined))
     }
 
+    if ((g = /^\/solicitudes\/([^/]+)\/cancelar$/.exec(p)) && m === 'POST') {
+      const x = await leerSolicitud(decodeURIComponent(g[1]))
+      if (!x) return send(res, 404, { error: 'Pedido no encontrado' })
+      if (x.estado === 'pendiente' || x.estado === 'en_curso') await writeJson(path.join(SOL, x.id + '.json'), { ...x, estado: 'cancelado', nota: 'Cancelado por el usuario' })
+      return send(res, 200, { ok: true })
+    }
+
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/solicitudes$/.exec(p)) && m === 'GET') {
       return send(res, 200, isSlug(g[1]) ? await solicitudesDe(g[1]) : [])
     }

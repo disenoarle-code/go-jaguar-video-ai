@@ -329,12 +329,16 @@ export async function renderProject(slug: string) {
     const btn = $('completa') as HTMLButtonElement
     if (x && (x.estado === 'pendiente' || x.estado === 'en_curso')) {
       estadoCompleta = 'activa'; btn.disabled = true
-      infoEl.textContent = x.estado === 'pendiente' ? 'Enviado a Claude, esperando que empiece…' : 'Claude está editando…'
+      const espera = Date.now() - new Date(x.creado).getTime()
+      const txt = x.estado === 'en_curso' ? 'Claude está editando…' : espera > 20000 ? 'Claude no ha respondido todavía. ¿Está abierta la sesión de Claude Code en esta carpeta?' : 'Enviado a Claude, esperando que empiece…'
+      infoEl.innerHTML = `${esc(txt)} <button class="mini" id="cancelarCompleta">Cancelar</button>`
+      $('cancelarCompleta').onclick = async () => { await api.cancelarSolicitud(x.id); void refrescarCompleta() }
       setTimeout(refrescarCompleta, 1500)
     } else {
       estadoCompleta = 'libre'
       btn.disabled = !(cur.info.procesado && cur.info.referencias.length)
       if (x?.estado === 'hecho') infoEl.innerHTML = `${ico('check')} Listo. Pulsa <b>Abrir editor</b> para ver y corregir el resultado.`
+      if (x?.estado === 'cancelado') infoEl.textContent = 'Cancelado. Puedes volver a pedirlo.'
       if (x?.estado === 'error') infoEl.textContent = 'Claude no pudo terminar: ' + (x.nota ?? 'error')
     }
   }

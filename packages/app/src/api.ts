@@ -12,7 +12,7 @@ export interface ProyectoInfo {
   material: { id: string; tipo: Tipo; ritmo: Ritmo | null; name: string; modo: Modo; existe: boolean; ruta: string; size: number; preview: Miniatura }[]; tieneEditor: boolean
 }
 export interface Paso { id: string; label: string; state: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string; pct?: number }
-export interface Solicitud { id: string; slug: string; tipo: 'errores' | 'completa'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error'; creado: string; nota?: string }
+export interface Solicitud { id: string; slug: string; tipo: 'errores' | 'completa'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error' | 'cancelado'; creado: string; nota?: string }
 export interface Trabajo { id: string; status: 'running' | 'done' | 'error' | 'cancelado'; steps: Paso[]; error?: string }
 
 async function j<T>(r: Response): Promise<T> {
@@ -30,6 +30,7 @@ export const api = {
   procesar: (slug: string) => post(`/api/proyectos/${slug}/procesar`).then(j<{ jobId: string }>),
   trabajo: (id: string) => fetch(`/api/trabajos/${encodeURIComponent(id)}`).then(j<Trabajo>),
   cancelarTrabajo: (id: string) => post(`/api/trabajos/${encodeURIComponent(id)}/cancelar`).then(j<{ ok: boolean }>),
+  cancelarSolicitud: (id: string) => post(`/api/solicitudes/${encodeURIComponent(id)}/cancelar`).then(j<{ ok: boolean }>),
   trabajoActivo: (slug: string) => fetch(`/api/proyectos/${slug}/trabajo`).then(j<Trabajo | null>),
   pedirEdicionCompleta: (slug: string, recomendacion: string) => post(`/api/proyectos/${slug}/pedir`, { tipo: 'completa', recomendacion }).then(j<Solicitud>),
   solicitudes: (slug: string) => fetch(`/api/proyectos/${slug}/solicitudes`).then(j<Solicitud[]>),
