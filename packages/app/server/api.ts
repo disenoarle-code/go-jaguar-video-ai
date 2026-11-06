@@ -15,7 +15,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { analizarRitmo, type Ritmo } from './ritmo'
-import { activeExport, cancelExport, getExport, startExport, type ExportOpts } from './exportar'
+import { activeExport, cancelExport, getExport, startExport, type ExportOpts, type Exportado } from './exportar'
 import { fileURLToPath } from 'node:url'
 import { Store, createProject, exec, execBatch, serialize, type AssetInfo, type Cmd } from '@gojaguar/core'
 
@@ -373,6 +373,27 @@ async function pickFiles(multiple: boolean, titulo: string, todo = false): Promi
   return r.code === 0 ? r.out.split('\n').map(x => x.trim()).filter(Boolean) : []   // cancelar = lista vacía
 }
 
+/** Diálogo nativo para elegir una carpeta (devuelve null si se cancela). */
+async function pickFolder(titulo: string, inicial: string): Promise<string | null> {
+  let r: { code: number; out: string }
+  const ini = inicial.replace(/"/g, '')
+  if (process.platform === 'darwin') {
+    r = await run('osascript', ['-e', 'tell me to activate', '-e', `set d to choose folder with prompt "${titulo.replace(/"/g, '')}" default location (POSIX file "${ini}")`, '-e', 'return POSIX path of d'])
+    if (r.code !== 0) r = await run('osascript', ['-e', 'tell me to activate', '-e', `POSIX path of (choose folder with prompt "${titulo.replace(/"/g, '')}")`])
+  } else if (process.platform === 'win32') {
+    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description='${titulo}'; $f.SelectedPath='${ini}'; if($f.ShowDialog() -eq 'OK'){ $f.SelectedPath }`])
+  } else r = await run('zenity', ['--file-selection', '--directory', `--title=${titulo}`, `--filename=${ini}/`])
+  const out = r.code === 0 ? r.out.trim().replace(/\/$/, '') : ''
+  return out || null
+}
+
+// --- configuración (última carpeta de exportación) y registro de lo exportado ---
+const CONFIG = path.join(ROOT, 'configuracion.json'), LOG = path.join(ROOT, 'exportaciones.json')
+const carpetaPorDefecto = async () => { for (const d of [path.join(os.homedir(), 'Movies'), path.join(os.homedir(), 'Videos'), path.join(os.homedir(), 'Desktop'), os.homedir()]) if (await exists(d)) return d; return os.homedir() }
+const carpetaGuardada = async () => { const c = (await readJson<{ carpetaExportacion?: string }>(CONFIG, {})).carpetaExportacion; return c && (await exists(c)) ? c : await carpetaPorDefecto() }
+const leerLog = () => readJson<Exportado[]>(LOG, [])
+const revelar = async (abs: string) => { if (process.platform === 'darwin') await run('open', ['-R', abs]); else if (process.platform === 'win32') await run('explorer', ['/select,', abs]); else await run('xdg-open', [path.dirname(abs)]) }
+
 /** Busca en el disco el original de un archivo arrastrado (mismo nombre, tamaño y fecha) para enlazarlo sin copiarlo. Solo macOS. */
 async function locateFile(name: string, size: number, lastModified: number): Promise<string | null> {
   if (process.platform !== 'darwin') return null
@@ -601,6 +622,9 @@ async function processProjectInner(job: Job) {
 async function serveFile(req: IncomingMessage, res: ServerResponse, rel: string) {
   const abs = path.resolve(ROOT, decodeURIComponent(rel))
   if (!abs.startsWith(ROOT + path.sep) || !(await exists(abs))) return send(res, 404, { error: 'no existe' })
+  return serveAbs(req, res, abs)
+}
+async function serveAbs(req: IncomingMessage, res: ServerResponse, abs: string) {
   const st = await fsp.stat(abs)
   if (!st.isFile()) return send(res, 404, { error: 'no es un archivo' })
   res.setHeader('Content-Type', MIME[path.extname(abs).toLowerCase()] ?? 'application/octet-stream')
@@ -761,33 +785,50 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
     }
 
     // --- exportar a MP4 (la edición actual, con efectos, superpuestos y música) ---
+    if (p === '/configuracion' && m === 'GET') return send(res, 200, { carpetaExportacion: await carpetaGuardada() })
+    if (p === '/carpeta' && m === 'POST') {
+      const { actual } = JSON.parse((await readBody(req)) || '{}') as { actual?: string }
+      const c = await pickFolder('¿En qué carpeta quieres guardar el video?', actual && (await exists(actual)) ? actual : await carpetaGuardada())
+      return send(res, 200, c ? { carpeta: c } : { cancelado: true })
+    }
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/exportar$/.exec(p)) && m === 'POST') {
       const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
       if (!meta) return send(res, 404, { error: 'Proyecto no encontrado' })
-      const body = JSON.parse((await readBody(req)) || '{}') as Partial<ExportOpts>
+      const body = JSON.parse((await readBody(req)) || '{}') as Partial<ExportOpts> & { carpeta?: string }
       const opts: ExportOpts = {
         resolucion: (['original', '720', '480'] as const).includes(body.resolucion as never) ? body.resolucion! : 'original',
         calidad: (['rapida', 'buena', 'maxima'] as const).includes(body.calidad as never) ? body.calidad! : 'buena',
         nombre: (body.nombre ?? meta.name).slice(0, 80),
       }
+      const carpeta = body.carpeta || await carpetaGuardada()
+      const okDir = path.isAbsolute(carpeta) && await fsp.stat(carpeta).then(s => s.isDirectory()).catch(() => false) && await fsp.access(carpeta, fs.constants.W_OK).then(() => true).catch(() => false)
+      if (!okDir) return send(res, 400, { error: `No puedo guardar en "${carpeta}". Elige otra carpeta.` })
       const f = path.join(projDir(g[1]), 'proyecto.gojaguar')
       if (!(await exists(f))) return send(res, 400, { error: 'Este proyecto aún no tiene edición' })
-      return send(res, 200, await startExport(g[1], f, path.join(projDir(g[1]), 'salidas'), ROOT, opts, `http://${req.headers.host ?? '127.0.0.1:5273'}`))
+      await writeJson(CONFIG, { ...(await readJson<object>(CONFIG, {})), carpetaExportacion: carpeta })     // la recuerda para la próxima vez
+      return send(res, 200, await startExport(g[1], f, path.join(projDir(g[1]), 'salidas'), ROOT, opts, `http://${req.headers.host ?? '127.0.0.1:5273'}`, carpeta,
+        async e => { await writeJson(LOG, [e, ...(await leerLog()).filter(x => x.ruta !== e.ruta)].slice(0, 200)) }))
     }
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/exportar$/.exec(p)) && m === 'GET') {
       return send(res, 200, activeExport(g[1]) ?? null)
     }
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/exportaciones$/.exec(p)) && m === 'GET') {
-      const dir = path.join(projDir(g[1]), 'salidas'), out = []
-      for (const f of await listFiles(dir)) if (f.name.endsWith('.mp4') && !f.name.startsWith('vista-previa') && !f.name.endsWith('.part.mp4'))
-        out.push({ name: f.name, size: f.size, fecha: f.mtime, url: `api/files/proyectos/${g[1]}/salidas/${encodeURIComponent(f.name)}` })
+      const out: { name: string; size: number; fecha: string; ruta: string }[] = []
+      for (const e of await leerLog()) if (e.slug === g[1] && await exists(e.ruta)) out.push({ name: e.name, size: e.size, fecha: e.fecha, ruta: e.ruta })
+      const dir = path.join(projDir(g[1]), 'salidas')       // exportaciones antiguas que quedaron en la biblioteca
+      for (const f of await listFiles(dir)) if (f.name.endsWith('.mp4') && !f.name.startsWith('vista-previa') && !f.name.endsWith('.part.mp4')) out.push({ name: f.name, size: f.size, fecha: f.mtime, ruta: path.join(dir, f.name) })
       return send(res, 200, out.sort((a, b) => b.fecha.localeCompare(a.fecha)))
     }
+    // un archivo exportado solo se sirve o se muestra si está en el registro (o en salidas/): no es una puerta a cualquier ruta del disco
+    const permitido = async (abs: string) => path.isAbsolute(abs) && ((await leerLog()).some(e => e.ruta === abs) || (abs.startsWith(path.join(ROOT, 'proyectos') + path.sep) && abs.includes(`${path.sep}salidas${path.sep}`))) && await exists(abs)
+    if (p === '/exportado' && m === 'GET') {
+      const abs = url.searchParams.get('ruta') ?? ''
+      return (await permitido(abs)) ? serveAbs(req, res, abs) : send(res, 404, { error: 'Archivo no encontrado' })
+    }
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/mostrar$/.exec(p)) && m === 'POST') {
-      const { file } = JSON.parse((await readBody(req)) || '{}') as { file?: string }
-      const abs = path.join(projDir(g[1]), 'salidas', safeName(file ?? ''))
-      if (!isSlug(g[1]) || !file || !(await exists(abs))) return send(res, 404, { error: 'Archivo no encontrado' })
-      if (process.platform === 'darwin') await run('open', ['-R', abs]); else if (process.platform === 'win32') await run('explorer', ['/select,', abs]); else await run('xdg-open', [path.dirname(abs)])
+      const { ruta } = JSON.parse((await readBody(req)) || '{}') as { ruta?: string }
+      if (!ruta || !(await permitido(ruta))) return send(res, 404, { error: 'Archivo no encontrado' })
+      await revelar(ruta)
       return send(res, 200, { ok: true })
     }
     if ((g = /^\/exportaciones\/(.+)\/cancelar$/.exec(p)) && m === 'POST') { cancelExport(decodeURIComponent(g[1])); return send(res, 200, { ok: true }) }

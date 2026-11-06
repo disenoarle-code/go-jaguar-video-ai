@@ -158,7 +158,18 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
 }
 
 /** Lanza la exportación en segundo plano. */
-export async function startExport(slug: string, projectFile: string, outDir: string, root: string, opts: ExportOpts, origin: string): Promise<ExportJob> {
+export interface Exportado { slug: string; name: string; ruta: string; size: number; fecha: string }
+
+/** Mueve el archivo (rename; si es otro disco, copia y borra). */
+async function mover(src: string, dst: string) {
+  try { await fsp.rename(src, dst) } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw e; await fsp.copyFile(src, dst); await fsp.rm(src, { force: true }) }
+}
+async function nombreLibre(dir: string, name: string) {
+  const ext = path.extname(name), base = path.basename(name, ext)
+  for (let i = 1; ; i++) { const f = path.join(dir, i === 1 ? name : `${base} (${i})${ext}`); if (!(await fsp.stat(f).then(() => true).catch(() => false))) return f }
+}
+
+export async function startExport(slug: string, projectFile: string, outDir: string, root: string, opts: ExportOpts, origin: string, carpeta: string, registrar: (e: Exportado) => Promise<void>): Promise<ExportJob> {
   const running = activeExport(slug); if (running) return running
   const job: ExportJob = { id: `${slug}-${Date.now()}`, slug, status: 'running', pct: 0, opts, detail: 'Preparando…' }
   jobs.set(job.id, job)
@@ -196,7 +207,10 @@ export async function startExport(slug: string, projectFile: string, outDir: str
       })
       await fsp.rm(script, { force: true }); await fsp.rm(path.join(outDir, '.rotulos'), { recursive: true, force: true })
       await fsp.rename(tmp, out)
-      job.file = out; job.size = (await fsp.stat(out)).size; job.url = `api/files/proyectos/${slug}/salidas/${encodeURIComponent(name)}`; job.pct = 1; job.status = 'done'; job.detail = undefined
+      const dest = await nombreLibre(carpeta, name)          // el video final queda en la carpeta que eligió el usuario, no escondido en la biblioteca
+      await mover(out, dest)
+      job.file = dest; job.size = (await fsp.stat(dest)).size; job.url = `api/exportado?ruta=${encodeURIComponent(dest)}`; job.pct = 1; job.status = 'done'; job.detail = undefined
+      await registrar({ slug, name: path.basename(dest), ruta: dest, size: job.size, fecha: new Date().toISOString() })
     } catch (e) {
       await fsp.rm(path.join(outDir, '.exportar.filter.txt'), { force: true }).catch(() => {}); await fsp.rm(path.join(outDir, '.rotulos'), { recursive: true, force: true }).catch(() => {})
       for (const f of await fsp.readdir(outDir).catch(() => [] as string[])) if (f.endsWith('.part.mp4')) await fsp.rm(path.join(outDir, f), { force: true })

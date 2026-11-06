@@ -105,22 +105,34 @@ export async function bootEditor(slug: string) {
     const close = () => { modal.remove() }
     const esc = (t: string) => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
     const mb = (n: number) => n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1e3)} KB`
-    const prev = await fetch(`/api/proyectos/${slug}/exportaciones`).then(r => r.json()).catch(() => []) as { name: string; size: number; url: string }[]
+    const prev = await fetch(`/api/proyectos/${slug}/exportaciones`).then(r => r.json()).catch(() => []) as { name: string; size: number; ruta: string }[]
+    let carpeta = (await fetch('/api/configuracion').then(r => r.json()).catch(() => ({}))).carpetaExportacion as string | undefined ?? ''     // la última carpeta usada
+    const corta = (r: string) => r.replace(/^\/Users\/[^/]+/, '~')
 
     const form = () => {
       box.innerHTML = `<h2>Exportar video</h2>
         <label>Nombre del archivo</label><input type="text" id="x-name" value="${esc(store.project.name)}" />
+        <label>Guardar en</label>
+        <div class="folder"><span id="x-folder" title="${esc(carpeta)}">${esc(corta(carpeta))}</span><button id="x-change">Cambiar…</button></div>
         <label>Resolución</label><select id="x-res"><option value="original">Original · ${f.width}×${f.height}</option><option value="720">720p · ${dim(720)}</option><option value="480">480p · ${dim(480)} (más liviano)</option></select>
         <label>Calidad</label><select id="x-cal"><option value="rapida">Rápida · se hace en menos tiempo</option><option value="buena" selected>Buena · recomendada</option><option value="maxima">Máxima · tarda más, archivo más grande</option></select>
         <p class="dim small">MP4 (H.264 + AAC) · ${f.fps} fps · ${tc(duration(store.project))} · incluye cortes, zooms, transiciones, superpuestos y música.</p>
-        ${prev.length ? `<p class="dim small" style="margin-bottom:4px">Exportaciones anteriores</p><div class="prev">${prev.map(p => `<a href="/${p.url}" download="${esc(p.name)}">${esc(p.name)} <i>${mb(p.size)}</i></a>`).join('')}</div>` : ''}
+        ${prev.length ? `<p class="dim small" style="margin-bottom:4px">Exportaciones anteriores (clic para mostrar en la carpeta)</p><div class="prev">${prev.map((p, i) => `<a href="#" data-i="${i}" title="${esc(p.ruta)}">${esc(p.name)} <i>${mb(p.size)}</i></a>`).join('')}</div>` : ''}
         <div class="row"><button id="x-no">Cancelar</button><button class="primary" id="x-go">Exportar</button></div>`
       box.querySelector<HTMLElement>('#x-no')!.onclick = close
       box.querySelector<HTMLElement>('#x-go')!.onclick = start
+      box.querySelector<HTMLElement>('#x-change')!.onclick = async () => {        // diálogo del sistema para elegir la carpeta
+        const b = box.querySelector<HTMLButtonElement>('#x-change')!; b.disabled = true; b.textContent = 'Elige en la ventana…'
+        const r = await fetch('/api/carpeta', { method: 'POST', body: JSON.stringify({ actual: carpeta }), headers: { 'content-type': 'application/json' } }).then(r => r.json()).catch(() => ({}))
+        if (r.carpeta) carpeta = r.carpeta
+        const f = box.querySelector<HTMLElement>('#x-folder')!; f.textContent = corta(carpeta); f.title = carpeta
+        b.disabled = false; b.textContent = 'Cambiar…'
+      }
+      box.querySelectorAll<HTMLAnchorElement>('.prev a').forEach(a => { a.onclick = e => { e.preventDefault(); void fetch(`/api/proyectos/${slug}/mostrar`, { method: 'POST', body: JSON.stringify({ ruta: prev[Number(a.dataset.i)].ruta }), headers: { 'content-type': 'application/json' } }) } })
     }
     const val = (id: string) => (box.querySelector(`#${id}`) as HTMLInputElement).value
     async function start() {
-      const body = { nombre: val('x-name'), resolucion: val('x-res'), calidad: val('x-cal') }
+      const body = { nombre: val('x-name'), resolucion: val('x-res'), calidad: val('x-cal'), carpeta }
       box.innerHTML = '<h2>Exportando…</h2><p class="dim" id="x-det">Preparando…</p><div class="bar2"><i id="x-bar" style="width:0%"></i></div><div class="row"><button class="danger" id="x-cancel">Cancelar exportación</button></div>'
       let job = await fetch(`/api/proyectos/${slug}/exportar`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }).then(r => r.json())
       if (job.error) { box.innerHTML = `<h2>No se pudo exportar</h2><p class="warn">${esc(job.error)}</p><div class="row"><button id="x-no">Cerrar</button></div>`; box.querySelector<HTMLElement>('#x-no')!.onclick = close; return }
@@ -134,10 +146,10 @@ export async function bootEditor(slug: string) {
       }
       if (job.status === 'done') {
         box.innerHTML = `<h2>✓ Video listo</h2><video src="/${job.url}" controls playsinline></video>
-          <p class="dim small">${esc(job.url.split('/').pop() ?? '')} · ${mb(job.size)}</p>
-          <div class="row"><button id="x-show">Mostrar en la carpeta</button><a class="btn primary" href="/${job.url}" download="${esc(decodeURIComponent(job.url.split('/').pop() ?? 'video.mp4'))}">Descargar</a><button id="x-no">Cerrar</button></div>`
+          <p class="dim small" title="${esc(job.file)}">Guardado en <b>${esc(corta(job.file))}</b> · ${mb(job.size)}</p>
+          <div class="row"><button class="primary" id="x-show">Mostrar en la carpeta</button><button id="x-no">Cerrar</button></div>`
         box.querySelector<HTMLElement>('#x-no')!.onclick = close
-        box.querySelector<HTMLElement>('#x-show')!.onclick = () => { void fetch(`/api/proyectos/${slug}/mostrar`, { method: 'POST', body: JSON.stringify({ file: decodeURIComponent(job.url.split('/').pop() ?? '') }) }) }
+        box.querySelector<HTMLElement>('#x-show')!.onclick = () => { void fetch(`/api/proyectos/${slug}/mostrar`, { method: 'POST', body: JSON.stringify({ ruta: job.file }), headers: { 'content-type': 'application/json' } }) }
       } else if (document.body.contains(modal)) {
         box.innerHTML = `<h2>${job.status === 'cancelado' ? 'Exportación cancelada' : 'No se pudo exportar'}</h2>${job.status === 'cancelado' ? '' : `<p class="warn">${esc(job.error ?? 'Error')}</p>`}<div class="row"><button id="x-back">Volver</button><button id="x-no">Cerrar</button></div>`
         box.querySelector<HTMLElement>('#x-no')!.onclick = close; box.querySelector<HTMLElement>('#x-back')!.onclick = form

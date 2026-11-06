@@ -264,3 +264,8 @@ header .grow { flex:1; }
 #inspector .hint.dimmer { opacity:.75; margin-top:4px; }
 
 #inspector input[type=range] { accent-color:var(--acc); height:14px; }
+
+/* Exportar: carpeta de destino */
+.modal-box.exp .folder { display:flex; align-items:center; gap:8px; background:#151513; border:1px solid var(--line); border-radius:8px; padding:4px 4px 4px 10px; }
+.modal-box.exp .folder span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; }
+.modal-box.exp .folder button { white-space:nowrap; font-size:12px; padding:4px 10px; }
