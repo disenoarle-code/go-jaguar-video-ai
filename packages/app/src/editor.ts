@@ -258,8 +258,9 @@ export async function bootEditor(slug: string) {
   }
   /** Los setters reciben el proyecto ACTUAL (no una referencia vieja), así sobreviven a deshacer/rehacer. */
   function input(type: string, value: string | number, set: (p: Project, v: string) => void, attrs: Record<string, string> = {}) {
-    const el = document.createElement('input'); el.type = type; el.value = String(value)
+    const el = document.createElement('input'); el.type = type
     Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v))
+    el.value = String(value)      // el valor va DESPUÉS de min/max/step: si no, un deslizador 0–1 redondea 0,22 a 0
     el.addEventListener('focus', () => store.beginTx())
     el.addEventListener('blur', () => store.endTx())
     el.addEventListener('input', () => store.live(p => set(p, el.value)))
@@ -307,8 +308,8 @@ export async function bootEditor(slug: string) {
           exec(store, { op: 'set_zoom', clip: id, zoom: { kind: k, amount: keep, duration: ZOOM_DEFAULTS[k].duration } })
         }))
         insp.insertAdjacentHTML('beforeend', `<p class="hint">${ZOOM_INFO[zk].hint}</p>`)
-        slider('Intensidad', clip.zoom.amount, 0.02, 0.8, 0.01, pct, (pr, n) => { const z = C(pr).zoom; if (z) z.amount = n })
-        if (zk === 'punch') slider('Duración del golpe', clip.zoom.duration ?? 0.35, 0.05, 1.5, 0.05, sec, (pr, n) => { const z = C(pr).zoom; if (z) z.duration = n })
+        slider('Intensidad', clip.zoom.amount, 0.05, 0.5, 0.01, pct, (pr, n) => { const z = C(pr).zoom; if (z) z.amount = n })
+        if (zk === 'punch') slider('Duración del golpe', clip.zoom.duration ?? 0.35, 0.1, 1, 0.05, sec, (pr, n) => { const z = C(pr).zoom; if (z) z.duration = n })
       }
 
       // ---- TRANSICIONES: la del corte es UNA sola; aquí se ve como entrada de este clip y como salida del anterior ----
@@ -321,7 +322,7 @@ export async function bootEditor(slug: string) {
           exec(store, { op: 'set_transition', clip: oid, transition: v ? { kind: v as TransitionKind, ...TRANSITION_DEFAULTS[v as TransitionKind], dir: tr?.dir ?? 1 } : null })))
         if (tr) {
           insp.insertAdjacentHTML('beforeend', `<p class="hint">${TRANSITION_INFO[tr.kind].hint}</p>`)
-          slider('Duración total', tr.duration, 0.1, 2, 0.05, sec, (pr, n) => { const t = O(pr).transition; if (t) t.duration = n })
+          slider('Duración total', tr.duration, 0.1, 1.5, 0.05, sec, (pr, n) => { const t = O(pr).transition; if (t) t.duration = n })
           slider('Intensidad', tr.intensity, 0.1, 1.5, 0.05, pct, (pr, n) => { const t = O(pr).transition; if (t) t.intensity = n })
           if (tr.kind === 'slide') field('Dirección', select([['-1', 'Entra desde la derecha'], ['1', 'Entra desde la izquierda']], String(tr.dir ?? 1), v =>
             exec(store, { op: 'set_transition', clip: oid, transition: { ...tr, dir: Number(v) as 1 | -1 } })))
