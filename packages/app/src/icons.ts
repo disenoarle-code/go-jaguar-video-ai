@@ -13,6 +13,7 @@ const P = {
   fit: S('<path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/>'),
   'zoom-in': S('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/><path d="M8.5 11h5M11 8.5v5"/>'),
   'zoom-out': S('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/><path d="M8.5 11h5"/>'),
+  panel: S('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
   save: S('<path d="M5 3h11l4 4v14H5z"/><path d="M8 3v6h8V3"/><path d="M8 21v-7h8v7"/>'),
   plus: S('<path d="M12 5v14M5 12h14"/>'),
   minus: S('<path d="M5 12h14"/>'),

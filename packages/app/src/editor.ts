@@ -68,7 +68,7 @@ export async function bootEditor(slug: string) {
   let lastSavedRev = store.revision
   let lastJson = JSON.stringify(store.project), savedJson = lastJson
   const saveEl = $('savestate')
-  const showSaved = (ok: boolean) => { saveEl.textContent = ok ? '✓ Guardado' : 'Guardando…'; saveEl.style.color = ok ? '' : '#e8b152' }
+  const showSaved = (ok: boolean) => { saveEl.textContent = ok ? '✓ Guardado' : 'Guardando…'; saveEl.dataset.icon = ok ? '✓' : '…'; saveEl.style.color = ok ? '' : '#e8b152' }
   showSaved(true)
   let autosaveTimer = 0
   async function guardar(avisar = false) {
@@ -158,6 +158,12 @@ export async function bootEditor(slug: string) {
     modal.onclick = e => { if (e.target === modal && !box.querySelector('#x-cancel')) close() }
     form()
   }
+
+  // --- panel lateral como menú que entra desde la derecha (solo en pantallas angostas) ---
+  const appEl = $('app'), setDrawer = (open: boolean) => appEl.classList.toggle('drawer-open', open)
+  $('panelbtn').onclick = () => setDrawer(!appEl.classList.contains('drawer-open'))
+  $('backdrop').onclick = () => setDrawer(false)
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') setDrawer(false) })
 
   // --- barra de herramientas ---------------------------------------------------
   const sel = () => store.selection
