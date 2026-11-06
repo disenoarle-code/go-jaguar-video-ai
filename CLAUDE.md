@@ -104,7 +104,7 @@ Antes de cambiar código: `npm test` y `npm run check` deben pasar.
 
 ## Límites actuales (no prometas lo que no existe)
 
-- Los textos (subtítulos y gráficos) se ven en el editor pero **aún no salen en el MP4**: este ffmpeg no tiene `drawtext`/`subtitles`. Hay que dibujarlos aparte (p. ej. renderizarlos como imágenes desde el navegador y superponerlos).
+- Los textos (subtítulos y gráficos) salen en el MP4: la exportación los dibuja con un Chromium sin pantalla (`server/rotulos.ts` + página `src/render.ts`, el MISMO código de `overlays.ts` que usa el editor) como PNG con transparencia y ffmpeg los superpone. Si un rótulo se ve distinto en el MP4, el cambio va en `overlays.ts`. Rótulo animado: capa `graphic` con `template:'lanzamiento'` y `props:{linea1,linea2,modelo,marca (ruta api/files/… del logo blanco con transparencia),acento}`.
 - **El video se exporta desde la app** (botón **Exportar** del editor: resolución, calidad, progreso, descargar). El servidor renderiza la edición actual con ffmpeg (`server/exportar.ts`: cortes, zoom/transiciones, superpuestos, audio de clips, música). **Nunca le envíes el video al usuario por el chat ni lo renderices tú a mano**; si algo falta en la exportación, se arregla en `exportar.ts`.
 - 3D, zoom y subtítulos animados viven solo en `experiments/estilo-3d`; no son capas del editor.
 - El análisis de referencias lo haces tú (Claude) cuando el usuario pide la edición completa; la app no lo hace sola.

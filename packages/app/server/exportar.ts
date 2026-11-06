@@ -7,6 +7,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { renderRotulos } from './rotulos'
 import { layout, mainDuration, overlayDur, duration, parseProject, type Clip, type Project, type Transition } from '@gojaguar/core'
 
 export interface ExportOpts { resolucion: 'original' | '720' | '480'; calidad: 'rapida' | 'buena' | 'maxima'; nombre?: string }
@@ -66,7 +67,7 @@ function fxExpr(clip: Clip, next: Clip | undefined, D: number, fps: number) {
   }
 }
 
-export async function buildExport(project: Project, root: string, opts: ExportOpts) {
+export async function buildExport(project: Project, root: string, opts: ExportOpts, rot?: { dir: string; t0: number; t1: number }) {
   const fps = project.format.fps || 30
   const scale = opts.resolucion === 'original' ? 1 : (opts.resolucion === '720' ? 720 : 480) / Math.min(project.format.width, project.format.height)
   const W = even(project.format.width * Math.min(scale, 1)), H = even(project.format.height * Math.min(scale, 1))
@@ -129,6 +130,13 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},volume=${num(m.volume)}${fade},atrim=0:${num(total)}[am]`)
   }
 
+  // 4) rótulos (subtítulos y gráficos): secuencia de PNG con transparencia dibujada por el editor, encima de todo
+  if (rot) {
+    inputs.push(['-framerate', String(fps), '-i', path.join(rot.dir, '%05d.png')]); const k = inputs.length - 1
+    vf.push(`[${k}:v]setpts=PTS-STARTPTS+${num(rot.t0)}/TB,format=rgba[txt]`)
+    vf.push(`[${cur}][txt]overlay=0:0:eof_action=pass:enable='between(t,${num(rot.t0)},${num(rot.t1)})'[btxt]`); cur = 'btxt'
+  }
+
   vf.push(`[${cur}]null[v]`)
   const labels = audio.map(l => /\[(a[a-z]+\d*)\]$/.exec(l)![1])
   let hasA = false
@@ -141,14 +149,27 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
 }
 
 /** Lanza la exportación en segundo plano. */
-export async function startExport(slug: string, projectFile: string, outDir: string, root: string, opts: ExportOpts): Promise<ExportJob> {
+export async function startExport(slug: string, projectFile: string, outDir: string, root: string, opts: ExportOpts, origin: string): Promise<ExportJob> {
   const running = activeExport(slug); if (running) return running
   const job: ExportJob = { id: `${slug}-${Date.now()}`, slug, status: 'running', pct: 0, opts, detail: 'Preparando…' }
   jobs.set(job.id, job)
   void (async () => {
     try {
       const raw = parseProject(await fsp.readFile(projectFile, 'utf8'))     // también abre y migra proyectos de versiones anteriores
-      const b = await buildExport(raw, root, opts)
+      // rótulos visibles (no ocultos): se dibujan primero con Chromium sin pantalla
+      const tr = raw.tracks, texts = raw.layers.filter(l => (l.type === 'subtitle' || l.type === 'graphic') && !tr?.[l.type]?.hidden)
+      const total = duration(raw)
+      let rot: { dir: string; t0: number; t1: number } | undefined
+      const sc = opts.resolucion === 'original' ? 1 : (opts.resolucion === '720' ? 720 : 480) / Math.min(raw.format.width, raw.format.height)
+      const ow = Math.max(2, Math.round(raw.format.width * Math.min(sc, 1) / 2) * 2), oh = Math.max(2, Math.round(raw.format.height * Math.min(sc, 1) / 2) * 2)
+      if (texts.length) {
+        job.detail = 'Dibujando rótulos…'
+        const t0 = Math.max(0, Math.min(...texts.map(l => l.start))), t1 = Math.min(total, Math.max(...texts.map(l => l.end)))
+        const dir = path.join(outDir, '.rotulos'); await fsp.rm(dir, { recursive: true, force: true })
+        await renderRotulos({ origin, slug, w: ow, h: oh, fps: raw.format.fps || 30, t0, t1, outDir: dir, cancelled: () => !!job.cancelada, onProgress: p => { job.pct = p * 0.25 } })
+        rot = { dir, t0, t1 }
+      }
+      const b = await buildExport(raw, root, opts, rot)
       await fsp.mkdir(outDir, { recursive: true })
       const safe = (opts.nombre ?? slug).normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || slug
       const name = `${safe}-${b.W}x${b.H}.mp4`, out = path.join(outDir, name), tmp = out + '.part.mp4', script = path.join(outDir, '.exportar.filter.txt')
@@ -159,16 +180,16 @@ export async function startExport(slug: string, projectFile: string, outDir: str
       await new Promise<void>((resolve, reject) => {
         const p = spawn('ffmpeg', args); procs.set(job.id, p)
         let err = ''
-        p.stdout.on('data', d => { const m = /out_time_us=(\d+)/g; let x, last = 0; const s = String(d); while ((x = m.exec(s))) last = Number(x[1]); if (last) job.pct = Math.min(0.99, last / 1e6 / b.total) })
+        p.stdout.on('data', d => { const m = /out_time_us=(\d+)/g; let x, last = 0; const s = String(d); while ((x = m.exec(s))) last = Number(x[1]); if (last) job.pct = Math.min(0.99, (rot ? 0.25 : 0) + (1 - (rot ? 0.25 : 0)) * (last / 1e6 / b.total)) })
         p.stderr.on('data', d => { err += d })
         p.on('error', reject)
         p.on('close', code => code === 0 ? resolve() : reject(new Error(job.cancelada ? 'Cancelado' : 'ffmpeg falló: ' + err.slice(-400))))
       })
-      await fsp.rm(script, { force: true })
+      await fsp.rm(script, { force: true }); await fsp.rm(path.join(outDir, '.rotulos'), { recursive: true, force: true })
       await fsp.rename(tmp, out)
       job.file = out; job.size = (await fsp.stat(out)).size; job.url = `api/files/proyectos/${slug}/salidas/${encodeURIComponent(name)}`; job.pct = 1; job.status = 'done'; job.detail = undefined
     } catch (e) {
-      await fsp.rm(path.join(outDir, '.exportar.filter.txt'), { force: true }).catch(() => {})
+      await fsp.rm(path.join(outDir, '.exportar.filter.txt'), { force: true }).catch(() => {}); await fsp.rm(path.join(outDir, '.rotulos'), { recursive: true, force: true }).catch(() => {})
       for (const f of await fsp.readdir(outDir).catch(() => [] as string[])) if (f.endsWith('.part.mp4')) await fsp.rm(path.join(outDir, f), { force: true })
       if (job.cancelada) { job.status = 'cancelado'; job.error = 'Exportación cancelada' } else { job.status = 'error'; job.error = (e as Error).message }
     } finally { procs.delete(job.id) }

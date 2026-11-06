@@ -772,7 +772,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       }
       const f = path.join(projDir(g[1]), 'proyecto.gojaguar')
       if (!(await exists(f))) return send(res, 400, { error: 'Este proyecto aún no tiene edición' })
-      return send(res, 200, await startExport(g[1], f, path.join(projDir(g[1]), 'salidas'), ROOT, opts))
+      return send(res, 200, await startExport(g[1], f, path.join(projDir(g[1]), 'salidas'), ROOT, opts, `http://${req.headers.host ?? '127.0.0.1:5273'}`))
     }
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/exportar$/.exec(p)) && m === 'GET') {
       return send(res, 200, activeExport(g[1]) ?? null)

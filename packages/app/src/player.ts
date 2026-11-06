@@ -1,5 +1,5 @@
 import type { LoadedAsset } from './media'
-import { drawOverlays } from './overlays'
+import { drawOverlays, setOverlayRedraw } from './overlays'
 import { duration, fxAt, layout, locate, overlayEnd, type FxState, type Store } from '@gojaguar/core'
 import { H, W, setCanvasSize } from './constants'
 
@@ -60,6 +60,7 @@ export class Player {
     this.canvas = canvas
     this.ctx = canvas.getContext('2d')!
     this.fit()
+    setOverlayRedraw(() => { this.dirty = true })
     store.onChange(() => {
       this.fit()
       this.playhead = Math.min(this.playhead, duration(store.project))

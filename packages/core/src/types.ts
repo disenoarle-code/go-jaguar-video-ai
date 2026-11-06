@@ -60,7 +60,8 @@ interface LayerBase {
 }
 
 export interface SubtitleLayer extends LayerBase { type: 'subtitle'; text: string; size: number; color: string }
-export interface GraphicLayer extends LayerBase { type: 'graphic'; template: string; text: string; size: number; color: string }
+/** Gráfico. `template` 'lowerthird' (barra con texto) o 'lanzamiento' (rótulo animado de lanzamiento; sus textos e imagen van en `props`). */
+export interface GraphicLayer extends LayerBase { type: 'graphic'; template: string; text: string; size: number; color: string; props?: Record<string, string> }
 /** Reservados para etapas posteriores (el modelo ya los soporta; aún no se dibujan). */
 export interface ImageLayer extends LayerBase { type: 'image'; assetId: string }
 export interface Scene3DLayer extends LayerBase { type: 'scene3d'; template: string; params: Record<string, unknown> }
@@ -86,6 +87,7 @@ export interface OverlayClip {
   srcIn: number; srcOut: number   // segundos del archivo fuente
   speed: number; volume: number
   transform: Transform            // posición/tamaño/opacidad (solo video)
+  blend?: 'screen'                // 'screen' suma la luz del clip al video de abajo (luces, destellos, humo): lo negro no se ve
 }
 
 /** Estado de una pista de la línea de tiempo. Claves: 'main', 'music', 'subtitle', 'graphic', 'v1','v2'… (video superpuesto) y 'a1','a2'… (audio extra). */

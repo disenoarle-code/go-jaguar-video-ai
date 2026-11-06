@@ -9,7 +9,7 @@ import {
 
 /** Capa nueva sin id; el transform puede ser parcial. */
 export type NewLayer = (Layer extends infer L ? L extends Layer ? Omit<L, 'id' | 'transform'> & { transform?: Partial<Transform> } : never : never)
-export type OverlayPatch = { start?: number; track?: number; srcIn?: number; srcOut?: number; speed?: number; volume?: number; transform?: Partial<Transform> }
+export type OverlayPatch = { blend?: 'screen' | null; start?: number; track?: number; srcIn?: number; srcOut?: number; speed?: number; volume?: number; transform?: Partial<Transform> }
 export type LayerPatch = { transform?: Partial<Transform>; [k: string]: unknown }
 
 /**
@@ -19,7 +19,7 @@ export type LayerPatch = { transform?: Partial<Transform>; [k: string]: unknown 
 export type Cmd =
   | { op: 'import_asset'; asset: AssetInfo }
   | { op: 'add_clip'; asset: string; src_in?: number; src_out?: number }
-  | { op: 'add_overlay'; asset: string; start: number; track?: number; src_in?: number; src_out?: number; x?: number; y?: number; scale?: number; volume?: number }
+  | { op: 'add_overlay'; asset: string; start: number; track?: number; src_in?: number; src_out?: number; x?: number; y?: number; scale?: number; volume?: number; blend?: 'screen' }
   | { op: 'clip_to_overlay'; clip: string; start: number; track?: number }
   | { op: 'update_overlay'; id: string; patch: OverlayPatch }
   | { op: 'delete_overlay'; id: string }
@@ -87,7 +87,7 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       const start = Math.max(cmd.start, 0)
       const track = freeTrack(p, kind, start, start + (srcOut - srcIn), cmd.track ?? 1)
       const o = { id: store.newId('o'), assetId: a.id, kind, track, start, srcIn, srcOut, speed: 1, volume: clamp(cmd.volume ?? 1, 0, 4),
-        transform: { ...DEFAULT_TRANSFORM, x: cmd.x ?? 0.5, y: cmd.y ?? 0.5, scale: cmd.scale ?? (kind === 'video' ? 0.5 : 1) } }
+        transform: { ...DEFAULT_TRANSFORM, x: cmd.x ?? 0.5, y: cmd.y ?? 0.5, scale: cmd.scale ?? (kind === 'video' ? 0.5 : 1) }, ...(cmd.blend && kind === 'video' ? { blend: cmd.blend } : {}) }
       ;(p.overlays ??= []).push(o)
       compactTracks(p)
       return `${o.id} ${kind} en pista ${track} desde ${f2(start)}s (${a.name})`
@@ -108,9 +108,10 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
     case 'update_overlay': {
       const o = p.overlays?.find(x => x.id === cmd.id)
       if (!o) return 'clip superpuesto no encontrado'
-      const { transform, ...rest } = cmd.patch
+      const { transform, blend, ...rest } = cmd.patch
       const a = p.assets.find(x => x.id === o.assetId)
       Object.assign(o, rest)
+      if (blend !== undefined) { if (blend) o.blend = blend; else delete o.blend }
       if (a) { o.srcIn = clamp(o.srcIn, 0, a.duration); o.srcOut = clamp(o.srcOut, o.srcIn + MIN_DUR * o.speed, a.duration) }
       o.start = Math.max(o.start, 0); o.speed = clamp(o.speed, 0.1, 8); o.volume = clamp(o.volume, 0, 4)
       if (transform) o.transform = { ...o.transform, ...transform }
