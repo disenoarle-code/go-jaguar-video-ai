@@ -284,7 +284,7 @@ async function listReferences() {
 
 async function linkReferences(rutas: string[]) {
   const usados = new Set((await listReferences()).map(r => r.nombre))
-  const agregados: string[] = []
+  const agregados: string[] = [], ids: string[] = []
   for (const ruta of rutas) {
     if (!path.isAbsolute(ruta) || !isVideoName(ruta)) continue
     const st = await fsp.stat(ruta).catch(() => null); if (!st?.isFile()) continue
@@ -294,9 +294,17 @@ async function linkReferences(rutas: string[]) {
     usados.add(stem)
     const id = `e-${crypto.randomBytes(4).toString('hex')}`
     await writeJson(path.join(REFS, `${id}.ref.json`), { id, name: path.basename(ruta), stem, ruta, size: st.size, agregada: new Date().toISOString() } satisfies RefLink)
-    agregados.push(path.basename(ruta))
+    agregados.push(path.basename(ruta)); ids.push(id)
   }
-  return agregados
+  return { agregados, ids }
+}
+
+/** Marca referencias como elegidas en un proyecto (para que una referencia nueva quede seleccionada sola). */
+async function seleccionarEnProyecto(slug: string | null, ids: string[]) {
+  if (!slug || !isSlug(slug) || !ids.length) return
+  const meta = await loadMeta(slug); if (!meta) return
+  meta.referencias = [...new Set([...(meta.referencias ?? []), ...ids])]
+  await writeJson(path.join(projDir(slug), 'proyecto.json'), meta)
 }
 
 // --- diálogo nativo para elegir archivos (devuelve rutas reales: así no hace falta copiar nada) ----------------
@@ -669,17 +677,22 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
     if (m === 'PUT' && p === '/referencias') {
       const name = await uniqueName(REFS, safeName(url.searchParams.get('filename') ?? 'referencia.mp4'))
       const size = await saveStream(req, path.join(REFS, name))
+      await seleccionarEnProyecto(url.searchParams.get('proyecto'), [name])
       return send(res, 200, { id: name, size, modo: 'copia' })
     }
     if (m === 'POST' && p === '/referencias/elegir') {
       const rutas = await pickFiles(true, 'Elige los videos de referencia')
-      return send(res, 200, { agregados: await linkReferences(rutas), cancelado: rutas.length === 0 })
+      const r = await linkReferences(rutas)
+      await seleccionarEnProyecto(url.searchParams.get('proyecto'), r.ids)
+      return send(res, 200, { agregados: r.agregados, cancelado: rutas.length === 0 })
     }
     if (m === 'POST' && p === '/referencias/enlazar') {
       const { archivos } = JSON.parse((await readBody(req)) || '{}') as { archivos: { name: string; size: number; lastModified: number }[] }
       const rutas: string[] = [], faltan: string[] = []
       for (const a of archivos ?? []) { const r = await locateFile(a.name, a.size, a.lastModified); r ? rutas.push(r) : faltan.push(a.name) }
-      return send(res, 200, { enlazados: await linkReferences(rutas), noEncontrados: faltan })
+      const r = await linkReferences(rutas)
+      await seleccionarEnProyecto(url.searchParams.get('proyecto'), r.ids)
+      return send(res, 200, { enlazados: r.agregados, noEncontrados: faltan })
     }
     if ((g = /^\/referencias\/([^/]+)\/ubicar$/.exec(p)) && m === 'POST') {
       const f = path.join(REFS, `${safeName(decodeURIComponent(g[1]))}.ref.json`)

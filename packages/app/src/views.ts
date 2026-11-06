@@ -229,7 +229,7 @@ export async function renderProject(slug: string) {
     zone.ondrop = e => { e.preventDefault(); zone.classList.remove('over'); if (e.dataTransfer?.files.length) void agregarArrastrados(e.dataTransfer.files, box, enlazar, urlCopia) }
   }
   wireDrop($('dropMat'), $('pickMat'), () => api.elegirMaterial(slug), a => api.enlazarMaterial(slug, a), `/api/proyectos/${slug}/material`, $('upl'))
-  wireDrop($('dropRef'), $('pickRef'), () => api.elegirReferencias(), a => api.enlazarReferencias(a), '/api/referencias', $('uplRef'))
+  wireDrop($('dropRef'), $('pickRef'), () => api.elegirReferencias(slug), a => api.enlazarReferencias(a, slug), `/api/referencias?proyecto=${slug}`, $('uplRef'))
 
   // --- tarjetas: borrar, elegir referencias y refrescar miniaturas ---------------------------------------
   let cur = { info, refs }
