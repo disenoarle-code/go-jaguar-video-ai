@@ -68,7 +68,7 @@ editor.exec({ op: 'delete_ranges', ranges: [[10,12],[30,31]] })
 await editor.bench()                   // mide scrub y reproducción (pestaña visible)
 ```
 
-Comandos (`op`): `import_asset`, `add_clip {asset,src_in,src_out}`, `split {at}`, `delete_range {from,to}`, `delete_ranges {ranges}`, `delete_clip {id}`, `speed {clip,value}`, `speed_all {value}`, `volume {clip,value}`, `move_clip {id,to_index}`, `trim {id,edge,src_time}`, `add_text {type:'subtitle'|'graphic',start,end,text,…}`, `add_layer`, `update_layer`, `delete_layer`. Definición: `packages/core/src/commands.ts`.
+Comandos (`op`): `import_asset`, `add_clip {asset,src_in,src_out,effect?,dir?}`, `set_effect {clip,effect|null,dir?}` (efectos: `push` zoom lento, `punch` golpe de zoom, `slide` deslizamiento, `punchflash`/`dropflash` zoom con destello), `set_music {asset,src_in,volume,fade_out}` (pista de música desde el inicio; el asset es `kind:'audio'` con `proxy` = la vista previa `.previews/<id>.m4a`), `clear_music`, `set_format {width,height}` (vertical: 1080×1920), `split {at}`, `delete_range {from,to}`, `delete_ranges {ranges}`, `delete_clip {id}`, `speed {clip,value}`, `speed_all {value}`, `volume {clip,value}`, `move_clip {id,to_index}`, `trim {id,edge,src_time}`, `add_text {type:'subtitle'|'graphic',start,end,text,…}`, `add_layer`, `update_layer`, `delete_layer`. Definición: `packages/core/src/commands.ts`.
 
 Reglas:
 - **Nunca borres, muevas ni renombres los videos originales del usuario** (están enlazados, no copiados). Quitar algo de la app solo quita el enlace.
@@ -100,7 +100,7 @@ Antes de cambiar código: `npm test` y `npm run check` deben pasar.
 
 ## Límites actuales (no prometas lo que no existe)
 
-- No hay exportación a MP4 desde el editor todavía (E3). El editor aún no tiene capa de música ni de imágenes: se usan al renderizar con `experiments/estilo-3d` (Remotion).
+- No hay exportación a MP4 desde el editor todavía (E3): el MP4 final se renderiza con ffmpeg a partir de la misma edición (cortes + `fx` + música). El editor muestra y reproduce música y efectos en vivo; aún no tiene capa de imágenes. Falta que la vista previa de "Proyectos" use música y efectos.
 - 3D, zoom y subtítulos animados viven solo en `experiments/estilo-3d`; no son capas del editor.
 - El análisis de referencias lo haces tú (Claude) cuando el usuario pide la edición completa; la app no lo hace sola.
 - Recorte de fondo (Apple Vision) solo en Mac: `experiments/estilo-3d/scripts/matte.swift`.

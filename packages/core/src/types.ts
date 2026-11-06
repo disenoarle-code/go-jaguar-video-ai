@@ -15,13 +15,21 @@ export interface AssetInfo {
   height: number
 }
 
+/** Efecto de movimiento/transición de un clip (ver fx.ts). */
+export type ClipFx = 'push' | 'punch' | 'slide' | 'punchflash' | 'dropflash'
+export const CLIP_FX: ClipFx[] = ['push', 'punch', 'slide', 'punchflash', 'dropflash']
+
 /** Tramo de un archivo fuente en la pista principal (magnética: sin huecos). */
 export interface Clip {
   id: string
   assetId: string
   srcIn: number; srcOut: number   // segundos del archivo fuente
   speed: number; volume: number
+  fx?: ClipFx; fxDir?: 1 | -1
 }
+
+/** Pista de música: un archivo de audio que suena desde el inicio de la línea de tiempo. */
+export interface Music { assetId: string; srcIn: number; volume: number; fadeOut: number }
 
 /** Posición y apariencia de una capa. x,y = centro normalizado (0..1). */
 export interface Transform {
@@ -61,6 +69,7 @@ export interface Project {
   assets: AssetInfo[]
   clips: Clip[]
   layers: Layer[]
+  music?: Music
   nextId: number
 }
 

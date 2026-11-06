@@ -56,6 +56,7 @@ export function validate(p: any): asserts p is Project {
     if (![c.srcIn, c.srcOut, c.speed, c.volume].every(num)) fail(`clip ${c.id} con números inválidos`)
     if (!(c.srcOut > c.srcIn) || !(c.speed > 0)) fail(`clip ${c.id} con rango o velocidad inválidos`)
   }
+  if (p.music && (!assetIds.has(p.music.assetId) || ![p.music.srcIn, p.music.volume, p.music.fadeOut].every(num))) fail('la música usa un asset inexistente o con números inválidos')
   for (const l of p.layers) {
     uniq(l.id)
     if (typeof l.type !== 'string') fail(`capa ${l.id} sin tipo`)

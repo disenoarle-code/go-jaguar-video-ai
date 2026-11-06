@@ -22,9 +22,16 @@ export async function bootEditor(slug: string) {
   const tl = new Timeline($('timeline') as HTMLCanvasElement, store, player)
 
   /** Carga los medios que el proyecto usa y aún no están en memoria. */
+  const loadingIds = new Set<string>()
   async function loadMedia() {
     for (const info of store.project.assets) {
-      if (player.assets.has(info.id)) continue
+      if (player.assets.has(info.id) || player.music.has(info.id) || loadingIds.has(info.id)) continue
+      loadingIds.add(info.id)
+      if (info.kind === 'audio') {
+        try { player.addMusic(info.id, await player.actx.decodeAudioData(await (await fetch(`/${info.proxy}`)).arrayBuffer())); tl.dirty = true }
+        catch (e) { notify(`No se pudo cargar la música "${info.name}": ${(e as Error).message}`) }
+        continue
+      }
       try { player.assets.set(info.id, await loadAsset(info, player.actx, () => { tl.dirty = true })) }
       catch (e) { notify(`No se pudo cargar "${info.name}": ${(e as Error).message}`) }
     }
@@ -205,8 +212,8 @@ export async function bootEditor(slug: string) {
   // API para que Claude (o los tests) controlen el editor con los mismos comandos que la UI
   ;(window as any).editor = {
     store, player, tl,
-    exec: (c: Cmd) => exec(store, c),
-    batch: (cs: Cmd[]) => execBatch(store, cs),   // varios comandos = una sola entrada de deshacer
+    exec: (c: Cmd) => { const r = exec(store, c); void loadMedia(); return r },
+    batch: (cs: Cmd[]) => { const r = execBatch(store, cs); void loadMedia(); return r },   // carga también la música recién importada   // varios comandos = una sola entrada de deshacer
     describe: () => describe(store),
     serialize: () => serialize(store.project),
     snapshot: () => player.snapshotDataUrl(),

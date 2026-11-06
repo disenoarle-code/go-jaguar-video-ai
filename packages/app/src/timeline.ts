@@ -8,8 +8,9 @@ const ROWS = {
   audio: { y: 92, h: 34, label: 'Audio' },
   subtitle: { y: 132, h: 26, label: 'Subtítulos' },
   graphic: { y: 162, h: 26, label: 'Gráficos' },
+  music: { y: 192, h: 30, label: 'Música' },
 } as const
-export const TL_HEIGHT = 196
+export const TL_HEIGHT = 228
 const EDGE = 7
 
 type Drag =
@@ -275,6 +276,7 @@ export class Timeline {
     for (const pl of placed) this.drawClip(pl, dragging?.id === pl.clip.id)
 
     for (const o of p.layers) if (isTextLayer(o)) this.drawOverlay(o)
+    this.drawMusic()
 
     // indicador de destino al reordenar
     if (dragging) {
@@ -355,7 +357,7 @@ export class Timeline {
     }
     c.fillStyle = 'rgba(8,9,14,.55)'; c.fillRect(x0, V.y, Math.min(150, x1 - x0), 18)
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
-    c.fillText(`${pl.clip.id}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}${pl.clip.volume !== 1 ? `  vol ${pl.clip.volume}` : ''}`, x0 + 6, V.y + 9)
+    c.fillText(`${pl.clip.id}${pl.clip.fx ? `  ✦${pl.clip.fx}` : ''}${pl.clip.speed !== 1 ? `  ×${pl.clip.speed}` : ''}${pl.clip.volume !== 1 ? `  vol ${pl.clip.volume}` : ''}`, x0 + 6, V.y + 9)
     c.restore()
 
     // audio + waveform
@@ -387,6 +389,28 @@ export class Timeline {
       c.fillStyle = '#e8b152'
       for (const xx of [x0, x1 - 5]) c.fillRect(xx, V.y + V.h / 2 - 12, 5, 24)
     }
+  }
+
+  private drawMusic() {
+    const m = this.store.project.music; if (!m) return
+    const c = this.ctx, R = ROWS.music, total = duration(this.store.project)
+    const x0 = this.t2x(0), x1 = this.t2x(total)
+    if (x1 < LEFT || x0 > this.w) return
+    const l = Math.max(x0, LEFT)
+    c.save(); c.beginPath(); c.rect(l, R.y, x1 - l, R.h); c.clip()
+    c.fillStyle = '#4a3a17'; c.beginPath(); c.roundRect(x0, R.y + 2, x1 - x0, R.h - 4, 5); c.fill()
+    const pk = this.player.musicPeaks.get(m.assetId)
+    if (pk) {
+      c.fillStyle = '#e8b152'; const mid = R.y + R.h / 2
+      for (let x = Math.floor(l); x < Math.min(x1, this.w); x++) {
+        const t = m.srcIn + (x - x0) / this.pps, i0 = Math.floor(t * 100), i1 = Math.max(i0 + 1, Math.floor((t + 1 / this.pps) * 100))
+        let mx = 0; for (let i = i0; i < i1 && i < pk.length; i++) if (pk[i] > mx) mx = pk[i]
+        const h = Math.min(1, mx * m.volume) * (R.h - 8); c.fillRect(x, mid - h / 2, 1, Math.max(h, 1))
+      }
+    }
+    c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
+    c.fillText('♪ ' + (this.store.asset(m.assetId)?.name ?? 'música'), Math.max(x0, LEFT) + 8, R.y + 9)
+    c.restore()
   }
 
   private drawOverlay(o: TextLayer) {

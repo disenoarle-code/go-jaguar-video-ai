@@ -2,7 +2,7 @@ import { MIN_DUR, clipDur, duration, layout } from './timeline'
 import type { Store } from './store'
 import {
   DEFAULT_TRANSFORM, isTextLayer,
-  type AssetInfo, type Clip, type Layer, type Project, type TextLayer, type Transform,
+  CLIP_FX, type AssetInfo, type Clip, type ClipFx, type Layer, type Project, type TextLayer, type Transform,
 } from './types'
 
 /** Capa nueva sin id; el transform puede ser parcial. */
@@ -15,7 +15,11 @@ export type LayerPatch = { transform?: Partial<Transform>; [k: string]: unknown 
  */
 export type Cmd =
   | { op: 'import_asset'; asset: AssetInfo }
-  | { op: 'add_clip'; asset: string; src_in?: number; src_out?: number }
+  | { op: 'add_clip'; asset: string; src_in?: number; src_out?: number; effect?: ClipFx; dir?: 1 | -1 }
+  | { op: 'set_effect'; clip: string; effect: ClipFx | null; dir?: 1 | -1 }
+  | { op: 'set_music'; asset: string; src_in?: number; volume?: number; fade_out?: number }
+  | { op: 'clear_music' }
+  | { op: 'set_format'; width: number; height: number; fps?: number }
   | { op: 'split'; at: number }
   | { op: 'delete_range'; from: number; to: number }
   | { op: 'delete_ranges'; ranges: [number, number][] }
@@ -60,9 +64,27 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       const srcIn = clamp(cmd.src_in ?? 0, 0, a.duration)
       const srcOut = clamp(cmd.src_out ?? a.duration, srcIn, a.duration)
       if (srcOut - srcIn < MIN_DUR) return 'tramo demasiado corto'
-      const c: Clip = { id: store.newId('c'), assetId: a.id, srcIn, srcOut, speed: 1, volume: 1 }
+      const c: Clip = { id: store.newId('c'), assetId: a.id, srcIn, srcOut, speed: 1, volume: 1, ...(cmd.effect ? { fx: cmd.effect, fxDir: cmd.dir } : {}) }
       p.clips.push(c)
       return `${c.id} añadido (${a.name} ${f2(srcIn)}–${f2(srcOut)})`
+    }
+    case 'set_effect': {
+      const c = p.clips.find(x => x.id === cmd.clip)
+      if (!c) return 'clip no encontrado'
+      if (cmd.effect && !CLIP_FX.includes(cmd.effect)) return `efecto desconocido (${CLIP_FX.join(', ')})`
+      if (cmd.effect) { c.fx = cmd.effect; c.fxDir = cmd.dir ?? c.fxDir } else { delete c.fx; delete c.fxDir }
+      return `${c.id} efecto ${cmd.effect ?? 'ninguno'}`
+    }
+    case 'set_music': {
+      const a = p.assets.find(x => x.id === cmd.asset)
+      if (!a) return 'asset no encontrado'
+      p.music = { assetId: a.id, srcIn: clamp(cmd.src_in ?? 0, 0, a.duration), volume: clamp(cmd.volume ?? 1, 0, 4), fadeOut: clamp(cmd.fade_out ?? 0.9, 0, 10) }
+      return `música ${a.name} desde ${f2(p.music.srcIn)}s`
+    }
+    case 'clear_music': { delete p.music; return 'música quitada' }
+    case 'set_format': {
+      p.format = { width: Math.round(clamp(cmd.width, 16, 8192)), height: Math.round(clamp(cmd.height, 16, 8192)), fps: cmd.fps ?? p.format.fps }
+      return `formato ${p.format.width}x${p.format.height}`
     }
     case 'split': {
       const hit = layout(p).find(x => cmd.at > x.start + MIN_DUR && cmd.at < x.end - MIN_DUR)
@@ -193,19 +215,20 @@ const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(
 export function describe(store: Store): string {
   const p = store.project
   const placed = layout(p)
-  const lines = [`"${p.name}" ${p.format.width}x${p.format.height}@${p.format.fps} · ${tc(duration(p))} · ${p.clips.length} clips · ${p.layers.length} capas`]
+  const lines = [`"${p.name}" ${p.format.width}x${p.format.height}@${p.format.fps} · ${tc(duration(p))} · ${p.clips.length} clips · ${p.layers.length} capas${p.music ? ` · música ${store.asset(p.music.assetId)?.name ?? p.music.assetId} desde ${f2(p.music.srcIn)}s` : ''}`]
   let i = 0
   while (i < placed.length) {
     let j = i
     while (j + 1 < placed.length
       && placed[j + 1].clip.assetId === placed[i].clip.assetId
       && placed[j + 1].clip.speed === placed[i].clip.speed
-      && placed[j + 1].clip.volume === placed[i].clip.volume) j++
+      && placed[j + 1].clip.volume === placed[i].clip.volume
+      && placed[j + 1].clip.fx === placed[i].clip.fx) j++
     const a = store.asset(placed[i].clip.assetId)
     const first = placed[i], last = placed[j]
     const n = j - i + 1
     lines.push(n === 1
-      ? `${first.clip.id} [${tc(first.start)}–${tc(first.end)}] ${a?.name ?? first.clip.assetId} src ${f2(first.clip.srcIn)}–${f2(first.clip.srcOut)} x${first.clip.speed} vol${first.clip.volume}`
+      ? `${first.clip.id} [${tc(first.start)}–${tc(first.end)}] ${a?.name ?? first.clip.assetId} src ${f2(first.clip.srcIn)}–${f2(first.clip.srcOut)} x${first.clip.speed} vol${first.clip.volume}${first.clip.fx ? ` fx:${first.clip.fx}` : ''}`
       : `${first.clip.id}…${last.clip.id} [${tc(first.start)}–${tc(last.end)}] ${n} clips ${a?.name ?? first.clip.assetId} x${first.clip.speed} vol${first.clip.volume}`)
     i = j + 1
   }
