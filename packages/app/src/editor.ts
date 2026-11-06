@@ -284,6 +284,7 @@ export async function bootEditor(slug: string) {
     const clip = s?.type === 'clip' ? p.clips.find(c => c.id === s.id) : undefined
     const lay = s?.type === 'layer' ? p.layers.find(o => o.id === s.id) : undefined
     const ov = s?.type === 'overlay' ? p.overlays?.find(o => o.id === s.id) : undefined
+    if (s && !(clip || lay || ov || (s.type === 'music' && p.music))) { store.selection = null; renderInspector(); return }     // lo seleccionado ya no existe (p. ej. tras deshacer)
     const nextClip = clip ? p.clips[p.clips.indexOf(clip) + 1] : undefined
     const key = s ? `${s.type}:${s.id}:${clip?.zoom?.kind ?? ''}:${clip?.transition?.kind ?? ''}:${clip?.transition?.dir ?? ''}:${nextClip?.transition?.kind ?? ''}:${nextClip?.transition?.dir ?? ''}` : 'none'
     if (key === lastKey && key !== 'none') return

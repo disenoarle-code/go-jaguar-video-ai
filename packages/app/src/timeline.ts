@@ -116,7 +116,7 @@ export class Timeline {
       { key: 'music', ...ROWS.music, type: 'audio', eye: false, mute: true },
       ...this.aLanes.map((r, i): R => ({ key: `a${i + 1}`, ...r, type: 'audio', eye: false, mute: true })),
     ]
-    return out
+    return out.filter(r => r.h > 0)
   }
   private onGutterDown(x: number, y: number) {
     for (const r of this.rowList()) {
@@ -148,8 +148,10 @@ export class Timeline {
     const p = this.store.project
     const nv = trackCount(p, 'video') + (this.extra === 'video' ? 1 : 0), na = trackCount(p, 'audio') + (this.extra === 'audio' ? 1 : 0)
     let y = 30
-    ROWS.subtitle.y = y; y += 30
-    ROWS.graphic.y = y; y += 32
+    // las filas de texto solo se ven si hay subtítulos / gráficos (como las pistas superpuestas: nada de filas vacías)
+    const hasSub = p.layers.some(l => l.type === 'subtitle'), hasGfx = p.layers.some(l => l.type === 'graphic')
+    ROWS.subtitle.h = hasSub ? 26 : 0; ROWS.subtitle.y = y; if (hasSub) y += 30
+    ROWS.graphic.h = hasGfx ? 26 : 0; ROWS.graphic.y = y; if (hasGfx) y += 32
     this.vLanes = []
     for (let k = nv; k >= 1; k--) { this.vLanes[k - 1] = { y, h: 46, label: `Video ${k + 1}` }; y += 50 }
     ROWS.video.y = y; y += ROWS.video.h + 6
