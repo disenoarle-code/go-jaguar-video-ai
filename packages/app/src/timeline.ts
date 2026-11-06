@@ -134,7 +134,7 @@ export class Timeline {
     if (row === 'video') {
       const tr = this.hitTransition(x, y) ?? this.hitCut(x, y)
       if (tr) {
-        this.store.select({ type: 'clip', id: tr.clip.id }); this.player.seek(tr.start + 0.01)
+        this.player.seek(tr.start + 0.01)
         const r = this.canvas.getBoundingClientRect()
         this.onCutClick(tr.clip.id, r.left + this.t2x(tr.start), r.top + ROWS.video.y)
         return
@@ -434,6 +434,7 @@ export class Timeline {
   private chipPos(pl: Placed) { return { cx: this.t2x(pl.start), cy: ROWS.video.y + ROWS.video.h / 2, r: 12 } }
   /** Corte entre dos clips que aún NO tiene transición (zona de la pastilla "+"). */
   private hitCut(x: number, y: number): Placed | null {
+    if (this.store.selection?.type === 'clip') return null     // con un clip seleccionado (ajustando tiempos) no se ofrecen transiciones
     const placed = layout(this.store.project), V = ROWS.video
     if (y < V.y || y > V.y + V.h) return null
     for (let i = 1; i < placed.length; i++) {
@@ -444,6 +445,7 @@ export class Timeline {
     return null
   }
   private hitTransition(x: number, y: number): Placed | null {
+    if (this.store.selection?.type === 'clip') return null
     const placed = layout(this.store.project)
     for (let i = 1; i < placed.length; i++) {
       const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx)) continue
