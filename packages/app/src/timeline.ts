@@ -3,9 +3,9 @@ import { FX_INFO, TRANSITIONS } from './fxinfo'
 import type { Player } from './player'
 import { MIN_DUR, clipDur, compactTracks, duration, exec, freeTrack, isTextLayer, layout, overlayDur, overlayEnd, trackCount, type OverlayClip, type Placed, type Store, type TextLayer } from '@gojaguar/core'
 
-const LEFT = 150, RULER_H = 26
+const LEFT = 132, RULER_H = 26
 /** Botones de la cabecera de cada pista (centros en x): bloquear, ocultar y silenciar, como en CapCut. */
-const SLOT = { lock: 62, eye: 94, mute: 126 }
+const SLOT = { type: 18, lock: 50, eye: 80, mute: 110 }
 interface Row { y: number; h: number; label: string }
 /** Filas fijas; sus posiciones se recalculan en relayout() según cuántas pistas superpuestas haya. */
 const ROWS: Record<'subtitle' | 'graphic' | 'video' | 'music', Row> = {
@@ -15,7 +15,7 @@ const ROWS: Record<'subtitle' | 'graphic' | 'video' | 'music', Row> = {
   music: { y: 186, h: 40, label: 'Música' },
 }
 const EDGE = 7
-const INK = '#e9e5dc', ACTIVE = '#35c2b5'   // iconos normales y activos (bloqueado / oculto / silenciado)
+const INK = '#b3aea2', HOVER = '#ffffff', DIM = '#6f6a60', ACTIVE = '#35c2b5'   // iconos normales y activos (bloqueado / oculto / silenciado)
 const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
 
 type Drag =
@@ -38,6 +38,7 @@ export class Timeline {
   private height = 234
   /** Tipo de pista con una pista vacía extra visible (solo mientras se arrastra: así se puede soltar en una pista nueva). */
   private extra: 'video' | 'audio' | null = null
+  private hoverIcon = ''     // botón de cabecera bajo el mouse ('main:lock'…)
   private mouse = { x: 0, y: 0 }
   /** Corte al que el cabezal quedó "pegado" (imán), para dibujar la guía. */
   private snapAt: number | null = null
@@ -53,7 +54,7 @@ export class Timeline {
     canvas.addEventListener('mousedown', e => this.onDown(e))
     window.addEventListener('mouseup', () => this.onUp())
     window.addEventListener('mousemove', e => { if (this.drag) this.onMove(e) })
-    canvas.addEventListener('mouseleave', () => { if (!this.drag) { this.hoverX = null; this.snapAt = null; this.hoverCut = null; player.hover = null; player.dirty = true; this.dirty = true } })
+    canvas.addEventListener('mouseleave', () => { this.hoverIcon = ''; if (!this.drag) { this.hoverX = null; this.snapAt = null; this.hoverCut = null; player.hover = null; player.dirty = true; this.dirty = true } })
     canvas.addEventListener('dblclick', e => this.onDbl(e))
     canvas.addEventListener('wheel', e => this.onWheel(e), { passive: false })
     canvas.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('text/gojaguar-asset')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } })
@@ -121,16 +122,24 @@ export class Timeline {
     for (const r of this.rowList()) {
       if (y < r.y || y >= r.y + r.h) continue
       const st = this.ts(r.key)
-      const hit = (cx: number) => Math.abs(x - cx) <= 14
+      const hit = (cx: number) => Math.abs(x - cx) <= 12
       if (hit(SLOT.lock)) { exec(this.store, { op: 'set_track', track: r.key, locked: !st.locked }); if (!st.locked) this.store.select(null) }
       else if (r.eye && hit(SLOT.eye)) exec(this.store, { op: 'set_track', track: r.key, hidden: !st.hidden })
       else if (r.mute && hit(SLOT.mute)) exec(this.store, { op: 'set_track', track: r.key, muted: !st.muted })
       return
     }
   }
+  private iconAt(x: number, y: number): string {
+    for (const r of this.rowList()) if (y >= r.y && y < r.y + r.h) {
+      if (Math.abs(x - SLOT.lock) <= 12) return `${r.key}:lock`
+      if (r.eye && Math.abs(x - SLOT.eye) <= 12) return `${r.key}:eye`
+      if (r.mute && Math.abs(x - SLOT.mute) <= 12) return `${r.key}:mute`
+    }
+    return ''
+  }
   private gutterCursor(x: number, y: number) {
     for (const r of this.rowList()) if (y >= r.y && y < r.y + r.h)
-      return Math.abs(x - SLOT.lock) <= 14 || (r.eye && Math.abs(x - SLOT.eye) <= 14) || (r.mute && Math.abs(x - SLOT.mute) <= 14) ? 'pointer' : 'default'
+      return Math.abs(x - SLOT.lock) <= 12 || (r.eye && Math.abs(x - SLOT.eye) <= 12) || (r.mute && Math.abs(x - SLOT.mute) <= 12) ? 'pointer' : 'default'
     return 'default'
   }
 
@@ -269,6 +278,8 @@ export class Timeline {
   private onMove(e: MouseEvent) {
     const { x, y } = this.pos(e)
     this.mouse = { x, y }
+    const hi = x < LEFT ? this.iconAt(x, y) : ''
+    if (hi !== this.hoverIcon) { this.hoverIcon = hi; this.dirty = true }
     const d = this.drag
     const p = this.store.project
 
@@ -500,34 +511,39 @@ export class Timeline {
 
     // cabecera de pistas (tapa lo que se desplaza debajo): tipo, bloquear, ocultar, silenciar
     c.fillStyle = '#191917'; c.fillRect(0, 0, LEFT, this.height)
-    c.fillStyle = '#262624'; c.fillRect(LEFT - 1, 0, 1, this.height)
     for (const r of this.rowList()) {
       const cy = r.y + r.h / 2, st = this.ts(r.key)
-      c.fillStyle = '#232321'; c.fillRect(4, r.y, LEFT - 10, r.h)
-      this.icon(r.type, 24, cy, '#8e897d')
-      this.icon('lock', SLOT.lock, cy, st.locked ? ACTIVE : INK)
-      if (r.eye) this.icon(st.hidden ? 'eyeoff' : 'eye', SLOT.eye, cy, st.hidden ? ACTIVE : INK)
-      if (r.mute) this.icon(st.muted ? 'speakeroff' : 'speaker', SLOT.mute, cy, st.muted ? ACTIVE : INK)
+      c.fillStyle = '#212120'; c.fillRect(0, r.y, LEFT - 1, r.h)
+      const btn = (slot: 'lock' | 'eye' | 'mute', kind: string, on: boolean) => {
+        const cx = SLOT[slot], hov = this.hoverIcon === `${r.key}:${slot}`
+        if (hov) { c.fillStyle = '#2e2e2b'; c.beginPath(); c.roundRect(cx - 11, cy - 11, 22, 22, 5); c.fill() }
+        this.icon(kind, cx, cy, on ? ACTIVE : hov ? HOVER : INK)
+      }
+      this.icon(r.type, SLOT.type, cy, DIM)
+      btn('lock', 'lock', !!st.locked)
+      if (r.eye) btn('eye', st.hidden ? 'eyeoff' : 'eye', !!st.hidden)
+      if (r.mute) btn('mute', st.muted ? 'speakeroff' : 'speaker', !!st.muted)
     }
+    c.fillStyle = '#2a2a27'; c.fillRect(LEFT - 1, 0, 1, this.height)
   }
 
-  /** Iconos vectoriales de la cabecera (trazo, sin imágenes). */
+  /** Iconos vectoriales de la cabecera: trazo fino (1,3 px), ~13 px, sin relleno, como los de CapCut. */
   private icon(kind: string, cx: number, cy: number, color: string) {
     const c = this.ctx
-    c.save(); c.strokeStyle = color; c.fillStyle = color; c.lineWidth = 1.7; c.lineCap = 'round'; c.lineJoin = 'round'
+    c.save(); c.strokeStyle = color; c.fillStyle = color; c.lineWidth = 1.3; c.lineCap = 'round'; c.lineJoin = 'round'
     c.beginPath()
-    if (kind === 'text') { c.font = 'bold 13px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'center'; c.fillText('TI', cx, cy + 0.5) }
-    else if (kind === 'video') { c.roundRect(cx - 8, cy - 6, 16, 12, 2.5); c.stroke(); c.beginPath(); c.moveTo(cx - 2, cy - 3); c.lineTo(cx + 3, cy); c.lineTo(cx - 2, cy + 3); c.closePath(); c.fill() }
-    else if (kind === 'audio') { c.arc(cx, cy, 8.5, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.arc(cx - 1.5, cy + 3, 2, 0, Math.PI * 2); c.fill(); c.beginPath(); c.moveTo(cx + 0.5, cy + 3); c.lineTo(cx + 0.5, cy - 4); c.lineTo(cx + 4, cy - 2.5); c.stroke() }
-    else if (kind === 'lock') { c.roundRect(cx - 6, cy - 1, 12, 8.5, 2); c.fill(); c.beginPath(); c.arc(cx, cy - 1.5, 4, Math.PI, 0); c.stroke() }
+    if (kind === 'text') { c.font = '600 11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'center'; c.fillText('TI', cx, cy + 0.5) }
+    else if (kind === 'video') { c.roundRect(cx - 7, cy - 5, 14, 10, 2); c.stroke(); c.beginPath(); c.moveTo(cx - 1.6, cy - 2.2); c.lineTo(cx + 2.6, cy); c.lineTo(cx - 1.6, cy + 2.2); c.closePath(); c.fill() }
+    else if (kind === 'audio') { c.arc(cx, cy, 7, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.arc(cx - 1.4, cy + 2.4, 1.5, 0, Math.PI * 2); c.fill(); c.beginPath(); c.moveTo(cx + 0.1, cy + 2.4); c.lineTo(cx + 0.1, cy - 3.2); c.lineTo(cx + 2.8, cy - 2.2); c.stroke() }
+    else if (kind === 'lock') { c.roundRect(cx - 4.5, cy - 0.5, 9, 6.5, 1.6); c.stroke(); c.beginPath(); c.arc(cx, cy - 0.5, 3, Math.PI, 0); c.stroke() }
     else if (kind === 'eye' || kind === 'eyeoff') {
-      c.moveTo(cx - 9, cy); c.quadraticCurveTo(cx, cy - 9, cx + 9, cy); c.quadraticCurveTo(cx, cy + 9, cx - 9, cy); c.stroke()
-      c.beginPath(); c.arc(cx, cy, 2.8, 0, Math.PI * 2); c.fill()
-      if (kind === 'eyeoff') { c.beginPath(); c.moveTo(cx - 8, cy + 8); c.lineTo(cx + 8, cy - 8); c.lineWidth = 2; c.stroke() }
+      c.moveTo(cx - 7, cy); c.quadraticCurveTo(cx, cy - 7.5, cx + 7, cy); c.quadraticCurveTo(cx, cy + 7.5, cx - 7, cy); c.stroke()
+      c.beginPath(); c.arc(cx, cy, 1.9, 0, Math.PI * 2); c.fill()
+      if (kind === 'eyeoff') { c.beginPath(); c.moveTo(cx - 5.5, cy + 5.5); c.lineTo(cx + 5.5, cy - 5.5); c.stroke() }
     } else {   // speaker / speakeroff
-      c.moveTo(cx - 8, cy - 3); c.lineTo(cx - 4, cy - 3); c.lineTo(cx + 1, cy - 7); c.lineTo(cx + 1, cy + 7); c.lineTo(cx - 4, cy + 3); c.lineTo(cx - 8, cy + 3); c.closePath(); c.fill()
-      if (kind === 'speaker') { c.beginPath(); c.arc(cx + 1, cy, 5, -0.95, 0.95); c.stroke(); c.beginPath(); c.arc(cx + 1, cy, 8.5, -0.95, 0.95); c.stroke() }
-      else { c.beginPath(); c.moveTo(cx - 8, cy + 8); c.lineTo(cx + 8, cy - 8); c.lineWidth = 2; c.stroke() }
+      c.moveTo(cx - 6.5, cy - 2.4); c.lineTo(cx - 3.6, cy - 2.4); c.lineTo(cx + 0.6, cy - 5.4); c.lineTo(cx + 0.6, cy + 5.4); c.lineTo(cx - 3.6, cy + 2.4); c.lineTo(cx - 6.5, cy + 2.4); c.closePath(); c.stroke()
+      if (kind === 'speaker') { c.beginPath(); c.arc(cx + 0.6, cy, 3.4, -0.95, 0.95); c.stroke(); c.beginPath(); c.arc(cx + 0.6, cy, 6.2, -0.95, 0.95); c.stroke() }
+      else { c.beginPath(); c.moveTo(cx - 5.5, cy + 5.5); c.lineTo(cx + 5.5, cy - 5.5); c.stroke() }
     }
     c.restore()
   }
