@@ -139,3 +139,10 @@ button.cardlink { display:flex; justify-content:flex-start; align-items:stretch;
 .steps .ic { display:inline-flex; justify-content:center; } .steps .ic .ico { width:16px; height:16px; }
 .spin .ico { animation:giro 1s linear infinite; } @keyframes giro { to { transform:rotate(360deg); } }
 #play, #undo, #redo, #zin, #zout { padding:7px 12px; } #play .ico { width:16px; height:16px; }
+
+/* ---------- Marca más pequeña y con aire debajo ---------- */
+.brand { align-items:flex-end; gap:12px; margin-bottom:30px; }
+.brand img { height:28px; }
+.brand span { font-size:16.4px; font-weight:800; letter-spacing:.1em; line-height:1; padding-left:12px; padding-bottom:1px; border-left:1px solid rgba(255,255,255,.35); }
+.brand.small { margin:0 16px 0 0; gap:8px; } .brand.small img { height:17px; } .brand.small span { font-size:9.5px; padding-left:8px; padding-bottom:0; }
+.home-head .brand { margin-bottom:34px; } .tus { margin-top:0; }
