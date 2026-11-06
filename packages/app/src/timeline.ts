@@ -253,7 +253,10 @@ export class Timeline {
       return
     }
 
-    if (row === 'music') { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
+    if (row === 'music') {
+      if (this.store.project.music && !this.locked('music')) this.store.select({ type: 'music', id: 'music' }); else this.store.select(null)
+      this.player.seek(t); this.drag = { k: 'seek' }; return
+    }
 
     if (row === 'vlane' || row === 'alane') {
       const h = this.hitOverlayClip(x, y, row === 'vlane' ? 'video' : 'audio')

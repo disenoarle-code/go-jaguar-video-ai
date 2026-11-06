@@ -729,6 +729,37 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       return send(res, 200, isSlug(g[1]) ? await solicitudesDe(g[1]) : [])
     }
 
+    // Prepara para el editor los archivos del Material que aún no están en la edición (proxy liviano de video, audio de vista previa)
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/preparar$/.exec(p)) && m === 'POST') {
+      const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
+      const file = isSlug(g[1]) ? path.join(projDir(g[1]), 'proyecto.gojaguar') : ''
+      if (!meta) return send(res, 404, { error: 'Proyecto no encontrado' })
+      if (!(await exists(file))) return send(res, 400, { error: 'Primero crea la edición con "Recorta silencios y errores"' })
+      const project = JSON.parse(await fsp.readFile(file, 'utf8')).project as { assets: AssetInfo[] }
+      const known = new Set(project.assets.map(a => a.original))
+      let n = project.assets.reduce((mx, a) => Math.max(mx, Number(/(\d+)$/.exec(a.id)?.[1] ?? 0)), 0)
+      const nuevos: AssetInfo[] = [], omitidos: string[] = []
+      const d = projDir(g[1])
+      for (const f of await listMaterial(g[1])) {
+        if (!f.existe || known.has(f.ruta)) continue
+        if (f.tipo === 'imagen') { omitidos.push(f.name); continue }
+        n++
+        if (f.tipo === 'video') {
+          const pr = await probe(f.ruta); if (!pr) { omitidos.push(f.name); continue }
+          const dst = path.join(d, 'proxies', `${f.stem}.proxy.mp4`)
+          await fsp.mkdir(path.dirname(dst), { recursive: true })
+          if (!(await exists(dst))) await makeProxy(f.ruta, dst, pr.duration, () => {})
+          nuevos.push({ id: `a${n}`, name: f.stem, kind: 'video', proxy: `api/files/proyectos/${g[1]}/proxies/${encodeURIComponent(f.stem)}.proxy.mp4`, original: f.ruta, ...pr })
+        } else {
+          await ensurePreview(f.ruta, path.join(d, '.previews'), f.id)
+          const dur = Number((await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f.ruta])).out.trim())
+          if (!(await exists(path.join(d, '.previews', f.id + '.m4a'))) || !(dur > 0)) { omitidos.push(f.name); continue }
+          nuevos.push({ id: `m${n}`, name: f.stem, kind: 'audio', proxy: `api/files/proyectos/${g[1]}/.previews/${encodeURIComponent(f.id)}.m4a`, original: f.ruta, duration: dur, fps: 0, width: 0, height: 0 })
+        }
+      }
+      return send(res, 200, { assets: nuevos, omitidos })
+    }
+
     // --- exportar a MP4 (la edición actual, con efectos, superpuestos y música) ---
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/exportar$/.exec(p)) && m === 'POST') {
       const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
