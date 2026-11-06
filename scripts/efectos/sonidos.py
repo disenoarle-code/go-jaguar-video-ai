@@ -35,19 +35,22 @@ tail=[lowpass_tv(rng.standard_normal(n), 900*np.exp(-t*1.6)+150)*np.exp(-t/0.8)*
 L=np.tanh((sub*1.5+body+crack+tail[0])*1.4); R=np.tanh((sub*1.5+body*0.95+crack+tail[1])*1.4)
 save('SFX-impacto.wav', L, R, 0.92)
 
-# 3) WHOOSH (0.75 s), de izquierda a derecha y al revés
+# 3) WHOOSH GRAVE (0.38 s): corto, bajo y con cuerpo (ruido filtrado grave que sube un poco + sub), de izquierda a derecha y al revés
 def whoosh(rev):
-    n=int(0.75*SR); t=np.arange(n)/SR; fc=450*(3800/450)**(t/0.75)
-    e=np.clip(t/0.3,0,1)**2*np.exp(-np.maximum(t-0.3,0)/0.16); e=np.sin(np.pi*np.minimum(t/0.75,1))**1.6*0.7+e*0.5
-    x=bandpass_tv(rng.standard_normal(n), fc, q=7)
-    x=lowpass_tv(x, 5200*np.ones(n))*e*1.8
-    th=np.linspace(0,np.pi/2,n); th=th[::-1] if rev else th
-    return x*np.cos(th), x*np.sin(th)
-save('SFX-whoosh-izq-der.wav', *whoosh(False), 0.7); save('SFX-whoosh-der-izq.wav', *whoosh(True), 0.7)
+    n=int(0.38*SR); t=np.arange(n)/SR; fc=200*(1400/200)**(t/0.38)
+    e=np.clip(t/0.12,0,1)**1.4*np.exp(-np.maximum(t-0.12,0)/0.085)
+    x=bandpass_tv(rng.standard_normal(n), fc, q=3)
+    x=lowpass_tv(x, 2400*np.ones(n))*1.4
+    sub=np.sin(2*np.pi*np.cumsum(72+45*(t/0.38))/SR)*0.9
+    y=np.tanh((x+sub)*e*1.7)
+    th=np.linspace(0.25,np.pi/2-0.25,n); th=th[::-1] if rev else th
+    return y*np.cos(th), y*np.sin(th)
+save('SFX-whoosh-grave-izq-der.wav', *whoosh(False), 0.8); save('SFX-whoosh-grave-der-izq.wav', *whoosh(True), 0.8)
 
-# 4) BRILLO (destello): campana con parciales altos + chispa de ruido
-n=int(1.0*SR); t=np.arange(n)/SR; sig=np.zeros(n)
-for f0,a,d in [(2093,1,0.55),(3136,0.7,0.4),(4186,0.5,0.28),(6272,0.3,0.18),(8372,0.18,0.1)]: sig+=a*np.sin(2*np.pi*f0*t)*np.exp(-t/d)
-spark=lowpass_tv(rng.standard_normal(n), 9000+0*t)*np.exp(-t/0.03)*0.5
-L=sig+spark; R=np.roll(sig,60)+spark*0.9
-save('SFX-brillo.wav', L, R, 0.55)
+# 4) GOLPE (0.45 s): golpe seco y grueso en lugar de una campana (bombo corto + cuerpo de ruido grave + clic)
+n=int(0.45*SR); t=np.arange(n)/SR
+kick=np.sin(2*np.pi*np.cumsum(72+150*np.exp(-t*26))/SR)*np.exp(-t/0.17)
+body=lowpass_tv(rng.standard_normal(n), 2400*np.exp(-t*16)+420)*np.exp(-t/0.06)*1.0
+click=rng.standard_normal(n)*np.exp(-t/0.004)*0.5
+y=np.tanh((kick*1.6+body+click)*1.9)
+save('SFX-golpe.wav', y, np.roll(y,25), 0.85)

@@ -89,7 +89,7 @@ Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.jso
 
 ## Efectos de sonido y luces (propios, sin descargar nada)
 
-`scripts/efectos/sonidos.py <carpeta>` sintetiza SFX libres de derechos (subida de 3,4 s, impacto, whoosh izq→der y der→izq, brillo) y `scripts/efectos/luces.py <carpeta>` genera luces de lente (cálida, fría, dorada). Se dejan en `material/` del proyecto, el botón Importar (o `POST /preparar`) los trae al editor y se colocan con `add_overlay`: SFX como audio sobre los cortes (subida que termina justo en la entrada de la música, impacto en ella, whoosh centrado en cada `slide`, brillo en cada `flash`) y las luces como video con `blend:'screen'`, `scale:1`, centradas en un corte (empiezan ~45 % de su duración antes). Para mezclar con `blend` en ffmpeg ambas entradas deben tener el mismo formato (`gbrp`) o el color sale magenta.
+`scripts/efectos/sonidos.py <carpeta>` sintetiza SFX libres de derechos (subida de 3,4 s, impacto grave, whoosh grave corto izq→der y der→izq, golpe grueso) y `scripts/efectos/luces.py <carpeta>` genera luces de lente (cálida, fría, dorada). Se dejan en `material/` del proyecto, el botón Importar (o `POST /preparar`) los trae al editor y se colocan con `add_overlay`. **Pocos y con intención** (el usuario pidió menos): subida que termina justo en la entrada de la música + impacto en ella, whoosh solo en 2 deslizamientos y golpe en 1 destello; luces (video con `blend:'screen'`, `scale:1`, centradas en el corte, empiezan ~45 % de su duración antes) solo en 2 cortes fuertes. Preferencias de sonido: **nada agudo tipo campana/"ding"**, whoosh corto y grave. Para mezclar con `blend` en ffmpeg ambas entradas deben tener el mismo formato (`gbrp`) o el color sale magenta.
 
 ## Recetas
 
