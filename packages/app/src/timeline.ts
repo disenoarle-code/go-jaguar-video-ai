@@ -489,7 +489,7 @@ export class Timeline {
 
     c.save()
     c.globalAlpha = ghost ? 0.35 : 1
-    c.beginPath(); c.roundRect(x0, V.y, w, V.h, 5); c.clip()
+    c.beginPath(); c.roundRect(x0, V.y, w, V.h, 3); c.clip()
     c.fillStyle = '#0d4f53'; c.fillRect(x0, V.y, w, V.h)
     // miniaturas (recortadas al centro)
     if (a) {
@@ -527,9 +527,9 @@ export class Timeline {
       const label = FX_INFO[fx].name
       c.font = '10px Figtree, system-ui, sans-serif'
       const tw2 = Math.min(c.measureText(label).width + 20, w - 8)
-      c.fillStyle = 'rgba(20,20,18,.78)'; c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 8); c.fill()
+      c.fillStyle = 'rgba(20,20,18,.78)'; c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 5); c.fill()
       c.fillStyle = FX_INFO[fx].color; c.beginPath(); c.arc(x0 + 12, V.y + HEAD + 12, 3, 0, Math.PI * 2); c.fill()
-      c.save(); c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 8); c.clip()
+      c.save(); c.beginPath(); c.roundRect(x0 + 4, V.y + HEAD + 4, tw2, 16, 5); c.clip()
       c.fillStyle = '#fff'; c.fillText(label, x0 + 18, V.y + HEAD + 12); c.restore()
     }
     c.restore()
@@ -537,7 +537,7 @@ export class Timeline {
     // selección: contorno blanco con asas, como en CapCut
     if (sel) {
       c.strokeStyle = '#fff'; c.lineWidth = 2
-      c.beginPath(); c.roundRect(x0 + 1, V.y + 1, w - 2, V.h - 2, 5); c.stroke()
+      c.beginPath(); c.roundRect(x0 + 1, V.y + 1, w - 2, V.h - 2, 3); c.stroke()
       c.fillStyle = '#fff'
       for (const xx of [x0 + 1, x1 - 7]) { c.beginPath(); c.roundRect(xx, V.y + V.h / 2 - 14, 6, 28, 3); c.fill() }
     }
@@ -576,7 +576,7 @@ export class Timeline {
     if (hc) {
       const { cx, cy } = this.chipPos(hc)
       c.save(); c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 4
-      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - 10, cy - 14, 20, 28, 5); c.fill(); c.shadowBlur = 0
+      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - 10, cy - 14, 20, 28, 3); c.fill(); c.shadowBlur = 0
       c.strokeStyle = '#1d1d1b'; c.lineWidth = 2; c.lineCap = 'round'
       c.beginPath(); c.moveTo(cx - 5, cy); c.lineTo(cx + 5, cy); c.moveTo(cx, cy - 5); c.lineTo(cx, cy + 5); c.stroke()
       c.restore()
@@ -593,9 +593,9 @@ export class Timeline {
       const info = FX_INFO[fx], sel = this.store.selection?.type === 'clip' && this.store.selection.id === placed[i].clip.id
       c.save()
       c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 4
-      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - 10, cy - 14, 20, 28, 5); c.fill()
+      c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - 10, cy - 14, 20, 28, 3); c.fill()
       c.shadowBlur = 0
-      if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(cx - 13, cy - 17, 26, 34, 7); c.stroke() }
+      if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(cx - 13, cy - 17, 26, 34, 5); c.stroke() }
       c.fillStyle = info.color; c.beginPath(); c.roundRect(cx - 10, cy + 10, 20, 4, 2); c.fill()
       c.fillStyle = '#1d1d1b'; c.strokeStyle = '#1d1d1b'; c.lineWidth = 1.8; c.lineCap = 'round'; c.lineJoin = 'round'
       if (fx === 'slide') {            // flechas ⇄
@@ -622,7 +622,7 @@ export class Timeline {
       const w = Math.max(x1 - x0, 2), a = this.player.assets.get(o.assetId)
       const sel = this.store.selection?.type === 'overlay' && this.store.selection.id === o.id
       const name = this.store.asset(o.assetId)?.name ?? o.id
-      c.save(); c.beginPath(); c.roundRect(x0, R.y, w, R.h, 5); c.clip()
+      c.save(); c.beginPath(); c.roundRect(x0, R.y, w, R.h, 3); c.clip()
       c.font = '10px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
       if (o.kind === 'video') {
         const HEAD = 14, TH = R.h - HEAD
@@ -653,7 +653,7 @@ export class Timeline {
       }
       c.restore()
       if (sel) {
-        c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 1, w - 2, R.h - 2, 5); c.stroke()
+        c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 1, w - 2, R.h - 2, 3); c.stroke()
         c.fillStyle = '#fff'; for (const xx of [x0 + 1, x1 - 7]) { c.beginPath(); c.roundRect(xx, R.y + R.h / 2 - 9, 6, 18, 3); c.fill() }
       }
     }
@@ -666,7 +666,7 @@ export class Timeline {
     if (x1 < LEFT || x0 > this.w) return
     const l = Math.max(x0, LEFT)
     c.save(); c.beginPath(); c.rect(l, R.y, x1 - l, R.h); c.clip()
-    c.fillStyle = '#143a66'; c.beginPath(); c.roundRect(x0, R.y + 1, x1 - x0, R.h - 2, 5); c.fill()
+    c.fillStyle = '#143a66'; c.beginPath(); c.roundRect(x0, R.y + 1, x1 - x0, R.h - 2, 3); c.fill()
     const pk = this.player.musicPeaks.get(m.assetId)
     if (pk) {
       c.fillStyle = '#2f86e0'; const mid = R.y + R.h / 2 + 6
@@ -677,8 +677,8 @@ export class Timeline {
       }
     }
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
-    c.fillStyle = 'rgba(8,20,40,.6)'; c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 4); c.fill()
-    c.save(); c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 4); c.clip()
+    c.fillStyle = 'rgba(8,20,40,.6)'; c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 3); c.fill()
+    c.save(); c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 3); c.clip()
     c.fillStyle = '#fff'; c.fillText('♪ ' + (this.store.asset(m.assetId)?.name ?? 'música'), Math.max(x0, LEFT) + 10, R.y + 10); c.restore()
     c.restore()
   }
@@ -692,10 +692,10 @@ export class Timeline {
     c.save()
     c.beginPath(); c.rect(l, R.y, x1 - l, R.h); c.clip()
     c.fillStyle = o.type === 'subtitle' ? '#c4553f' : '#a23b6d'
-    c.beginPath(); c.roundRect(x0, R.y + 2, x1 - x0, R.h - 4, 5); c.fill()
+    c.beginPath(); c.roundRect(x0, R.y + 2, x1 - x0, R.h - 4, 3); c.fill()
     c.fillStyle = '#fff'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
     c.fillText('Aa≡ ' + o.text, x0 + 8, R.y + R.h / 2)
-    if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 3, x1 - x0 - 2, R.h - 6, 5); c.stroke() }
+    if (sel) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 3, x1 - x0 - 2, R.h - 6, 3); c.stroke() }
     c.restore()
   }
 }
