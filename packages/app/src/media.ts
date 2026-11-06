@@ -75,7 +75,7 @@ export class LoadedAsset {
 }
 
 export const PEAK_RATE = 100
-export const THUMB_W = 96, THUMB_H = 54
+export const THUMB_W = 192, THUMB_H = 108   // miniatura 16:9 (mayor resolución para pantallas retina)
 
 export async function loadAsset(info: AssetInfo, actx: AudioContext, onThumb: () => void): Promise<LoadedAsset> {
   const asset = new LoadedAsset(info)
@@ -141,7 +141,10 @@ export async function loadAsset(info: AssetInfo, actx: AudioContext, onThumb: ()
     const thumbSrc = new FrameSource(samples, config, fps)
     for (let s = 0; s < Math.ceil(info.duration); s++) {
       const f = await thumbSrc.getFrame(Math.min(Math.round(s * fps), thumbSrc.frameCount - 1))
-      asset.thumbs[s] = await createImageBitmap(f, { resizeWidth: THUMB_W, resizeHeight: THUMB_H })
+      // "object-fit: cover": se recorta el centro del frame con la proporción de la miniatura, nunca se estira
+      const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight, ar = THUMB_W / THUMB_H
+      const sw = fw / fh > ar ? fh * ar : fw, sh = fw / fh > ar ? fh : fw / ar
+      asset.thumbs[s] = await createImageBitmap(f, Math.round((fw - sw) / 2), Math.round((fh - sh) / 2), Math.round(sw), Math.round(sh), { resizeWidth: THUMB_W, resizeHeight: THUMB_H, resizeQuality: 'medium' })
       if (s % 5 === 0) onThumb()
     }
     onThumb()
