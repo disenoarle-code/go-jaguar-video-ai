@@ -136,7 +136,8 @@ export async function bootEditor(slug: string) {
   $('play').onclick = () => player.toggle()
   $('undo').onclick = () => store.undo()
   $('redo').onclick = () => store.redo()
-  $('split').onclick = () => exec(store, { op: 'split', at: player.playhead })
+  const splitHere = () => { if (store.project.tracks?.main?.locked) { notify('La pista principal está bloqueada'); return } exec(store, { op: 'split', at: player.playhead }) }
+  $('split').onclick = splitHere
   $('del').onclick = deleteSelected
   $('addsub').onclick = () => exec(store, { op: 'add_text', type: 'subtitle', start: player.playhead, end: player.playhead + 2.5, text: 'Nuevo subtítulo' })
   $('addgfx').onclick = () => exec(store, { op: 'add_text', type: 'graphic', start: player.playhead, end: player.playhead + 3, text: 'Nuevo gráfico' })
@@ -156,7 +157,7 @@ export async function bootEditor(slug: string) {
     const mod = e.metaKey || e.ctrlKey
     if (e.code === 'Space') { e.preventDefault(); player.toggle() }
     else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); void guardar(true) }
-    else if (e.key === 's' && !mod) exec(store, { op: 'split', at: player.playhead })
+    else if (e.key === 's' && !mod) splitHere()
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected() }
     else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? store.redo() : store.undo() }
     else if (e.key === 'ArrowLeft') player.seek(player.playhead - 1 / 30)

@@ -20,6 +20,7 @@ export type Cmd =
   | { op: 'add_overlay'; asset: string; start: number; track?: number; src_in?: number; src_out?: number; x?: number; y?: number; scale?: number; volume?: number }
   | { op: 'update_overlay'; id: string; patch: OverlayPatch }
   | { op: 'delete_overlay'; id: string }
+  | { op: 'set_track'; track: string; locked?: boolean; hidden?: boolean; muted?: boolean }
   | { op: 'set_effect'; clip: string; effect: ClipFx | null; dir?: 1 | -1 }
   | { op: 'set_music'; asset: string; src_in?: number; volume?: number; fade_out?: number }
   | { op: 'clear_music' }
@@ -107,6 +108,14 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       compactTracks(p)
       if (store.selection?.id === cmd.id) store.selection = null
       return n === p.overlays.length ? 'clip superpuesto no encontrado' : `${cmd.id} eliminado`
+    }
+    case 'set_track': {
+      const t = (p.tracks ??= {}), s = (t[cmd.track] ??= {})
+      if (cmd.locked !== undefined) s.locked = cmd.locked || undefined
+      if (cmd.hidden !== undefined) s.hidden = cmd.hidden || undefined
+      if (cmd.muted !== undefined) s.muted = cmd.muted || undefined
+      if (!s.locked && !s.hidden && !s.muted) delete t[cmd.track]
+      return `pista ${cmd.track}: ${[s.locked && 'bloqueada', s.hidden && 'oculta', s.muted && 'silenciada'].filter(Boolean).join(', ') || 'normal'}`
     }
     case 'set_effect': {
       const c = p.clips.find(x => x.id === cmd.clip)

@@ -78,6 +78,9 @@ export interface OverlayClip {
   transform: Transform            // posición/tamaño/opacidad (solo video)
 }
 
+/** Estado de una pista de la línea de tiempo. Claves: 'main', 'music', 'subtitle', 'graphic', 'v1','v2'… (video superpuesto) y 'a1','a2'… (audio extra). */
+export interface TrackState { locked?: boolean; hidden?: boolean; muted?: boolean }
+
 export interface Project {
   version: number
   name: string
@@ -87,6 +90,7 @@ export interface Project {
   layers: Layer[]
   music?: Music
   overlays?: OverlayClip[]
+  tracks?: Record<string, TrackState>
   nextId: number
 }
 

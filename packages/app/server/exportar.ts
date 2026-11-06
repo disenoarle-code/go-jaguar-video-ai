@@ -66,6 +66,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   const hasAudio = async (f: string) => { if (!audioCache.has(f)) audioCache.set(f, await probeAudio(f)); return audioCache.get(f)! }
   const addInput = (ss: number, len: number, file: string) => { inputs.push(['-ss', num(ss), '-t', num(len), '-i', file]); return inputs.length - 1 }
 
+  const ts = (k: string) => project.tracks?.[k] ?? {}
   const vf: string[] = [], audio: string[] = []
   const placed = layout(project)
   const A_FMT = 'aformat=sample_rates=44100:channel_layouts=stereo'
@@ -76,11 +77,13 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     const c = pl.clip, D = pl.end - pl.start, file = await srcOf(c.assetId)
     const k = addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, file)
     const fx = fxExpr(c.fx, c.fxDir ?? 1, D, fps, i === placed.length - 1)
+    if (!ts('main').hidden) {
     const eq = fx.flash ? `,eq=brightness='${fx.flash}*pow(max(0,1-n/${fps}/0.15),2)':eval=frame` : ''
     vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
       + `zoompan=z='${fx.z}':x='${fx.x}':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=${fps}${eq},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v${i}]`)
     vlabels.push(`[v${i}]`)
-    if (c.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(c.speed)},volume=${num(c.volume)},atrim=0:${num(D)},adelay=${Math.round(pl.start * 1000)}:all=1[ac${i}]`)
+    }
+    if (!ts('main').muted && c.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(c.speed)},volume=${num(c.volume)},atrim=0:${num(D)},adelay=${Math.round(pl.start * 1000)}:all=1[ac${i}]`)
   }
   vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(total)}[base]`)
   let cur = 'base'
@@ -91,18 +94,18 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   for (const [j, o] of ovs.entries()) {
     const file = await srcOf(o.assetId), D = overlayDur(o)
     const k = addInput(o.srcIn, (o.srcOut - o.srcIn) + 0.3, file)
-    if (o.kind === 'video') {
+    if (o.kind === 'video' && !ts('v' + o.track).hidden) {
       const R = `(min(W,H)*0.06)`
       const round = `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(abs(X-W/2)-(W/2-${R}),0)*gt(abs(Y-H/2)-(H/2-${R}),0)*gt(hypot(abs(X-W/2)-(W/2-${R}),abs(Y-H/2)-(H/2-${R})),${R}),0,255)'`
       vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${round},colorchannelmixer=aa=${num(o.transform.opacity)}[ov${j}]`)
       vf.push(`[${cur}][ov${j}]overlay=x='${num(W * o.transform.x)}-w/2':y='${num(H * o.transform.y)}-h/2':eof_action=pass:enable='between(t,${num(o.start)},${num(o.start + D)})'[b${j + 1}]`)
       cur = `b${j + 1}`
     }
-    if (o.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(o.speed)},volume=${num(o.volume)},atrim=0:${num(D)},adelay=${Math.round(o.start * 1000)}:all=1[ao${j}]`)
+    if (!ts((o.kind === 'video' ? 'v' : 'a') + o.track).muted && o.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(o.speed)},volume=${num(o.volume)},atrim=0:${num(D)},adelay=${Math.round(o.start * 1000)}:all=1[ao${j}]`)
   }
 
   // 3) música
-  if (project.music && assets.has(project.music.assetId) && project.music.volume > 0) {
+  if (project.music && assets.has(project.music.assetId) && project.music.volume > 0 && !ts('music').muted) {
     const m = project.music, file = await srcOf(m.assetId)
     const k = addInput(m.srcIn, total + 0.3, file)
     const fade = m.fadeOut > 0 ? `,afade=t=out:st=${num(Math.max(0, total - m.fadeOut))}:d=${num(m.fadeOut)}` : ''

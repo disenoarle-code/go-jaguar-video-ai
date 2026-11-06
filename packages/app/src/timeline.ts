@@ -3,7 +3,9 @@ import { FX_INFO, TRANSITIONS } from './fxinfo'
 import type { Player } from './player'
 import { MIN_DUR, clipDur, compactTracks, duration, exec, freeTrack, isTextLayer, layout, overlayDur, overlayEnd, trackCount, type OverlayClip, type Placed, type Store, type TextLayer } from '@gojaguar/core'
 
-const LEFT = 78, RULER_H = 26
+const LEFT = 150, RULER_H = 26
+/** Botones de la cabecera de cada pista (centros en x): bloquear, ocultar y silenciar, como en CapCut. */
+const SLOT = { lock: 62, eye: 94, mute: 126 }
 interface Row { y: number; h: number; label: string }
 /** Filas fijas; sus posiciones se recalculan en relayout() según cuántas pistas superpuestas haya. */
 const ROWS: Record<'subtitle' | 'graphic' | 'video' | 'music', Row> = {
@@ -13,6 +15,7 @@ const ROWS: Record<'subtitle' | 'graphic' | 'video' | 'music', Row> = {
   music: { y: 186, h: 40, label: 'Música' },
 }
 const EDGE = 7
+const INK = '#e9e5dc', ACTIVE = '#35c2b5'   // iconos normales y activos (bloqueado / oculto / silenciado)
 const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
 
 type Drag =
@@ -97,6 +100,40 @@ export class Timeline {
   /** Lo usa el panel Material: mientras se arrastra un archivo, aparece una pista de su tipo donde soltarlo. */
   showDropLane(kind: 'video' | 'audio' | null) { this.extra = kind; this.dirty = true }
 
+  // --- estado de las pistas (bloquear / ocultar / silenciar) ---
+  private ts(key: string) { return this.store.project.tracks?.[key] ?? {} }
+  private locked(key: string) { return !!this.ts(key).locked }
+  private laneKey(o: OverlayClip) { return (o.kind === 'video' ? 'v' : 'a') + o.track }
+  /** Todas las filas con su clave y qué botones tienen. */
+  private rowList() {
+    type R = { key: string; y: number; h: number; type: 'text' | 'video' | 'audio'; eye: boolean; mute: boolean }
+    const out: R[] = [
+      { key: 'subtitle', ...ROWS.subtitle, type: 'text', eye: true, mute: false },
+      { key: 'graphic', ...ROWS.graphic, type: 'text', eye: true, mute: false },
+      ...this.vLanes.map((r, i): R => ({ key: `v${i + 1}`, ...r, type: 'video', eye: true, mute: true })),
+      { key: 'main', ...ROWS.video, type: 'video', eye: true, mute: true },
+      { key: 'music', ...ROWS.music, type: 'audio', eye: false, mute: true },
+      ...this.aLanes.map((r, i): R => ({ key: `a${i + 1}`, ...r, type: 'audio', eye: false, mute: true })),
+    ]
+    return out
+  }
+  private onGutterDown(x: number, y: number) {
+    for (const r of this.rowList()) {
+      if (y < r.y || y >= r.y + r.h) continue
+      const st = this.ts(r.key)
+      const hit = (cx: number) => Math.abs(x - cx) <= 14
+      if (hit(SLOT.lock)) { exec(this.store, { op: 'set_track', track: r.key, locked: !st.locked }); if (!st.locked) this.store.select(null) }
+      else if (r.eye && hit(SLOT.eye)) exec(this.store, { op: 'set_track', track: r.key, hidden: !st.hidden })
+      else if (r.mute && hit(SLOT.mute)) exec(this.store, { op: 'set_track', track: r.key, muted: !st.muted })
+      return
+    }
+  }
+  private gutterCursor(x: number, y: number) {
+    for (const r of this.rowList()) if (y >= r.y && y < r.y + r.h)
+      return Math.abs(x - SLOT.lock) <= 14 || (r.eye && Math.abs(x - SLOT.eye) <= 14) || (r.mute && Math.abs(x - SLOT.mute) <= 14) ? 'pointer' : 'default'
+    return 'default'
+  }
+
   /** Coloca las filas: textos, pistas de video superpuestas (la más alta arriba), video principal, música y pistas de audio. Solo se ven las pistas en uso. */
   private relayout() {
     const p = this.store.project
@@ -175,13 +212,15 @@ export class Timeline {
   // --- eventos ----------------------------------------------------------------
   private onDown(e: MouseEvent) {
     const { x, y } = this.pos(e)
-    if (x < LEFT) return
+    if (x < LEFT) { this.onGutterDown(x, y); return }
     const row = this.rowAt(y)
     const t = this.magnet(Math.min(this.x2t(x), this.total()))
     this.player.hover = null
 
     if (row === 'ruler') { this.drag = { k: 'seek' }; this.player.seek(t); return }
 
+    if (row === 'video' && this.locked('main')) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
+    if ((row === 'subtitle' || row === 'graphic') && this.locked(row)) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
     if (row === 'video') {
       const tr = this.hitTransition(x, y) ?? this.hitCut(x, y)
       if (tr) {
@@ -209,7 +248,7 @@ export class Timeline {
 
     if (row === 'vlane' || row === 'alane') {
       const h = this.hitOverlayClip(x, y, row === 'vlane' ? 'video' : 'audio')
-      if (!h) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
+      if (!h || this.locked(this.laneKey(h.o))) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
       this.store.select({ type: 'overlay', id: h.o.id })
       this.store.beginTx()
       this.drag = { k: 'ovc', id: h.o.id, mode: h.zone, x0: x, start0: h.o.start, in0: h.o.srcIn, out0: h.o.srcOut }
@@ -347,7 +386,8 @@ export class Timeline {
     const { x, y } = this.pos(e); const a = this.store.asset(id)
     if (x < LEFT || !a) return
     const kind: 'video' | 'audio' = a.kind === 'audio' ? 'audio' : 'video', row = this.rowAt(y)
-    const track = (row === 'vlane' && kind === 'video') || (row === 'alane' && kind === 'audio') ? this.laneAt(y, kind) ?? undefined : undefined
+    let track = (row === 'vlane' && kind === 'video') || (row === 'alane' && kind === 'audio') ? this.laneAt(y, kind) ?? undefined : undefined
+    if (track && this.locked((kind === 'video' ? 'v' : 'a') + track)) track = undefined
     const t = this.magnet(this.x2t(x)); this.snapAt = null
     this.extra = null
     exec(this.store, { op: 'add_overlay', asset: id, start: t, track })
@@ -374,7 +414,7 @@ export class Timeline {
   }
 
   private cursorAt(x: number, y: number) {
-    if (x < LEFT) return 'default'
+    if (x < LEFT) return this.gutterCursor(x, y)
     const row = this.rowAt(y)
     if (row === 'video') {
       const h = this.hitClip(x)
@@ -449,11 +489,47 @@ export class Timeline {
       c.beginPath(); c.moveTo(ph - 6, 0); c.lineTo(ph + 6, 0); c.lineTo(ph, 10); c.closePath(); c.fill()
     }
 
-    // gutter de etiquetas (tapa lo que se desplaza debajo)
+    // pistas bloqueadas: rayado diagonal sobre la fila
+    for (const r of this.rowList()) if (this.ts(r.key).locked) {
+      c.save(); c.beginPath(); c.rect(LEFT, r.y, w - LEFT, r.h); c.clip()
+      c.fillStyle = 'rgba(0,0,0,.28)'; c.fillRect(LEFT, r.y, w - LEFT, r.h)
+      c.strokeStyle = 'rgba(255,255,255,.07)'; c.lineWidth = 1
+      for (let x = LEFT - r.h; x < w; x += 9) { c.beginPath(); c.moveTo(x, r.y + r.h); c.lineTo(x + r.h, r.y); c.stroke() }
+      c.restore()
+    }
+
+    // cabecera de pistas (tapa lo que se desplaza debajo): tipo, bloquear, ocultar, silenciar
     c.fillStyle = '#191917'; c.fillRect(0, 0, LEFT, this.height)
-    c.fillStyle = '#a39e92'; c.font = '11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
-    for (const k of Object.keys(ROWS) as (keyof typeof ROWS)[]) c.fillText(ROWS[k].label, 10, ROWS[k].y + ROWS[k].h / 2)
-    for (const r of [...this.vLanes, ...this.aLanes]) c.fillText(r.label, 10, r.y + r.h / 2)
+    c.fillStyle = '#262624'; c.fillRect(LEFT - 1, 0, 1, this.height)
+    for (const r of this.rowList()) {
+      const cy = r.y + r.h / 2, st = this.ts(r.key)
+      c.fillStyle = '#232321'; c.fillRect(4, r.y, LEFT - 10, r.h)
+      this.icon(r.type, 24, cy, '#8e897d')
+      this.icon('lock', SLOT.lock, cy, st.locked ? ACTIVE : INK)
+      if (r.eye) this.icon(st.hidden ? 'eyeoff' : 'eye', SLOT.eye, cy, st.hidden ? ACTIVE : INK)
+      if (r.mute) this.icon(st.muted ? 'speakeroff' : 'speaker', SLOT.mute, cy, st.muted ? ACTIVE : INK)
+    }
+  }
+
+  /** Iconos vectoriales de la cabecera (trazo, sin imágenes). */
+  private icon(kind: string, cx: number, cy: number, color: string) {
+    const c = this.ctx
+    c.save(); c.strokeStyle = color; c.fillStyle = color; c.lineWidth = 1.7; c.lineCap = 'round'; c.lineJoin = 'round'
+    c.beginPath()
+    if (kind === 'text') { c.font = 'bold 13px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'center'; c.fillText('TI', cx, cy + 0.5) }
+    else if (kind === 'video') { c.roundRect(cx - 8, cy - 6, 16, 12, 2.5); c.stroke(); c.beginPath(); c.moveTo(cx - 2, cy - 3); c.lineTo(cx + 3, cy); c.lineTo(cx - 2, cy + 3); c.closePath(); c.fill() }
+    else if (kind === 'audio') { c.arc(cx, cy, 8.5, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.arc(cx - 1.5, cy + 3, 2, 0, Math.PI * 2); c.fill(); c.beginPath(); c.moveTo(cx + 0.5, cy + 3); c.lineTo(cx + 0.5, cy - 4); c.lineTo(cx + 4, cy - 2.5); c.stroke() }
+    else if (kind === 'lock') { c.roundRect(cx - 6, cy - 1, 12, 8.5, 2); c.fill(); c.beginPath(); c.arc(cx, cy - 1.5, 4, Math.PI, 0); c.stroke() }
+    else if (kind === 'eye' || kind === 'eyeoff') {
+      c.moveTo(cx - 9, cy); c.quadraticCurveTo(cx, cy - 9, cx + 9, cy); c.quadraticCurveTo(cx, cy + 9, cx - 9, cy); c.stroke()
+      c.beginPath(); c.arc(cx, cy, 2.8, 0, Math.PI * 2); c.fill()
+      if (kind === 'eyeoff') { c.beginPath(); c.moveTo(cx - 8, cy + 8); c.lineTo(cx + 8, cy - 8); c.lineWidth = 2; c.stroke() }
+    } else {   // speaker / speakeroff
+      c.moveTo(cx - 8, cy - 3); c.lineTo(cx - 4, cy - 3); c.lineTo(cx + 1, cy - 7); c.lineTo(cx + 1, cy + 7); c.lineTo(cx - 4, cy + 3); c.lineTo(cx - 8, cy + 3); c.closePath(); c.fill()
+      if (kind === 'speaker') { c.beginPath(); c.arc(cx + 1, cy, 5, -0.95, 0.95); c.stroke(); c.beginPath(); c.arc(cx + 1, cy, 8.5, -0.95, 0.95); c.stroke() }
+      else { c.beginPath(); c.moveTo(cx - 8, cy + 8); c.lineTo(cx + 8, cy - 8); c.lineWidth = 2; c.stroke() }
+    }
+    c.restore()
   }
 
   private drawRuler() {
@@ -488,7 +564,7 @@ export class Timeline {
     const dur = (pl.end - pl.start)
 
     c.save()
-    c.globalAlpha = ghost ? 0.35 : 1
+    c.globalAlpha = ghost || this.ts('main').hidden ? 0.35 : 1     // pista oculta: se ve atenuada
     c.beginPath(); c.roundRect(x0, V.y, w, V.h, 3); c.clip()
     c.fillStyle = '#0d4f53'; c.fillRect(x0, V.y, w, V.h)
     // miniaturas (recortadas al centro)
@@ -552,6 +628,7 @@ export class Timeline {
   }
   /** Corte entre dos clips que aún NO tiene transición (zona de la pastilla "+"). */
   private hitCut(x: number, y: number): Placed | null {
+    if (this.locked('main')) return null
     const placed = layout(this.store.project), V = ROWS.video
     if (y < V.y || y > V.y + V.h) return null
     for (let i = 1; i < placed.length; i++) {
@@ -562,6 +639,7 @@ export class Timeline {
     return null
   }
   private hitTransition(x: number, y: number): Placed | null {
+    if (this.locked('main')) return null
     const placed = layout(this.store.project)
     for (let i = 1; i < placed.length; i++) {
       const fx = placed[i].clip.fx; if (!fx || !TRANSITIONS.has(fx) || this.cutBusy(placed, i)) continue
@@ -622,7 +700,8 @@ export class Timeline {
       const w = Math.max(x1 - x0, 2), a = this.player.assets.get(o.assetId)
       const sel = this.store.selection?.type === 'overlay' && this.store.selection.id === o.id
       const name = this.store.asset(o.assetId)?.name ?? o.id
-      c.save(); c.beginPath(); c.roundRect(x0, R.y, w, R.h, 3); c.clip()
+      c.save(); c.globalAlpha = (o.kind === 'video' ? this.ts(this.laneKey(o)).hidden : this.ts(this.laneKey(o)).muted) ? 0.4 : 1
+      c.beginPath(); c.roundRect(x0, R.y, w, R.h, 3); c.clip()
       c.font = '10px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'
       if (o.kind === 'video') {
         const HEAD = 14, TH = R.h - HEAD
@@ -665,7 +744,7 @@ export class Timeline {
     const x0 = this.t2x(0), x1 = this.t2x(total)
     if (x1 < LEFT || x0 > this.w) return
     const l = Math.max(x0, LEFT)
-    c.save(); c.beginPath(); c.rect(l, R.y, x1 - l, R.h); c.clip()
+    c.save(); c.globalAlpha = this.ts('music').muted ? 0.4 : 1; c.beginPath(); c.rect(l, R.y, x1 - l, R.h); c.clip()
     c.fillStyle = '#143a66'; c.beginPath(); c.roundRect(x0, R.y + 1, x1 - x0, R.h - 2, 3); c.fill()
     const pk = this.player.musicPeaks.get(m.assetId)
     if (pk) {

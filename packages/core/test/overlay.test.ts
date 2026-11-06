@@ -55,3 +55,14 @@ describe('superposición de pistas', () => {
     expect(s.project.overlays![0].track).toBe(1)
   })
 })
+
+describe('estado de pista', () => {
+  it('bloquear, ocultar y silenciar se guardan y se limpian al volver a normal', () => {
+    const s = base()
+    exec(s, { op: 'set_track', track: 'main', locked: true, muted: true })
+    exec(s, { op: 'set_track', track: 'v1', hidden: true })
+    expect(parseProject(serialize(s.project)).tracks).toEqual({ main: { locked: true, muted: true }, v1: { hidden: true } })
+    exec(s, { op: 'set_track', track: 'main', locked: false, muted: false })
+    expect(s.project.tracks).toEqual({ v1: { hidden: true } })
+  })
+})

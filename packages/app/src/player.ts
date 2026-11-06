@@ -156,8 +156,9 @@ export class Player {
     this.t0 = from
     this.ctxStart = this.actx.currentTime + 0.05
     const placed = layout(this.store.project)
+    const ts = (k: string) => this.store.project.tracks?.[k] ?? {}
     placed.forEach(({ clip, start, end }, i) => {
-      if (end <= from) return
+      if (end <= from || ts('main').muted) return
       const a = this.assets.get(clip.assetId)
       if (!a?.audio) return
       const inClip = Math.max(from - start, 0)            // segundos de línea de tiempo ya consumidos
@@ -194,7 +195,7 @@ export class Player {
     for (const o of this.store.project.overlays ?? []) {
       if (overlayEnd(o) <= from) continue
       const buf = o.kind === 'video' ? this.assets.get(o.assetId)?.audio : this.music.get(o.assetId)
-      if (!buf || o.volume <= 0) continue
+      if (!buf || o.volume <= 0 || ts((o.kind === 'video' ? 'v' : 'a') + o.track).muted) continue
       const inO = Math.max(from - o.start, 0)
       const len = (o.srcOut - o.srcIn) - inO * o.speed
       if (len <= 0) continue
@@ -206,7 +207,7 @@ export class Player {
     }
     // música: suena desde el inicio de la línea de tiempo, con fundido al final
     const m = this.store.project.music, mb = m && this.music.get(m.assetId)
-    if (m && mb) {
+    if (m && mb && !ts('music').muted) {
       const total = duration(this.store.project), len = total - from
       if (len > 0) {
         const src = this.actx.createBufferSource(); src.buffer = mb
@@ -236,7 +237,8 @@ export class Player {
   }
 
   private draw(t: number) {
-    const loc = locate(this.store.project, t)
+    const tracks = this.store.project.tracks ?? {}
+    const loc = tracks.main?.hidden ? null : locate(this.store.project, t)
     this.fx = loc ? fxAt(loc.placed.clip.fx, loc.placed.clip.fxDir, t - loc.placed.start, loc.placed.end - loc.placed.start, loc.placed.clip === this.store.project.clips[this.store.project.clips.length - 1]) : { zoom: 1, shift: 0, flash: 0 }
     if (loc) {
       const asset = this.assets.get(loc.placed.clip.assetId)
@@ -258,7 +260,9 @@ export class Player {
     this.drawOverlayVideos(t)
     if (this.fx.flash > 0.005) { this.ctx.fillStyle = `rgba(255,255,255,${this.fx.flash})`; this.ctx.fillRect(0, 0, W, H) }
     const sel = this.store.selection
-    drawOverlays(this.ctx, this.store.project, t, sel?.type === 'layer' ? sel.id : null)
+    const tr = this.store.project.tracks
+    const proj = tr?.subtitle?.hidden || tr?.graphic?.hidden ? { ...this.store.project, layers: this.store.project.layers.filter(l => !tr?.[l.type]?.hidden) } : this.store.project
+    drawOverlays(this.ctx, proj, t, sel?.type === 'layer' ? sel.id : null)
     this.fps.n++
     const now = performance.now()
     if (now - this.fps.last > 1000) { this.fps.shown = this.fps.n; this.fps.n = 0; this.fps.last = now }
@@ -266,7 +270,7 @@ export class Player {
 
   /** Videos superpuestos: de la pista más baja a la más alta, con su posición, tamaño, opacidad y esquinas redondeadas. */
   private drawOverlayVideos(t: number) {
-    const ovs = (this.store.project.overlays ?? []).filter(o => o.kind === 'video' && t >= o.start && t < overlayEnd(o)).sort((a, b) => a.track - b.track)
+    const ovs = (this.store.project.overlays ?? []).filter(o => o.kind === 'video' && !this.store.project.tracks?.['v' + o.track]?.hidden && t >= o.start && t < overlayEnd(o)).sort((a, b) => a.track - b.track)
     for (const o of ovs) {
       const asset = this.assets.get(o.assetId); if (!asset) continue
       const idx = asset.source.idxAt(o.srcIn + (t - o.start) * o.speed)
