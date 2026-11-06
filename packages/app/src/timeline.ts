@@ -21,7 +21,7 @@ const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(
 type Drag =
   | { k: 'seek' }
   | { k: 'trim'; edge: 'in' | 'out'; id: string; x0: number; in0: number; out0: number; start0: number }
-  | { k: 'clip'; id: string; x0: number; moved: boolean; target: number }
+  | { k: 'clip'; id: string; x0: number; moved: boolean; target: number; start0: number; up: boolean; track: number }
   | { k: 'ovc'; id: string; mode: 'move' | 'l' | 'r'; x0: number; start0: number; in0: number; out0: number }
   | { k: 'ov'; id: string; mode: 'move' | 'l' | 'r'; x0: number; s0: number; e0: number; moved: boolean }
 
@@ -244,7 +244,7 @@ export class Timeline {
       if (!h) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
       this.store.select({ type: 'clip', id: h.p.clip.id })
       if (h.zone === 'body') {
-        this.drag = { k: 'clip', id: h.p.clip.id, x0: x, moved: false, target: this.store.project.clips.indexOf(h.p.clip) }
+        this.drag = { k: 'clip', id: h.p.clip.id, x0: x, moved: false, target: this.store.project.clips.indexOf(h.p.clip), start0: h.p.start, up: false, track: 1 }
         this.player.seek(t)
       } else {
         this.store.beginTx()
@@ -353,6 +353,10 @@ export class Timeline {
     if (d.k === 'clip') {
       if (Math.abs(x - d.x0) > 4) d.moved = true
       if (d.moved) {
+        // arrastrar hacia arriba (fuera de la pista principal): aparece una pista de superposición donde soltar
+        d.up = y < ROWS.video.y - 4
+        this.extra = d.up ? 'video' : null
+        if (d.up) d.track = this.laneAt(y, 'video') ?? 1
         const others = layout(p).filter(q => q.clip.id !== d.id)
         const t = this.x2t(x)
         let target = 0
@@ -387,7 +391,11 @@ export class Timeline {
     this.player.override = null
     if (d.k === 'ovc') { this.extra = null; this.store.live(pr => compactTracks(pr)) }   // si una pista quedó vacía, desaparece
     if (d.k === 'trim' || d.k === 'ov' || d.k === 'ovc') this.store.endTx()
-    if (d.k === 'clip' && d.moved) {
+    if (d.k === 'clip') this.extra = null
+    if (d.k === 'clip' && d.moved && d.up) {
+      const start = Math.max(0, this.magnet(d.start0 + (this.mouse.x - d.x0) / this.pps)); this.snapAt = null
+      exec(this.store, { op: 'clip_to_overlay', clip: d.id, start, track: d.track })
+    } else if (d.k === 'clip' && d.moved) {
       if (d.target !== this.store.project.clips.findIndex(c => c.id === d.id)) exec(this.store, { op: 'move_clip', id: d.id, to_index: d.target })
     }
     this.player.dirty = true; this.dirty = true
@@ -476,7 +484,15 @@ export class Timeline {
     this.drawOverlayClips()
 
     // indicador de destino al reordenar
-    if (dragging) {
+    if (dragging?.up) {          // soltar arriba: el clip pasa a la pista de superposición bajo el cursor
+      const row = this.vLanes[dragging.track - 1], g = placed.find(q => q.clip.id === dragging.id)
+      if (row && g) {
+        c.fillStyle = 'rgba(232,177,82,.12)'; c.fillRect(LEFT, row.y, this.w - LEFT, row.h)
+        const gw = (g.end - g.start) * this.pps
+        c.globalAlpha = 0.75; c.fillStyle = '#e8b152'; c.beginPath(); c.roundRect(this.mouse.x - gw / 2, row.y + 2, gw, row.h - 4, 3); c.fill()
+        c.globalAlpha = 1
+      }
+    } else if (dragging) {
       const others = placed.filter(q => q.clip.id !== dragging.id)
       const tx = dragging.target <= 0 ? 0 : others[Math.min(dragging.target, others.length) - 1].end
       const x = this.t2x(tx)

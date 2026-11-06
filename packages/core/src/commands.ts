@@ -18,6 +18,7 @@ export type Cmd =
   | { op: 'import_asset'; asset: AssetInfo }
   | { op: 'add_clip'; asset: string; src_in?: number; src_out?: number; effect?: ClipFx; dir?: 1 | -1 }
   | { op: 'add_overlay'; asset: string; start: number; track?: number; src_in?: number; src_out?: number; x?: number; y?: number; scale?: number; volume?: number }
+  | { op: 'clip_to_overlay'; clip: string; start: number; track?: number }
   | { op: 'update_overlay'; id: string; patch: OverlayPatch }
   | { op: 'delete_overlay'; id: string }
   | { op: 'set_track'; track: string; locked?: boolean; hidden?: boolean; muted?: boolean }
@@ -87,6 +88,19 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       ;(p.overlays ??= []).push(o)
       compactTracks(p)
       return `${o.id} ${kind} en pista ${track} desde ${f2(start)}s (${a.name})`
+    }
+    case 'clip_to_overlay': {
+      // Arrastrar un clip de la pista principal hacia arriba: sale de la pista magnética (que se cierra) y pasa a una pista superpuesta
+      const i = p.clips.findIndex(c => c.id === cmd.clip)
+      if (i < 0) return 'clip no encontrado'
+      const [c] = p.clips.splice(i, 1)
+      const start = Math.max(0, cmd.start), len = clipDur(c)
+      const o = { id: store.newId('o'), assetId: c.assetId, kind: 'video' as const, track: freeTrack(p, 'video', start, start + len, cmd.track ?? 1),
+        start, srcIn: c.srcIn, srcOut: c.srcOut, speed: c.speed, volume: c.volume, transform: { ...DEFAULT_TRANSFORM, scale: 1 } }
+      ;(p.overlays ??= []).push(o)
+      compactTracks(p)
+      store.selection = { type: 'overlay', id: o.id }
+      return `${c.id} pasó a ${o.id} (pista de video ${o.track}) desde ${f2(start)}s`
     }
     case 'update_overlay': {
       const o = p.overlays?.find(x => x.id === cmd.id)

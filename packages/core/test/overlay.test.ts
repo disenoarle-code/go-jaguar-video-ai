@@ -66,3 +66,16 @@ describe('estado de pista', () => {
     expect(s.project.tracks).toEqual({ v1: { hidden: true } })
   })
 })
+
+describe('clip de la pista principal a superpuesto', () => {
+  it('sale de la principal (que se cierra) y queda en una pista superpuesta', () => {
+    const s = new Store(createProject('t'))
+    execBatch(s, [{ op: 'import_asset', asset: vid }, { op: 'add_clip', asset: 'a1', src_in: 0, src_out: 3 }, { op: 'add_clip', asset: 'a1', src_in: 4, src_out: 7 }, { op: 'add_clip', asset: 'a1', src_in: 8, src_out: 10 }])
+    const id = s.project.clips[1].id
+    exec(s, { op: 'clip_to_overlay', clip: id, start: 1 })
+    expect(s.project.clips).toHaveLength(2)
+    expect(s.project.overlays).toHaveLength(1)
+    expect(s.project.overlays![0]).toMatchObject({ kind: 'video', track: 1, start: 1, srcIn: 4, srcOut: 7 })
+    expect(s.selection).toMatchObject({ type: 'overlay' })
+  })
+})
