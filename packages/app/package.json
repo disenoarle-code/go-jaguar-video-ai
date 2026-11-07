@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 5273",
-    "check": "tsc --noEmit",
-    "proxy": "node scripts/make-proxy.mjs"
+    "check": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/dom-webcodecs": "^0.1.19",

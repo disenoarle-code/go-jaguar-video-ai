@@ -48,7 +48,7 @@ Si alguna respuesta es "no": corrige (añade el contexto que falta, cambia el ga
 - Si no existe, añade un **texto breve en pantalla** (título de 3–6 palabras) y **avísalo al usuario**. Nunca inventes frases que la persona no dijo.
 
 ## Entradas
-- Transcripción con tiempos (`media/transcripciones/<video>.lineas.txt` y `.words.json`). Los tiempos por palabra son **aproximados**: úsalos para ubicar, no para cortar.
+- Transcripción con tiempos (`biblioteca/proyectos/<slug>/transcripciones/<video>.lineas.txt` y `.words.json`). Los tiempos por palabra son **aproximados**: úsalos para ubicar, no para cortar.
 - Silencios del audio (ffmpeg `silencedetect`). Los cortes se hacen **dentro de pausas**.
 
 ## Método

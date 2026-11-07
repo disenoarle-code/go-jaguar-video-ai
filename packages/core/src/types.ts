@@ -7,7 +7,7 @@ export interface AssetInfo {
   id: string
   name: string
   kind?: 'video' | 'image' | 'audio'
-  proxy: string       // copia liviana para editar (ruta relativa a media/)
+  proxy: string       // copia liviana para editar (URL api/files/… dentro de la biblioteca del proyecto)
   original: string    // archivo original
   duration: number    // segundos
   fps: number

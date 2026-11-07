@@ -38,7 +38,7 @@ Objetivo: un editor de video simple y rápido que **Claude controla con pocos to
 - El resumen para Claude crece con el número de clips (145 clips = mucho texto). Hay que agruparlo.
 - Los cortes por silencio se detectaron por volumen: no están verificados contra palabras.
 - El audio estirado se pre-procesa por velocidad usada; con velocidades distintas por clip hay que cachear por clip.
-- El prototipo corre en un navegador; la importación hoy es por script (`npm run proxy`).
+- El prototipo corre en un navegador; la importación se hace desde la app (Material → Elegir archivos / Importar); los proxies los crea la app.
 
 ---
 

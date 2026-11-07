@@ -1,6 +1,8 @@
 """Recorta el tramo elegido: 16:9 1080p, sin silencios, con fundidos de 6 ms en cada unión."""
 import json, subprocess, sys
-SRC = '/Users/a1/Developer/editor_gojaguar/media/originales/IMG_0047.MOV'
+import os
+SRC = os.environ.get('VIDEO_ORIGEN', '')      # ruta del video a recortar (el original de prueba usado en este experimento ya no existe)
+if not SRC: sys.exit('Define VIDEO_ORIGEN con la ruta del video a recortar')
 START, END = 35.0, 67.7           # tramo elegido (segundos del original)
 OUT = 'work/seg_cut.mp4'
 sil = [r for r in json.load(open('/tmp/ranges.json')) if r[1] > START and r[0] < END]
