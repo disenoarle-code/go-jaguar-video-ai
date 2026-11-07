@@ -193,3 +193,22 @@ suite('describe (resumen para Claude)', () => {
     expect(describe(s)).toMatch(/clips demo/)
   })
 })
+
+suite('ripple de superpuestos, karaoke y recortes de borde', () => {
+  const conKaraoke = () => {
+    const s = fresh()
+    exec(s, { op: 'add_layer', layer: { type: 'subtitle', start: 50, end: 52, text: 'x', size: 54, color: '#fff', template: 'karaoke', props: { palabras: JSON.stringify([['hola', 50, 51], ['mundo', 51, 52]]) } } })
+    return s
+  }
+  it('delete_range mueve también las palabras del karaoke', () => {
+    const s = conKaraoke(); exec(s, { op: 'delete_range', from: 20, to: 30 })
+    const l = s.project.layers[0] as unknown as { start: number; props: { palabras: string } }
+    expect(l.start).toBeCloseTo(40); expect(JSON.parse(l.props.palabras)[1][1]).toBeCloseTo(41)
+  })
+  it('trim del borde de salida corre capas, palabras y sonidos como un borrado', () => {
+    const s = conKaraoke(); exec(s, { op: 'split', at: 30 }); const c = s.project.clips[0]
+    exec(s, { op: 'trim', id: c.id, edge: 'out', src_time: 20 })
+    const l = s.project.layers[0] as unknown as { start: number; props: { palabras: string } }
+    expect(l.start).toBeCloseTo(40); expect(JSON.parse(l.props.palabras)[0][1]).toBeCloseTo(40)
+  })
+})

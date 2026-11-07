@@ -173,6 +173,17 @@ export async function bootEditor(slug: string) {
   $('redo').onclick = () => store.redo()
   const splitHere = () => { if (store.project.tracks?.main?.locked) { notify('La pista principal está bloqueada'); return } exec(store, { op: 'split', at: player.playhead }) }
   $('split').onclick = splitHere
+  /** Como CapCut: borra de un clip todo lo anterior (Q) o lo posterior (W) al cabezal y cierra el hueco. */
+  const trimHere = (lado: 'antes' | 'despues') => {
+    if (store.project.tracks?.main?.locked) { notify('La pista principal está bloqueada'); return }
+    const t = player.playhead, c = layout(store.project).find(x => t > x.start + 0.01 && t < x.end - 0.01)
+    if (!c) { notify('Pon el cabezal dentro de un clip'); return }
+    exec(store, lado === 'antes' ? { op: 'delete_range', from: c.start, to: t } : { op: 'delete_range', from: t, to: c.end })
+    if (lado === 'antes') player.seek(c.start)
+    store.select(null)
+  }
+  $('trimL').onclick = () => trimHere('antes')
+  $('trimR').onclick = () => trimHere('despues')
   $('del').onclick = deleteSelected
   $('addsub').onclick = () => exec(store, { op: 'add_text', type: 'subtitle', start: player.playhead, end: player.playhead + 2.5, text: 'Nuevo subtítulo' })
   $('addgfx').onclick = () => exec(store, { op: 'add_text', type: 'graphic', start: player.playhead, end: player.playhead + 3, text: 'Nuevo gráfico' })
@@ -195,6 +206,9 @@ export async function bootEditor(slug: string) {
     if (e.code === 'Space') { e.preventDefault(); player.toggle() }
     else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); void guardar(true) }
     else if (e.key === 's' && !mod) splitHere()
+    else if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); splitHere() }
+    else if (!mod && !e.altKey && e.key.toLowerCase() === 'q') { e.preventDefault(); trimHere('antes') }
+    else if (!mod && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); trimHere('despues') }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected() }
     else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? store.redo() : store.undo() }
     else if (e.key === 'ArrowLeft') player.seek(player.playhead - 1 / 30)

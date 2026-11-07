@@ -7,6 +7,10 @@ const P = {
   undo: S('<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   redo: S('<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/>'),
   scissors: S('<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/>'),
+  // cortar / borrar lo anterior / borrar lo posterior (corchetes ][ ; la mitad que se borra va tenue)
+  split: S('<path d="M9 5H6v14h3"/><path d="M15 5h3v14h-3"/>'),
+  'trim-left': S('<g opacity=".35"><path d="M9 5H6v14h3"/></g><path d="M15 5h3v14h-3"/><path d="M3 12h2"/>'),
+  'trim-right': S('<path d="M9 5H6v14h3"/><g opacity=".35"><path d="M15 5h3v14h-3"/></g><path d="M19 12h2"/>'),
   download: S('<path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/>'),
   text: S('<path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/>'),
   graphic: S('<path d="M12 3l2.4 5.6 6 .6-4.5 4 1.4 5.9L12 16l-5.3 3.1 1.4-5.9-4.5-4 6-.6z"/>'),

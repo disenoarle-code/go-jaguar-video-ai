@@ -60,6 +60,20 @@ export function execBatch(store: Store, cmds: Cmd[]): string[] {
   return out
 }
 
+/** Mueve en el tiempo todo lo que no es el clip principal tras un recorte/borrado: capas, tiempos de las palabras del karaoke (props.palabras) y superpuestos/sonidos. */
+function rippleTodo(p: Project, mover: (t: number) => number) {
+  const conPalabras = (l: Layer): Layer => {
+    const pr = (l as { props?: Record<string, string> }).props
+    if (!pr?.palabras) return l
+    try { return ({ ...l, props: { ...pr, palabras: JSON.stringify((JSON.parse(pr.palabras) as [string, number, number][]).map(([w, a, b]) => [w, +mover(a).toFixed(3), +mover(b).toFixed(3)])) } } as unknown as Layer) } catch { return l }
+  }
+  p.layers = p.layers.flatMap(l => {
+    const s = mover(l.start), e = mover(l.end)
+    return e - s < 0.1 ? [] : [conPalabras({ ...l, start: s, end: e })]
+  })
+  if (p.overlays) p.overlays = p.overlays.map(o => ({ ...o, start: +mover(o.start).toFixed(3) }))
+}
+
 function apply(store: Store, p: Project, cmd: Cmd): string {
   switch (cmd.op) {
     case 'import_asset': {
@@ -202,13 +216,7 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       p.clips = out
       // Las capas se desplazan con el ripple.
       const d = to - from
-      p.layers = p.layers.flatMap(l => {
-        if (l.end <= from) return [l]
-        if (l.start >= to) return [{ ...l, start: l.start - d, end: l.end - d }]
-        const s = Math.min(l.start, from)
-        const e = l.end > to ? l.end - d : from
-        return e - s < 0.1 ? [] : [{ ...l, start: s, end: e }]
-      })
+      rippleTodo(p, (t: number) => (t <= from ? t : t >= to ? t - d : from))
       return `borrado ${f2(from)}–${f2(to)}s (ripple, ${f2(d)}s)`
     }
     case 'delete_ranges': {
@@ -252,8 +260,13 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       if (!c) return 'clip no encontrado'
       const total = p.assets.find(a => a.id === c.assetId)?.duration ?? Infinity
       const minSrc = MIN_DUR * c.speed
+      const antes = layout(p).find(x => x.clip.id === c.id)
       if (cmd.edge === 'in') c.srcIn = Math.min(Math.max(cmd.src_time, 0), c.srcOut - minSrc)
       else c.srcOut = Math.max(Math.min(cmd.src_time, total), c.srcIn + minSrc)
+      if (antes) {                                       // lo que viene después (capas, palabras del karaoke, sonidos) se corre con el borde, como en delete_range
+        const dd = (c.srcOut - c.srcIn) / c.speed - (antes.end - antes.start), fin = antes.end
+        if (Math.abs(dd) > 1e-4) rippleTodo(p, dd < 0 ? (t: number) => (t <= fin + dd ? t : t >= fin ? t + dd : fin + dd) : (t: number) => (t <= fin ? t : t + dd))
+      }
       return `${c.id} recortado (${cmd.edge}) → ${f2(c.srcIn)}–${f2(c.srcOut)}`
     }
     case 'add_text': {
