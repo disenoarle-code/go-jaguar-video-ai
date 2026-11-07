@@ -1,5 +1,5 @@
 import {
-  Store, describe, duration, exec, execBatch, layout, parseProject, serialize,
+  Store, describe, duration, exec, execBatch, layout, parseProject, serialize, sincronizarPalabras,
   TRANSITION_DEFAULTS, TRANSITION_KINDS, ZOOM_DEFAULTS, ZOOM_KINDS, type AssetInfo, type Cmd, type TransitionKind, type ZoomKind, type Project, type TextLayer,
 } from '@gojaguar/core'
 import { TRANSITION_INFO, ZOOM_INFO } from './fxinfo'
@@ -335,6 +335,35 @@ export async function bootEditor(slug: string) {
     el.addEventListener('input', () => store.live(p => set(p, el.value)))
     return el
   }
+  /** Pestaña "Subtítulos": todos los subtítulos en filas (tiempo + texto) para corregirlos en un solo lugar. */
+  function buildSubtitleList(selId: string) {
+    const subs = store.project.layers.filter((l): l is Extract<TextLayer, { type: 'subtitle' }> => l.type === 'subtitle').sort((a, b) => a.start - b.start)
+    const fmt = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
+    insp.insertAdjacentHTML('beforeend', `<div class="sublist-head"><span>${subs.length} subtítulos</span><span class="dim">Enter pasa al siguiente</span></div><div class="sublist"></div>`)
+    const box = insp.querySelector('.sublist') as HTMLElement
+    subs.forEach(l => {
+      const row = document.createElement('div'); row.className = 'subrow' + (l.id === selId ? ' on' : ''); row.dataset.id = l.id
+      const tm = document.createElement('button'); tm.className = 'subtime'; tm.textContent = fmt(l.start); tm.title = 'Ir a este subtítulo'
+      tm.onclick = () => { player.seek(l.start + 0.01); store.select({ type: 'layer', id: l.id }) }
+      const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'subtxt'; inp.value = l.text; inp.spellcheck = false
+      inp.addEventListener('focus', () => { store.beginTx(); player.seek(l.start + 0.01) })
+      inp.addEventListener('blur', () => store.endTx())
+      inp.addEventListener('input', () => store.live(p => { const q = p.layers.find(o => o.id === l.id) as TextLayer | undefined; if (q) { q.text = inp.value; sincronizarPalabras(q) } }))
+      // al salir de la fila se reconstruye la lista (cambió el texto): por eso el foco se pone DESPUÉS, buscando la fila por su id
+      const irA = (r: Element | null) => { const id = (r as HTMLElement | null)?.dataset.id; if (id) setTimeout(() => (insp.querySelector(`.subrow[data-id="${id}"] .subtxt`) as HTMLInputElement | null)?.focus(), 0) }
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); irA(row.nextElementSibling); inp.blur() }
+        else if (e.key === 'ArrowDown' && inp.selectionStart === inp.value.length) { e.preventDefault(); irA(row.nextElementSibling); inp.blur() }
+        else if (e.key === 'ArrowUp' && inp.selectionStart === 0) { e.preventDefault(); irA(row.previousElementSibling); inp.blur() }
+        e.stopPropagation()
+      })
+      const del = document.createElement('button'); del.className = 'x subdel'; del.textContent = '✕'; del.title = 'Borrar este subtítulo'
+      del.onclick = () => { exec(store, { op: 'delete_layer', id: l.id }); const next = subs.find(o => o.id !== l.id && o.start >= l.start) ?? subs.find(o => o.id !== l.id); store.select(next ? { type: 'layer', id: next.id } : null) }
+      row.append(tm, inp, del); box.append(row)
+    })
+    box.querySelector('.subrow.on')?.scrollIntoView({ block: 'center' })
+  }
+  let subTab: 'ajustes' | 'lista' = 'ajustes'
   function renderInspector() {
     const s = sel()
     const p = store.project
@@ -344,10 +373,14 @@ export async function bootEditor(slug: string) {
     if (s && !(clip || lay || ov || (s.type === 'music' && p.music))) { store.selection = null; renderInspector(); return }     // lo seleccionado ya no existe (p. ej. tras deshacer)
     const nextClip = clip ? p.clips[p.clips.indexOf(clip) + 1] : undefined
     const key = s ? `${s.type}:${s.id}:${clip?.zoom?.kind ?? ''}:${clip?.transition?.kind ?? ''}:${clip?.transition?.dir ?? ''}:${nextClip?.transition?.kind ?? ''}:${nextClip?.transition?.dir ?? ''}` : 'none'
-    if (key === lastKey && key !== 'none') return
+    const esSub = lay?.type === 'subtitle'
+    const listaSig = esSub && subTab === 'lista' ? p.layers.filter(l => l.type === 'subtitle').map(l => l.id + '\u0001' + l.text).join('\u0002') : ''
+    if (esSub && subTab === 'lista' && lastKey.startsWith(`layer:${s!.id}:`) && insp.contains(document.activeElement) && (document.activeElement as HTMLElement).classList.contains('subtxt')) return   // no pisar lo que se está escribiendo
+    const keyFull = key + (esSub ? `:${subTab}:${listaSig}` : '')
+    if (keyFull === lastKey && key !== 'none') return
     if (lastKey.startsWith('overlay') && key.startsWith('overlay') && insp.contains(document.activeElement)) return   // no pisar lo que se está escribiendo
     if (key === 'none' && lastKey === 'none') { updatePool(); return }
-    lastKey = key
+    lastKey = keyFull
     insp.innerHTML = ''
     if (clip) {
       const id = clip.id
@@ -427,6 +460,11 @@ export async function bootEditor(slug: string) {
     } else if (lay && (lay.type === 'subtitle' || lay.type === 'graphic')) {
       const id = lay.id
       const T = (pr: Project) => pr.layers.find(o => o.id === id) as TextLayer
+      if (lay.type === 'subtitle') {
+        insp.insertAdjacentHTML('beforeend', `<div class="pool-tabs"><button class="ptab ${subTab === 'ajustes' ? 'on' : ''}" data-t="ajustes">Ajustes</button><button class="ptab ${subTab === 'lista' ? 'on' : ''}" data-t="lista">Subtítulos</button></div>`)
+        insp.querySelectorAll<HTMLButtonElement>('.ptab').forEach(b => { b.onclick = () => { subTab = b.dataset.t as 'ajustes' | 'lista'; lastKey = ''; renderInspector() } })
+        if (subTab === 'lista') { buildSubtitleList(lay.id); return }
+      }
       insp.insertAdjacentHTML('beforeend', `<h3>${lay.type === 'subtitle' ? 'Subtítulo' : 'Gráfico'} ${id}</h3>`)
       if (lay.type === 'subtitle') {
         const lab = document.createElement('label'); lab.className = 'chk'; lab.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;margin:6px 0'
@@ -435,7 +473,7 @@ export async function bootEditor(slug: string) {
         lab.append(cb, 'Aplicar a todos los subtítulos'); insp.append(lab)
         insp.insertAdjacentHTML('beforeend', '<p class="hint" style="margin:0 0 8px">Mover, agrandar, estirar o girar un subtítulo lo hace en todos. Desmárcalo para cambiar solo este.</p>')
       }
-      field('Texto', input('text', lay.text, (pr, v) => { T(pr).text = v }))
+      field('Texto', input('text', lay.text, (pr, v) => { const l = T(pr); l.text = v; sincronizarPalabras(l) }))
       field('Tamaño', input('number', lay.size, (pr, v) => { T(pr).size = Math.max(10, parseFloat(v) || 10) }, { min: '10', max: '200' }))
       field('Color', input('color', lay.color, (pr, v) => { T(pr).color = v }))
       field('Inicio (s)', input('number', lay.start.toFixed(2), (pr, v) => { T(pr).start = Math.max(0, parseFloat(v) || 0) }, { step: '0.1' }))

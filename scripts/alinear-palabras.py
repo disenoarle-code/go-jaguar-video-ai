@@ -65,5 +65,5 @@ for q in range(len(REF)):                                              # cada pa
     nxt = t0[q + 1] if q + 1 < len(REF) else DUR
     t1[q] = nxt if nxt - t1[q] < 0.3 else min(max(t1[q] + 0.12, min(fin_de_voz(t1[q], nxt), t1[q] + 0.45)), nxt)
     t1[q] = max(t1[q], t0[q] + 0.05)
-json.dump([{'w': REF[q]['w'], 't0': round(float(t0[q]), 3), 't1': round(float(t1[q]), 3)} for q in range(len(REF))], open(salida, 'w'), ensure_ascii=False, indent=1)
+json.dump([{'w': re.sub(r'["“”«»]', '', REF[q]['w']), 't0': round(float(t0[q]), 3), 't1': round(float(t1[q]), 3)} for q in range(len(REF))], open(salida, 'w'), ensure_ascii=False, indent=1)
 print(f'{len(REF)} palabras alineadas con {MODELO} → {salida}', file=sys.stderr)

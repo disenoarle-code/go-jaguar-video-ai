@@ -103,6 +103,10 @@ Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.jso
 
 ⌘B (o S) corta el clip en el cabezal; **Q** borra lo anterior del clip bajo el cabezal; **W** borra lo posterior; los botones `][` de la barra hacen lo mismo y muestran la tecla al pasar el mouse. Borrar y recortar bordes (`delete_range`, `trim`) **corren juntos** las capas, los tiempos de las palabras del karaoke (`props.palabras`) y los superpuestos/sonidos que vienen después (`rippleTodo` en `commands.ts`): no hace falta moverlos a mano.
 
+## Editar subtítulos en el editor
+
+Con un subtítulo seleccionado, el panel derecho tiene dos pestañas: **Ajustes** y **Subtítulos** (lista con una fila por subtítulo: tiempo + texto editable; Enter/↑/↓ pasan de fila; ✕ borra; clic en el tiempo va a ese punto). Cambiar `text` de un karaoke rehace sus `props.palabras` con `sincronizarPalabras` (core): las palabras que no cambian conservan su tiempo. Por eso `update_layer {patch:{text}}` también funciona por comando.
+
 ## Color de marca
 
 La palabra resaltada del karaoke y el acento por defecto de las plantillas usan el naranja de Go Jaguar: `NARANJA` (hoy `#ff7a00`, valor provisional: el repo no tiene el hex oficial) en `packages/app/src/overlays.ts`. Cámbialo solo ahí. Las tarjetas de cristal y píldoras 3D siguen disponibles como plantillas, pero el usuario no las quiere por defecto en los videos.
@@ -118,8 +122,9 @@ Los tiempos por palabra de Whisper se desfasan (hasta ~1 s), así que **no se us
 2. Alinear: `~/.gojaguar-alinear/bin/python scripts/alinear-palabras.py audio.wav transcripciones/<video>.words.json analisis/<video>.palabras.json` (alineación forzada CTC con wav2vec2 en español, Apache 2.0). Instalación única y gratuita (~1,5 GB, pedir permiso antes): `python3 -m venv ~/.gojaguar-alinear && ~/.gojaguar-alinear/bin/pip install torch torchaudio transformers soundfile numpy`.
 3. Revisar: `python3 scripts/verificar-sincronia.py audio.wav analisis/<video>.palabras.json` (voz sobre silencio, pausas dentro de palabras, ventanas re-transcritas). Si dice `SINCRONÍA MALA`, no seguir.
 4. Armar las capas karaoke con los tiempos pasados a la línea de tiempo (en los cortes, restar lo eliminado), exportar desde la app a una carpeta temporal y revisar de punta a punta: `ffmpeg -i export.mp4 -vn -ac 1 -ar 16000 exp.wav` y `python3 scripts/verificar-sincronia.py exp.wav proyecto.gojaguar`. Restaurar la carpeta de exportación del usuario.
-5. Si escribiste `proyecto.gojaguar` en disco con el editor abierto, **recarga la página del editor** (`location.reload()`): no detecta cambios externos, sigue mostrando (y guardando) la versión vieja. Comprueba con `JSON.parse(editor.serialize())`.
-6. Mirar a ojo 2-3 zonas (energía vs palabras) antes de decir "listo".
+5. **Sin comillas** (`"` `“` `”` `«` `»`) en el texto de los subtítulos ni en sus palabras: el usuario las quita siempre.
+6. Si escribiste `proyecto.gojaguar` en disco con el editor abierto, **recarga la página del editor** (`location.reload()`): no detecta cambios externos, sigue mostrando (y guardando) la versión vieja. Comprueba con `JSON.parse(editor.serialize())`.
+7. Mirar a ojo 2-3 zonas (energía vs palabras) antes de decir "listo".
 
 ## Momentos sin voz que hay que reconocer y cortar
 

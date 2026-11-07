@@ -74,6 +74,38 @@ function rippleTodo(p: Project, mover: (t: number) => number) {
   if (p.overlays) p.overlays = p.overlays.map(o => ({ ...o, start: +mover(o.start).toFixed(3) }))
 }
 
+/**
+ * Un subtítulo karaoke se dibuja con `props.palabras` (cada palabra con su tiempo), no con `text`. Al cambiar `text` hay que rehacer esa lista:
+ * las palabras que no cambiaron conservan su tiempo (se emparejan por texto en orden) y las nuevas se reparten en el hueco que dejan.
+ */
+export function sincronizarPalabras(l: Layer) {
+  const pr = (l as { props?: Record<string, string> }).props
+  if (l.type !== 'subtitle' || !pr?.palabras) return
+  let old: [string, number, number][]
+  try { old = JSON.parse(pr.palabras) } catch { return }
+  const nuevas = l.text.split(/\s+/).filter(Boolean)
+  if (!old.length || !nuevas.length) return
+  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+  const n = old.length, m = nuevas.length
+  const L = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))      // subsecuencia común más larga
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = norm(old[i][0]) === norm(nuevas[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1])
+  const t0 = new Array<number | null>(m).fill(null), t1 = new Array<number | null>(m).fill(null)
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (norm(old[i][0]) === norm(nuevas[j])) { t0[j] = old[i][1]; t1[j] = old[i][2]; i++; j++ } else if (L[i + 1][j] >= L[i][j + 1]) i++; else j++
+  }
+  const ini = old[0][1], fin = old[n - 1][2]
+  for (let j = 0; j < m;) {
+    if (t0[j] !== null) { j++; continue }
+    let k = j; while (k < m && t0[k] === null) k++
+    const a = j > 0 ? (t1[j - 1] as number) : ini, b = k < m ? (t0[k] as number) : fin
+    const pesos = nuevas.slice(j, k).map(w => Math.max(2, norm(w).length) + 1), tot = pesos.reduce((x, y) => x + y, 0)
+    let x = a
+    for (let q = j; q < k; q++) { t0[q] = x; x += (Math.max(b - a, 0.1 * (k - j)) * pesos[q - j]) / tot; t1[q] = x }
+    j = k
+  }
+  pr.palabras = JSON.stringify(nuevas.map((w, q) => [w, +(t0[q] as number).toFixed(3), +(t1[q] as number).toFixed(3)]))
+}
+
 function apply(store: Store, p: Project, cmd: Cmd): string {
   switch (cmd.op) {
     case 'import_asset': {
@@ -293,6 +325,7 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       if (!l) return 'capa no encontrada'
       const { transform, ...rest } = cmd.patch
       Object.assign(l, rest)
+      if ('text' in rest) sincronizarPalabras(l)
       if (transform) l.transform = { ...l.transform, ...transform }
       return `${l.id} actualizado`
     }

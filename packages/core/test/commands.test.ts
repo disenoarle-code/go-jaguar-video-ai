@@ -212,3 +212,23 @@ suite('ripple de superpuestos, karaoke y recortes de borde', () => {
     expect(l.start).toBeCloseTo(40); expect(JSON.parse(l.props.palabras)[0][1]).toBeCloseTo(40)
   })
 })
+
+suite('sincronizarPalabras (cambiar el texto de un karaoke)', () => {
+  const crear = () => {
+    const s = fresh()
+    exec(s, { op: 'add_layer', layer: { type: 'subtitle', start: 1, end: 5, text: 'hola mundo cruel', size: 54, color: '#fff', template: 'karaoke', props: { palabras: JSON.stringify([['hola', 1, 2], ['mundo', 2, 3], ['cruel', 3, 4]]) } } })
+    return s
+  }
+  const pal = (s: ReturnType<typeof fresh>) => JSON.parse((s.project.layers[0] as unknown as { props: { palabras: string } }).props.palabras) as [string, number, number][]
+  it('cambiar una palabra conserva los tiempos', () => {
+    const s = crear(); exec(s, { op: 'update_layer', id: s.project.layers[0].id, patch: { text: 'hola gente cruel' } })
+    expect(pal(s)).toEqual([['hola', 1, 2], ['gente', 2, 3], ['cruel', 3, 4]])
+  })
+  it('agregar y quitar palabras reparte el hueco sin mover las demás', () => {
+    const s = crear(); exec(s, { op: 'update_layer', id: s.project.layers[0].id, patch: { text: 'hola querido mundo cruel' } })
+    const p = pal(s); expect(p.map(x => x[0])).toEqual(['hola', 'querido', 'mundo', 'cruel'])
+    expect(p[0][1]).toBe(1); expect(p[2]).toEqual(['mundo', 2, 3]); expect(p[1][1]).toBeGreaterThanOrEqual(2 - 1e-6 - 1)
+    exec(s, { op: 'update_layer', id: s.project.layers[0].id, patch: { text: 'mundo cruel' } })
+    expect(pal(s)).toEqual([['mundo', 2, 3], ['cruel', 3, 4]])
+  })
+})
