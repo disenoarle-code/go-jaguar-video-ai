@@ -5,7 +5,7 @@ import { H, W } from './constants'
  * Escenas animadas con seudo-3D dibujadas con código (sin texto legible). Todo sale solo del tiempo `t` (nada de azar entre fotogramas),
  * así la vista previa y el MP4 exportado coinciden. Capa gráfica con `template: 'escena'` y `props`:
  *  - tipo 'claude'  : el muñeco de Claude (naranja, 3D). `anim`: 'golpe' (vuela, te pega en la cabeza —el centro de su caja—, rebota, se marea y al final se cae) | 'baile' | 'quieto';
- *                     `humor` al quedarse: 'loco' | 'triste' | 'feliz' | 'asustado'; `lado` desde donde entra: 'izq' | 'der' | 'centro'; `tam`: factor de tamaño; `y`: altura del golpe (fracción del alto, 0,2 = cabeza).
+ *                     `humor` al quedarse: 'loco' | 'triste' | 'feliz' | 'asustado' | 'culpable' (encogido, mira de lado, una lágrima); `lado` desde donde entra: 'izq' | 'der' | 'centro'; `tam`: factor de tamaño; `y`: altura del golpe (fracción del alto, 0,2 = cabeza).
  *  - tipo 'pantalla': una pantalla a cuadro completo con un editor de video (`pantalla:'editor'`) o código (`pantalla:'codigo'`) en tiempo real,
  *                     con cámara que se mueve, golpes de zoom y glitch al entrar y salir.
  */
@@ -61,8 +61,10 @@ interface Pose {
   triste: number                               // 0..1 tinte azul y cejas caídas
   tiembla: number                              // 0..1 temblor
   sudor: number                                // 0..1 gotas de sudor
+  mirada: number                              // -1..1 hacia dónde mira (evita tu mirada) y algo hacia abajo si ≠ 0
+  lagrima: number                             // 0..1 una lágrima suelta
 }
-const poseBase = (): Pose => ({ sx: 1, sy: 1, brazoI: 0.45, brazoD: -0.45, pata: 0, ojos: 'normal', boca: 'neutra', mareo: 0, triste: 0, tiembla: 0, sudor: 0 })
+const poseBase = (): Pose => ({ sx: 1, sy: 1, brazoI: 0.45, brazoD: -0.45, pata: 0, ojos: 'normal', boca: 'neutra', mareo: 0, triste: 0, tiembla: 0, sudor: 0, mirada: 0, lagrima: 0 })
 
 function pintarMuneco(c: Ctx, S: number, t: number, p: Pose) {
   const cx = S / 2 + (p.tiembla ? Math.sin(t * 60) * S * 0.008 * p.tiembla : 0), cy = S * 0.52
@@ -98,8 +100,9 @@ function pintarMuneco(c: Ctx, S: number, t: number, p: Pose) {
     else if (p.ojos === 'feliz') { c.beginPath(); c.arc(x, ey + S * 0.012, S * 0.03, Math.PI * 1.1, Math.PI * 1.9); c.stroke() }
     else {
       const gran = p.ojos === 'asustado' ? 1.3 : p.ojos === 'llorando' ? 1.15 : 1, blink = p.ojos === 'normal' && (t % 3.4) < 0.1 ? 0.15 : 1
-      c.fillStyle = '#2a1410'; c.beginPath(); c.roundRect(x - S * 0.024 * gran, ey - S * 0.05 * gran * blink, S * 0.048 * gran, S * 0.1 * gran * blink, S * 0.02); c.fill()
-      c.fillStyle = '#fff'; c.beginPath(); c.arc(x - S * 0.006, ey - S * 0.02 * gran, S * 0.009 * gran, 0, Math.PI * 2); c.fill()
+      const mx = p.mirada * S * 0.016, my2 = p.mirada ? S * 0.012 : 0, hh = p.mirada ? 0.78 : 1          // si evita tu mirada: ojos hacia un lado y abajo, algo caídos
+      c.fillStyle = '#2a1410'; c.beginPath(); c.roundRect(x - S * 0.024 * gran + mx, ey - S * 0.05 * gran * blink * hh + my2, S * 0.048 * gran, S * 0.1 * gran * blink * hh, S * 0.02); c.fill()
+      c.fillStyle = '#fff'; c.beginPath(); c.arc(x - S * 0.006 + mx, ey - S * 0.02 * gran + my2, S * 0.009 * gran, 0, Math.PI * 2); c.fill()
     }
     if (p.triste > 0.05) { c.strokeStyle = '#2a1410'; c.lineWidth = S * 0.012; c.beginPath(); c.moveTo(x + l * S * 0.04, ey - S * 0.07 + p.triste * S * 0.012); c.lineTo(x - l * S * 0.04, ey - S * 0.07 - p.triste * S * 0.025); c.stroke() }
   }
@@ -115,6 +118,7 @@ function pintarMuneco(c: Ctx, S: number, t: number, p: Pose) {
     for (let i = 0; i < 8; i++) { const l = i % 2 ? 1 : -1, f = (t * 1.6 + i * 0.19) % 1; c.globalAlpha = 1 - f; c.beginPath(); c.ellipse(cx + l * (ex + S * 0.012), ey + S * 0.05 + f * S * 0.22, S * 0.012, S * 0.02, 0, 0, Math.PI * 2); c.fill() }
     c.globalAlpha = 1
   }
+  if (p.lagrima > 0.05) { const f = (t * 0.7) % 1; c.fillStyle = 'rgba(160,215,255,.95)'; c.globalAlpha = p.lagrima * (1 - f * f); c.beginPath(); c.ellipse(cx + ex + S * 0.02, ey + S * 0.05 + f * S * 0.2, S * 0.013, S * 0.022, 0, 0, Math.PI * 2); c.fill(); c.globalAlpha = 1 }
   if (p.sudor > 0.05) { c.fillStyle = 'rgba(170,225,255,.95)'; for (let i = 0; i < 3; i++) { const f = (t * 2.2 + i * 0.33) % 1, x = cx + (i - 1) * bw * 0.32; c.globalAlpha = p.sudor * (1 - f); c.beginPath(); c.ellipse(x, cy - bh / 2 - S * 0.02 + f * S * 0.1, S * 0.012, S * 0.02, 0, 0, Math.PI * 2); c.fill() } c.globalAlpha = 1 }
   c.restore()
   if (p.mareo > 0.05) {                                                                                                // estrellitas dando vueltas sobre la cabeza
@@ -164,9 +168,14 @@ function dibujarMuneco(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
     const sq = u < 0.18 ? 1 - u / 0.18 : 0, alto = Math.sin(Math.PI * clamp01((u - 0.18) / 0.82))
     p.sx = 1 + 0.4 * sq - 0.08 * alto; p.sy = 1 - 0.45 * sq + 0.15 * alto; y = P.y - H * 0.1 * alto; rot = Math.sin(u * 14) * 0.12 * (1 - u); p.brazoI = 0.9 + 1.2 * (1 - u); p.brazoD = -0.9 - 1.2 * (1 - u); jug(u < 0.3 ? 'x' : 'espiral', 'o'); p.mareo = u
     if (anim !== 'golpe') { p.sx = 1 + 0.12 * Math.sin(u * 20) * (1 - u); p.sy = 2 - p.sx; jug('feliz', 'sonrisa') }
+    if (humor === 'culpable') { p.sx = 1; p.sy = 1 - 0.1 * u; p.triste = u * 0.6; p.mirada = u; p.brazoI = 0.45 - 0.5 * u; p.brazoD = -0.45 + 0.5 * u; jug('normal', 'triste') }
   } else {                                                                                                         // ya instalado: según el humor
     const u = tt - tR
-    if (humor === 'triste') { p.triste = easeOut3(u / 0.5); p.sy = 0.94 - 0.03 * Math.sin(u * 3); p.sx = 1.04; p.brazoI = 0.05; p.brazoD = -0.05; jug('llorando', 'triste'); rot = 0.05 * Math.sin(u * 1.4) }
+    if (humor === 'culpable') {                                                                                    // se siente culpable: encogido, mira de lado, manitas inquietas, una lágrima y sudor
+      p.triste = 0.6 + 0.1 * Math.sin(u * 2); p.sy = 0.9 - 0.02 * Math.sin(u * 2.4); p.sx = 1.03; p.mirada = 1; p.sudor = 0.8; p.lagrima = easeOut3(u / 0.8); p.tiembla = 0.12
+      p.brazoI = -0.15 + Math.sin(u * 7) * 0.1; p.brazoD = 0.15 - Math.sin(u * 7 + 1) * 0.1; jug('normal', 'triste'); rot = 0.07 + 0.03 * Math.sin(u * 1.7); y = P.y + S * 0.03 + Math.sin(u * 2.4) * S * 0.004; x = P.x + Math.sin(u * 1.1) * S * 0.006
+    }
+    else if (humor === 'triste') { p.triste = easeOut3(u / 0.5); p.sy = 0.94 - 0.03 * Math.sin(u * 3); p.sx = 1.04; p.brazoI = 0.05; p.brazoD = -0.05; jug('llorando', 'triste'); rot = 0.05 * Math.sin(u * 1.4) }
     else if (humor === 'feliz') { const s = Math.abs(Math.sin(u * 6.5)); y = P.y - s * H * 0.045; p.sy = 1 + 0.12 * (1 - s) * -1 + 0.1 * s; p.sx = 1 - 0.06 * s; p.brazoI = 2.4 - s * 0.6; p.brazoD = -2.4 + s * 0.6; p.pata = u * 12; jug('feliz', 'sonrisa'); rot = Math.sin(u * 6.5) * 0.08 }
     else if (humor === 'asustado') { p.tiembla = 1; p.sudor = 1; p.brazoI = 1.3 + Math.sin(u * 40) * 0.15; p.brazoD = -1.3 - Math.sin(u * 40) * 0.15; p.sy = 0.96; jug('asustado', 'o'); rot = Math.sin(u * 55) * 0.03 }
     else { p.mareo = clamp01(1 - u / 1.2); p.brazoI = 1.4 + Math.sin(u * 14) * 1.0; p.brazoD = -1.4 - Math.sin(u * 14 + 1) * 1.0; p.pata = u * 18; p.tiembla = 0.6; jug('espiral', 'grito'); y = P.y + Math.sin(u * 22) * H * 0.006; rot = Math.sin(u * 9) * 0.12 }
