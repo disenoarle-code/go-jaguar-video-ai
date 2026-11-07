@@ -44,10 +44,15 @@ function probeAudio(file: string): Promise<boolean> {
 function fxExpr(clip: Clip, next: Clip | undefined, D: number, fps: number) {
   const t = `on/${fps}`, tn = `n/${fps}`        // zoompan cuenta fotogramas con "on"; eq con "n"
   const ease = (u: string) => `pow(max(0,1-(${u})),2)`
-  const zs: string[] = [], ss: string[] = [], fs: string[] = []
+  const zs: string[] = [], ss: string[] = [], sy: string[] = [], fs: string[] = []
   const zm = clip.zoom
   if (zm) {
-    if (zm.kind === 'push') zs.push(`${num(zm.amount)}*${t}/${num(D)}`)
+    if (zm.kind === 'temblor') {
+      // mismas fórmulas que ruido()/fxAt del core
+      const n = (k: number) => `(sin(2*PI*17*(${t})+${num(k)})+0.7*sin(2*PI*29*(${t})+${num(1.3 + 1.7 * k)})+0.5*sin(2*PI*43*(${t})+${num(2.1 + 0.6 * k)}))/2.2`
+      const env = `min(1,max(0,min((${t})/0.15,(${num(D)}-(${t}))/0.15)))`
+      zs.push(`${num(zm.amount * 0.5)}`); ss.push(`0.85*${env}*(${n(0)})`); sy.push(`0.85*${env}*(${n(2.4)})`)
+    } else if (zm.kind === 'push') zs.push(`${num(zm.amount)}*${t}/${num(D)}`)
     else if (zm.kind === 'pull') zs.push(`${num(zm.amount)}*(1-${t}/${num(D)})`)
     else zs.push(`${num(zm.amount)}*${ease(`${t}/${num(zm.duration ?? 0.35)}`)}+0.05*${t}/${num(D)}`)
   }
@@ -63,6 +68,7 @@ function fxExpr(clip: Clip, next: Clip | undefined, D: number, fps: number) {
   return {
     z: zs.length ? `1+${zs.join('+')}` : '1',
     x: 'iw/2-(iw/zoom/2)' + (ss.length ? `+(iw-iw/zoom)/2*(${ss.join('+')})` : ''),
+    y: 'ih/2-(ih/zoom/2)' + (sy.length ? `+(ih-ih/zoom)/2*(${sy.join('+')})` : ''),
     flash: fs.length ? `clip(${fs.join('+')},-1,1)` : '',
   }
 }
@@ -98,7 +104,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     if (!ts('main').hidden) {
     const eq = fx.flash ? `,eq=brightness='${fx.flash}':eval=frame` : ''
     vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
-      + `zoompan=z='${fx.z}':x='${fx.x}':y='ih/2-(ih/zoom/2)':d=1:s=${W}x${H}:fps=${fps}${eq},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v${i}]`)
+      + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps}${eq},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v${i}]`)
     vlabels.push(`[v${i}]`)
     }
     if (!ts('main').muted && c.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(c.speed)},volume=${num(c.volume)},atrim=0:${num(D)},adelay=${Math.round(pl.start * 1000)}:all=1[ac${i}]`)

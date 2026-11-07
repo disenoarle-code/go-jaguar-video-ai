@@ -34,7 +34,7 @@ export class Player {
   /** Música decodificada (por id de asset) y su envolvente para la línea de tiempo. */
   music = new Map<string, AudioBuffer>()
   musicPeaks = new Map<string, Float32Array>()
-  private fx: FxState = { zoom: 1, shift: 0, flash: 0 }
+  private fx: FxState = { zoom: 1, shift: 0, shiftY: 0, flash: 0 }
   private fxKey = ''
   private sizeKey = ''
 
@@ -241,12 +241,12 @@ export class Player {
     const tracks = this.store.project.tracks ?? {}
     const loc = tracks.main?.hidden ? null : locate(this.store.project, t)
     const cl = this.store.project.clips
-    this.fx = loc ? fxAt(loc.placed.clip, cl[cl.indexOf(loc.placed.clip) + 1], t - loc.placed.start, loc.placed.end - loc.placed.start) : { zoom: 1, shift: 0, flash: 0 }
+    this.fx = loc ? fxAt(loc.placed.clip, cl[cl.indexOf(loc.placed.clip) + 1], t - loc.placed.start, loc.placed.end - loc.placed.start) : { zoom: 1, shift: 0, shiftY: 0, flash: 0 }
     if (loc) {
       const asset = this.assets.get(loc.placed.clip.assetId)
       if (asset) {
         const idx = asset.source.idxAt(loc.srcTime)
-        const fk = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}`
+        const fk = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}`
         const key = `${asset.info.id}:${idx}`
         if (key !== this.layerKey || fk !== this.fxKey) {
           const f = asset.source.peek(idx)
@@ -298,7 +298,8 @@ export class Player {
     const k = Math.min(W / fw, H / fh), z = this.fx.zoom, w = fw * k * z, h = fh * k * z
     this.layerCtx.fillStyle = '#000'; this.layerCtx.fillRect(0, 0, W, H)
     const dx = this.fx.shift * (fw * k * (z - 1)) / 2   // el efecto "slide" desplaza la ventana de recorte
-    try { this.layerCtx.drawImage(f, (W - w) / 2 - dx, (H - h) / 2, w, h) } catch { /* frame cerrado por el LRU */ }
+    const dy = this.fx.shiftY * (fh * k * (z - 1)) / 2
+    try { this.layerCtx.drawImage(f, (W - w) / 2 - dx, (H - h) / 2 - dy, w, h) } catch { /* frame cerrado por el LRU */ }
   }
 
   private async pump() {
@@ -309,7 +310,7 @@ export class Player {
         const w = this.wanted
         const f = await w.asset.source.getFrame(w.idx)
         this.blit(f)
-        this.layerKey = w.key; this.fxKey = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}`
+        this.layerKey = w.key; this.fxKey = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}`
         this.dirty = true
       }
     } finally { this.pumping = false }

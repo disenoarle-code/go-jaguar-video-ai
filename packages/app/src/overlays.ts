@@ -1,5 +1,6 @@
 import { isTextLayer, type Project, type TextLayer } from '@gojaguar/core'
 import { H, W } from './constants'
+import { cajaEscena, dibujarEscena } from './escenas'
 
 const ease = (x: number) => 1 - Math.pow(1 - Math.min(Math.max(x, 0), 1), 3)
 const FONT = (o: TextLayer) => `700 ${o.size}px Figtree, "Segoe UI", system-ui, sans-serif`
@@ -45,6 +46,7 @@ function karaokeMedidas(ctx: CanvasRenderingContext2D, o: TextLayer) {
 
 /** Caja final (sin animación ni transformación del usuario) de un overlay, en el lienzo; sirve para dibujar y para hacer hit-test. */
 export function boundsOf(ctx: CanvasRenderingContext2D, o: TextLayer): Rect {
+  if (o.type === 'graphic' && o.template === 'escena') return cajaEscena(o)
   if (o.type === 'graphic' && o.template === 'lanzamiento') return { x: W * 0.08, y: H * 0.20, w: W * 0.84, h: H * 0.42 }
   if (o.type === 'graphic' && o.template === 'glass') { const lado = o.props?.lado ?? 'izq', w = W * 0.58; return { x: (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W - w / 2, y: H * 0.17 - w * 0.2, w, h: w * 0.4 } }
   if (o.type === 'graphic' && o.template === 'pildora') {
@@ -73,7 +75,7 @@ export interface Geom { b: Rect; D: Pt; F: Pt; rot: number; sx: number; sy: numb
 /** Margen invisible que respeta la posición INICIAL de lo que entra a pantalla (fracción del ancho / alto); el usuario puede pasarse a mano. */
 export const MARGEN_X = 0.05, MARGEN_Y = 0.03
 /** Plantillas: se dibujan en su lugar por defecto y `transform.x/y` = 0,5 significa "ahí"; mover suma un desplazamiento. */
-const esPlantilla = (o: TextLayer) => (o.type === 'subtitle' && o.template === 'karaoke') || (o.type === 'graphic' && ['lanzamiento', 'glass', 'pildora'].includes(o.template))
+const esPlantilla = (o: TextLayer) => (o.type === 'subtitle' && o.template === 'karaoke') || (o.type === 'graphic' && ['lanzamiento', 'glass', 'pildora', 'escena'].includes(o.template))
 const sinCambios = (t: TextLayer['transform']) => t.x === 0.5 && t.y === 0.5 && (t.scale ?? 1) === 1 && !t.rotation && (t.sx ?? 1) === 1 && (t.sy ?? 1) === 1
 
 export function geomOf(ctx: CanvasRenderingContext2D, o: TextLayer): Geom {
@@ -170,6 +172,7 @@ export function drawOverlays(ctx: CanvasRenderingContext2D, p: Project, t: numbe
     if (o.type === 'subtitle' && o.template === 'karaoke') drawKaraoke(ctx, o, t)
     else if (o.type === 'graphic' && o.template === 'glass') drawGlass(ctx, o, t)
     else if (o.type === 'graphic' && o.template === 'pildora') drawPildora(ctx, o, t)
+    else if (o.type === 'graphic' && o.template === 'escena') dibujarEscena(ctx, o, t)
     else if (o.type === 'graphic' && o.template === 'lanzamiento') drawLanzamiento(ctx, o, t)
     else {
       ctx.font = FONT(o)

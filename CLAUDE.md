@@ -107,6 +107,12 @@ Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.jso
 
 Con un subtítulo seleccionado, el panel derecho tiene dos pestañas: **Ajustes** y **Subtítulos** (lista con una fila por subtítulo: tiempo + texto editable; Enter/↑/↓ pasan de fila; ✕ borra; clic en el tiempo va a ese punto). Cambiar `text` de un karaoke rehace sus `props.palabras` con `sincronizarPalabras` (core): las palabras que no cambian conservan su tiempo. Por eso `update_layer {patch:{text}}` también funciona por comando.
 
+## Escenas animadas 3D (sin texto) y temblor de cámara
+
+- **Escenas** (`packages/app/src/escenas.ts`, capa gráfica `template:'escena'`): `props.tipo:'claude'` (muñeco naranja; `humor` `triste` | `curioso` | `feliz`; `lado` `izq` | `der` | `centro`) o `props.tipo:'trabajo'` (persona tecleando frente a un Mac; `pantalla` `editor` = editor de video simulado en tiempo real | `codigo`). Seudo-3D hecho con canvas (giro con perspectiva, extrusión, sombras); solo dependen del tiempo, así la exportación coincide con el editor. Se mueven, escalan, giran y borran como cualquier gráfico. Ejemplo: `add_layer {layer:{type:'graphic',template:'escena',start,end,text:'',size:40,color:'#fff',props:{tipo:'claude',humor:'triste'}}}`. Sin texto legible: al usuario no le gustan los textos 3D.
+- **Temblor de cámara**: efecto de clip `set_zoom {clip, zoom:{kind:'temblor', amount}}` (amount = zoom de margen, 0,12–0,3; mayor = más fuerte). Parte el clip (`split`) para que tiemble solo un momento. Fórmulas en `fx.ts` y `exportar.ts`.
+- **Sonidos** propios: `scripts/efectos/sonidos-escenas.py <carpeta>` → `SFX-tecleo.wav` (5 s), `SFX-temblor.wav` (3,2 s), `SFX-suspiro.wav` (1,9 s); se dejan en `material/`, `POST /preparar` los trae y `import_asset` + `add_overlay` los coloca. Sin tambores ni golpes.
+
 ## Color de marca
 
 La palabra resaltada del karaoke y el acento por defecto de las plantillas usan el naranja de Go Jaguar: `NARANJA` (hoy `#ff7a00`, valor provisional: el repo no tiene el hex oficial) en `packages/app/src/overlays.ts`. Cámbialo solo ahí. Las tarjetas de cristal y píldoras 3D siguen disponibles como plantillas, pero el usuario no las quiere por defecto en los videos.
