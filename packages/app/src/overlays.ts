@@ -30,6 +30,9 @@ const FONT_BRAND = (px: number, w = 900) => `${w} ${px}px Figtree, "Segoe UI", s
 /** Caja final (sin animación) de un overlay; sirve para dibujar y para hacer hit-test. */
 export function boundsOf(ctx: CanvasRenderingContext2D, o: TextLayer): Rect {
   if (o.type === 'graphic' && o.template === 'lanzamiento') return { x: W * 0.08, y: H * 0.20, w: W * 0.84, h: H * 0.42 }
+  if (o.type === 'graphic' && o.template === 'glass') { const lado = o.props?.lado ?? 'izq', w = W * 0.58; return { x: (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W - w / 2, y: H * 0.17 - w * 0.2, w, h: w * 0.4 } }
+  if (o.type === 'graphic' && o.template === 'pildora') return { x: W * 0.1, y: H * 0.07, w: W * 0.8, h: H * 0.08 }
+  if (o.type === 'subtitle' && o.template === 'karaoke') return { x: W * 0.05, y: H * 0.72, w: W * 0.9, h: H * 0.16 }
   ctx.save()
   ctx.font = FONT(o)
   const tw = ctx.measureText(o.text).width
@@ -47,6 +50,16 @@ export function visibleOverlays(p: Project, t: number) {
 export function drawOverlays(ctx: CanvasRenderingContext2D, p: Project, t: number, selectedId: string | null) {
   for (const o of visibleOverlays(p, t)) {
     const b = boundsOf(ctx, o)
+    if (o.type === 'subtitle' && o.template === 'karaoke') {
+      drawKaraoke(ctx, o, t)
+      if (o.id === selectedId) { ctx.save(); ctx.strokeStyle = '#e8b152'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.restore() }
+      continue
+    }
+    if (o.type === 'graphic' && (o.template === 'glass' || o.template === 'pildora')) {
+      o.template === 'glass' ? drawGlass(ctx, o, t) : drawPildora(ctx, o, t)
+      if (o.id === selectedId) { ctx.save(); ctx.strokeStyle = '#e8b152'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.restore() }
+      continue
+    }
     if (o.type === 'graphic' && o.template === 'lanzamiento') {
       drawLanzamiento(ctx, o, t)
       if (o.id === selectedId) { ctx.save(); ctx.strokeStyle = '#e8b152'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.restore() }
@@ -177,6 +190,117 @@ function drawLanzamiento(ctx: CanvasRenderingContext2D, o: TextLayer, t: number)
     ctx.save(); ctx.globalAlpha *= clamp01(mt * 1.6); ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = W * 0.02
     ctx.fillStyle = acc; ctx.beginPath(); ctx.roundRect(cx - pw / 2, py - ph / 2, pw, ph, ph / 2); ctx.fill()
     ctx.shadowColor = 'transparent'; ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(modelo, cx - w3 / 2, py + 1); ctx.restore()
+  }
+  ctx.restore()
+}
+
+
+// ======================== Estilo "glass" (cristal) y subtítulos karaoke ========================
+
+const VIOLETA = '#8b5cf6', LAVANDA = '#c4b5fd'
+
+/** Subtítulos karaoke: las palabras del grupo se ven juntas; la que se dice se agranda y se pinta de lavanda con brillo, las dichas en blanco y las que faltan atenuadas. */
+function drawKaraoke(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
+  if (o.type !== 'subtitle') return
+  let palabras: [string, number, number][] = []
+  try { palabras = JSON.parse(o.props?.palabras ?? '[]') } catch { return }
+  if (!palabras.length) return
+  const size = W * 0.092, tt = t - o.start, ent = easeOut3(tt / 0.14)
+  ctx.save()
+  ctx.font = FONT_BRAND(size, 800); ctx.textBaseline = 'middle'; ctx.letterSpacing = `${size * 0.01}px`
+  const space = ctx.measureText(' ').width + size * 0.24, ws = palabras.map(p => ctx.measureText(p[0]).width)   // + holgura: el borde grueso se comería el espacio
+  // si no caben en una línea, se parten en dos
+  const total = ws.reduce((a, b) => a + b, 0) + space * (palabras.length - 1)
+  const lines: number[][] = total > W * 0.88 ? [palabras.map((_, i) => i).slice(0, Math.ceil(palabras.length / 2)), palabras.map((_, i) => i).slice(Math.ceil(palabras.length / 2))] : [palabras.map((_, i) => i)]
+  const lh = size * 1.18, y0 = H * 0.8 - ((lines.length - 1) * lh) / 2 + (1 - ent) * size * 0.35
+  ctx.globalAlpha = ent
+  lines.forEach((idxs, li) => {
+    const lw = idxs.reduce((a, i) => a + ws[i], 0) + space * (idxs.length - 1)
+    let x = W / 2 - lw / 2; const y = y0 + li * lh
+    for (const i of idxs) {
+      const [w, a, b] = palabras[i], activa = t >= a && t < b, dicha = t >= b
+      const k = activa ? 1 + 0.12 * Math.sin(Math.PI * Math.min((t - a) / Math.max(b - a, 0.05), 1)) + 0.04 : 1
+      ctx.save(); ctx.translate(x + ws[i] / 2, y); ctx.scale(k, k)
+      ctx.lineJoin = 'round'; ctx.lineWidth = size / 5; ctx.strokeStyle = 'rgba(14,6,36,.92)'; ctx.strokeText(w, -ws[i] / 2, 0)
+      if (activa) { ctx.shadowColor = VIOLETA; ctx.shadowBlur = size * 0.5 }
+      ctx.fillStyle = activa ? LAVANDA : '#fff'; ctx.globalAlpha = ent * (dicha || activa ? 1 : 0.55)
+      ctx.fillText(w, -ws[i] / 2, 0); ctx.restore()
+      x += ws[i] + space
+    }
+  })
+  ctx.restore()
+}
+
+/** Píldora de título: texto grande en mayúsculas sobre un degradado violeta, entra con rebote y se inclina un poco. */
+function drawPildora(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
+  if (o.type !== 'graphic') return
+  const texto = (o.props?.texto ?? o.text).toUpperCase(), acc = o.props?.acento ?? VIOLETA
+  const tt = t - o.start, dur = o.end - o.start, ent = easeBack(tt / 0.5), ex = clamp01((tt - (dur - 0.3)) / 0.3)
+  const size = W * 0.074; ctx.save()
+  ctx.font = FONT_BRAND(size, 900); ctx.letterSpacing = `${size * 0.03}px`; ctx.textBaseline = 'middle'
+  const tw = ctx.measureText(texto).width, pw = tw + size * 1.6, ph = size * 1.75, cx = W / 2, cy = H * 0.105
+  ctx.translate(cx, cy); const s = (0.55 + 0.45 * ent) * (1 - 0.1 * ex); ctx.scale(s, s); ctx.rotate((1 - Math.min(ent, 1)) * -0.12)
+  ctx.globalAlpha = clamp01(tt / 0.2) * (1 - ex)
+  const g = ctx.createLinearGradient(-pw / 2, 0, pw / 2, 0); g.addColorStop(0, acc); g.addColorStop(1, '#5b21b6')
+  ctx.shadowColor = acc; ctx.shadowBlur = size * 0.9
+  ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(-pw / 2, -ph / 2, pw, ph, ph * 0.3); ctx.fill()
+  ctx.shadowColor = 'transparent'; ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1.5, size * 0.04); ctx.stroke()
+  ctx.fillStyle = '#fff'; ctx.fillText(texto, -tw / 2, size * 0.03)
+  ctx.restore()
+}
+
+/** Iconos vectoriales simples para las tarjetas (sin imágenes). */
+function dibujarIcono(c: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, nombre: string, cx: number, cy: number, r: number) {
+  c.save(); c.translate(cx, cy); c.strokeStyle = '#fff'; c.fillStyle = '#fff'; c.lineWidth = r * 0.16; c.lineCap = 'round'; c.lineJoin = 'round'
+  if (nombre === 'rayo') { c.beginPath(); c.moveTo(r * 0.15, -r); c.lineTo(-r * 0.55, r * 0.1); c.lineTo(-r * 0.05, r * 0.1); c.lineTo(-r * 0.2, r); c.lineTo(r * 0.55, -r * 0.2); c.lineTo(r * 0.05, -r * 0.2); c.closePath(); c.fill() }
+  else if (nombre === 'reloj') { c.beginPath(); c.arc(0, 0, r * 0.85, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.moveTo(0, -r * 0.5); c.lineTo(0, 0); c.lineTo(r * 0.38, r * 0.25); c.stroke() }
+  else if (nombre === 'alerta') { c.beginPath(); c.moveTo(0, -r * 0.95); c.lineTo(r * 0.95, r * 0.7); c.lineTo(-r * 0.95, r * 0.7); c.closePath(); c.stroke(); c.beginPath(); c.moveTo(0, -r * 0.3); c.lineTo(0, r * 0.2); c.stroke(); c.beginPath(); c.arc(0, r * 0.48, r * 0.07, 0, Math.PI * 2); c.fill() }
+  else { c.beginPath(); for (let a = 0; a < 8; a++) { const rr = a % 2 === 0 ? r : r * 0.28, ang = (a * Math.PI) / 4 - Math.PI / 2; c.lineTo(rr * Math.cos(ang), rr * Math.sin(ang)) } c.closePath(); c.fill() }   // chispa
+  c.restore()
+}
+
+/**
+ * Tarjeta de cristal que entra con perspectiva 3D: el contenido (vidrio translúcido con borde brillante, icono, título y subtítulo) se dibuja
+ * en un lienzo aparte y se proyecta por franjas verticales girándolo sobre su eje; entra girada y se asienta, flota un poco y sale girando.
+ */
+function drawGlass(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
+  if (o.type !== 'graphic') return
+  const pr = o.props ?? {}, titulo = pr.titulo ?? o.text, sub = pr.sub ?? '', acc = pr.acento ?? VIOLETA, lado = pr.lado ?? 'izq', icono = pr.icono ?? 'chispa'
+  const tt = t - o.start, dur = o.end - o.start, k = easeBack(tt / 0.7), ex = clamp01((tt - (dur - 0.4)) / 0.4)
+  const dir = lado === 'der' ? -1 : 1
+  const w = W * 0.58, h = w * 0.4, cw = Math.ceil(w * 2), chh = Math.ceil(h * 2)
+  // 1) contenido a doble resolución
+  const cv = new OffscreenCanvas(cw, chh), c = cv.getContext('2d')!
+  c.scale(2, 2)
+  const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, 'rgba(255,255,255,.30)'); g.addColorStop(0.5, 'rgba(210,190,255,.14)'); g.addColorStop(1, 'rgba(255,255,255,.07)')
+  c.fillStyle = g; c.beginPath(); c.roundRect(1, 1, w - 2, h - 2, h * 0.16); c.fill()
+  const bg = c.createLinearGradient(0, 0, w, h); bg.addColorStop(0, 'rgba(255,255,255,.85)'); bg.addColorStop(0.45, 'rgba(255,255,255,.18)'); bg.addColorStop(1, 'rgba(196,181,253,.55)')
+  c.strokeStyle = bg; c.lineWidth = 1.6; c.stroke()
+  const brillo = c.createLinearGradient(0, 0, 0, h * 0.5); brillo.addColorStop(0, 'rgba(255,255,255,.22)'); brillo.addColorStop(1, 'rgba(255,255,255,0)')
+  c.fillStyle = brillo; c.beginPath(); c.roundRect(3, 3, w - 6, h * 0.46, [h * 0.14, h * 0.14, h * 0.3, h * 0.3]); c.fill()
+  const ir = h * 0.2, ix = h * 0.3 + ir * 0.15, iy = h / 2
+  const ig = c.createLinearGradient(ix - ir, iy - ir, ix + ir, iy + ir); ig.addColorStop(0, acc); ig.addColorStop(1, '#5b21b6')
+  c.shadowColor = acc; c.shadowBlur = ir * 0.9; c.fillStyle = ig; c.beginPath(); c.arc(ix, iy, ir * 1.28, 0, Math.PI * 2); c.fill(); c.shadowBlur = 0
+  dibujarIcono(c, icono, ix, iy, ir * 0.72)
+  c.fillStyle = '#fff'; c.textBaseline = 'middle'; const tx = ix + ir * 1.28 + h * 0.14
+  const disp = w - tx - h * 0.1
+  let fs = h * (sub ? 0.25 : 0.3); c.font = FONT_BRAND(fs, 900)
+  while (c.measureText(titulo).width > disp && fs > h * 0.1) { fs *= 0.95; c.font = FONT_BRAND(fs, 900) }     // el título se achica para caber (nunca se deforma)
+  c.save(); c.shadowColor = 'rgba(20,8,50,.55)'; c.shadowBlur = fs * 0.3; c.fillText(titulo, tx, sub ? h * 0.38 : h * 0.5)
+  if (sub) { let fs2 = fs * 0.62; c.font = FONT_BRAND(fs2, 600); while (c.measureText(sub).width > disp && fs2 > h * 0.08) { fs2 *= 0.95; c.font = FONT_BRAND(fs2, 600) } c.fillStyle = 'rgba(235,228,255,.92)'; c.fillText(sub, tx, h * 0.68) }
+  c.restore()
+  // 2) proyección con perspectiva (franjas verticales)
+  const rest = dir * 12 * Math.PI / 180, enter = dir * (1 - Math.min(k, 1.15)) * -62 * Math.PI / 180, salir = dir * ex * -55 * Math.PI / 180
+  const th = rest + enter + salir + Math.sin(tt * 1.7) * 0.03
+  const cx = (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W + dir * -(1 - Math.min(k, 1)) * W * 0.28, cy = H * 0.17 + Math.sin(tt * 2.1) * H * 0.004
+  const D = w * 2.4, N = 56, alfa = clamp01(tt / 0.22) * (1 - ex)
+  ctx.save(); ctx.globalAlpha = alfa
+  // resplandor de color detrás
+  const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, w * 0.62); rg.addColorStop(0, `${acc}55`); rg.addColorStop(1, `${acc}00`); ctx.fillStyle = rg; ctx.fillRect(cx - w, cy - w * 0.6, w * 2, w * 1.2)
+  const proj = (x: number) => { const X = x * Math.cos(th), Z = x * Math.sin(th), s = D / (D + Z); return { px: cx + X * s, s } }
+  for (let i = 0; i < N; i++) {
+    const a = proj((i / N - 0.5) * w), b = proj(((i + 1) / N - 0.5) * w), s = (a.s + b.s) / 2, dh = h * s
+    ctx.drawImage(cv as unknown as CanvasImageSource, (i / N) * cw, 0, cw / N + 0.5, chh, a.px, cy - dh / 2, b.px - a.px + 0.7, dh)
   }
   ctx.restore()
 }

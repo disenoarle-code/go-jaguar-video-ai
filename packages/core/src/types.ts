@@ -59,8 +59,9 @@ interface LayerBase {
   keyframes?: Keyframe[]        // reservado: aún no se renderiza
 }
 
-export interface SubtitleLayer extends LayerBase { type: 'subtitle'; text: string; size: number; color: string }
-/** Gráfico. `template` 'lowerthird' (barra con texto) o 'lanzamiento' (rótulo animado de lanzamiento; sus textos e imagen van en `props`). */
+/** Subtítulo. `template` 'karaoke' dibuja las palabras de `props.palabras` (JSON [[palabra,inicio,fin],…] en segundos de la línea de tiempo) resaltando la que se está diciendo. */
+export interface SubtitleLayer extends LayerBase { type: 'subtitle'; text: string; size: number; color: string; template?: string; props?: Record<string, string> }
+/** Gráfico. `template`: 'lowerthird' (barra con texto), 'lanzamiento' (rótulo animado de lanzamiento), 'glass' (tarjeta de cristal que entra con perspectiva 3D: props titulo, sub, icono, lado, acento) o 'pildora' (píldora de título con texto grande: props texto, acento). */
 export interface GraphicLayer extends LayerBase { type: 'graphic'; template: string; text: string; size: number; color: string; props?: Record<string, string> }
 /** Reservados para etapas posteriores (el modelo ya los soporta; aún no se dibujan). */
 export interface ImageLayer extends LayerBase { type: 'image'; assetId: string }
