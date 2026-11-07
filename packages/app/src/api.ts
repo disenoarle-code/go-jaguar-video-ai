@@ -27,7 +27,8 @@ export const api = {
   estado: () => fetch('/api/estado').then(j<{ biblioteca: string; herramientas: Herramientas; proyectos: ProyectoResumen[]; referencias: Referencia[] }>),
   crearProyecto: (name: string) => post('/api/proyectos', { name }).then(j<{ slug: string; name: string }>),
   proyecto: (slug: string) => fetch(`/api/proyectos/${slug}`).then(j<ProyectoInfo>),
-  procesar: (slug: string) => post(`/api/proyectos/${slug}/procesar`).then(j<{ jobId: string }>),
+  /** modo 'recorte' (opción 1: solo recorta) o 'completa' (opción 2: prepara el material y pide la edición completa en un solo paso). */
+  procesar: (slug: string, modo: 'recorte' | 'completa' = 'recorte', recomendacion = '') => post(`/api/proyectos/${slug}/procesar`, { modo, recomendacion }).then(j<{ jobId?: string; solicitud?: Solicitud }>),
   trabajo: (id: string) => fetch(`/api/trabajos/${encodeURIComponent(id)}`).then(j<Trabajo>),
   cancelarTrabajo: (id: string) => post(`/api/trabajos/${encodeURIComponent(id)}/cancelar`).then(j<{ ok: boolean }>),
   cancelarSolicitud: (id: string) => post(`/api/solicitudes/${encodeURIComponent(id)}/cancelar`).then(j<{ ok: boolean }>),

@@ -456,18 +456,18 @@ async function locateFile(name: string, size: number, lastModified: number): Pro
 
 // --- trabajos (procesamiento en segundo plano) ---------------------------------------------------
 interface Step { id: string; label: string; state: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string; pct?: number }
-interface Job { id: string; slug: string; status: 'running' | 'done' | 'error' | 'cancelado'; steps: Step[]; error?: string; cancelada?: boolean; solicitud?: string }
+interface Job { id: string; slug: string; status: 'running' | 'done' | 'error' | 'cancelado'; steps: Step[]; error?: string; cancelada?: boolean; solicitud?: string; modo?: 'recorte' | 'completa'; recomendacion?: string }
 const jobs = new Map<string, Job>()
 
-function newJob(slug: string): Job {
+function newJob(slug: string, modo: 'recorte' | 'completa' = 'recorte', recomendacion?: string): Job {
   const job: Job = {
-    id: `${slug}-${Date.now()}`, slug, status: 'running',
+    id: `${slug}-${Date.now()}`, slug, status: 'running', modo, recomendacion,
     steps: [
       { id: 'proxy', label: 'Preparando los videos para editar', state: 'pending' },
       { id: 'texto', label: 'Convirtiendo el audio en texto', state: 'pending' },
       { id: 'silencios', label: 'Detectando silencios', state: 'pending' },
       { id: 'base', label: 'Armando la edición base (sin silencios)', state: 'pending' },
-      { id: 'claude', label: 'Claude: quitar lo repetido y ordenar el guion', state: 'pending' },
+      { id: 'claude', label: modo === 'completa' ? 'Claude: edición completa copiando el estilo de tus referencias' : 'Claude: quitar lo repetido y ordenar el guion', state: 'pending' },
     ],
   }
   jobs.set(job.id, job)
@@ -641,7 +641,10 @@ async function processProjectInner(job: Job) {
 
     // 5) Claude: quita lo repetido y ordena el guion (le llega el pedido en el chat) ---------------------------
     set('claude', { state: 'running', detail: 'enviado, esperando a Claude…' })
-    const sol = await crearSolicitud(slug, 'errores', [])
+    // Opción 1 (recorte): Claude solo limpia lo repetido y ordena el guion. Opción 2 (completa): en el mismo paso hace la edición basada en las referencias.
+    const refs = (await loadMeta(slug))?.referencias ?? []
+    const sol = job.modo === 'completa' ? await crearSolicitud(slug, 'completa', refs, job.recomendacion) : await crearSolicitud(slug, 'errores', [])
+    if (job.modo === 'completa') await registrarUso(slug, refs, 'pedido')
     job.solicitud = sol.id
     const t0 = Date.now()
     for (;;) {
@@ -771,7 +774,19 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
       const running = [...jobs.values()].find(j => j.slug === g![1] && j.status === 'running')
       if (running) return send(res, 200, { jobId: running.id })
-      const job = newJob(g[1]); void processProject(job)
+      const body = JSON.parse((await readBody(req)) || '{}') as { modo?: string; recomendacion?: string }
+      const modo = body.modo === 'completa' ? 'completa' : 'recorte'
+      const reco = (body.recomendacion ?? '').trim().slice(0, 2000) || undefined
+      if (modo === 'completa') {
+        const meta = (await loadMeta(g[1]))!
+        if (!meta.referencias?.length) return send(res, 400, { error: 'Marca al menos una referencia' })
+        if (meta.procesado) {      // el material ya está preparado: solo se le pide a Claude la edición completa
+          const sol = await crearSolicitud(meta.slug, 'completa', meta.referencias, reco)
+          if (Date.now() - new Date(sol.creado).getTime() < 3000) await registrarUso(meta.slug, meta.referencias, 'pedido')
+          return send(res, 200, { solicitud: sol })
+        }
+      }
+      const job = newJob(g[1], modo, reco); void processProject(job)
       return send(res, 200, { jobId: job.id })
     }
 

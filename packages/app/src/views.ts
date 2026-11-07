@@ -56,6 +56,11 @@ const tilesRef = (refs: Referencia[], linked: Set<string>) => refs.length ? refs
       <button class="trash" data-delref="${esc(r.id)}" data-nombre="${esc(r.nombre)}" data-modo="${r.modo}" title="${r.modo === 'enlace' ? 'Quitar de la biblioteca (tu archivo no se borra)' : 'Borrar la copia de la biblioteca'}">${ico('trash')}</button></div>
   </div>`).join('') : '<p class="dim">Aún no hay referencias. Agrega una abajo.</p>'
 
+/** Texto de ayuda de la opción 2 (edición completa): independiente de la opción 1, no hace falta recortar antes. */
+const infoCompleta = (info: ProyectoInfo, nRefs: number) => !info.material.some(f => f.tipo === 'video') ? 'Agrega videos al material.'
+  : !nRefs ? 'Marca al menos una referencia.'
+  : 'Opción 2 · Todo en un paso: prepara el material, quita silencios y Claude arma la edición copiando el estilo de tus referencias.'
+
 const signature = (info: ProyectoInfo, refs: Referencia[]) =>
   JSON.stringify([info.material.map(f => [f.id, f.preview.listo, f.existe, f.modo, !!f.ritmo]), refs.map(r => [r.id, r.preview.listo, r.existe, r.modo])])
 
@@ -180,24 +185,24 @@ export async function renderProject(slug: string) {
     </div>
 
     <section>
-      <h2><span class="num">1</span> Material <small class="dim">videos, música e imágenes para tu edición</small></h2>
+      <h2>Material <small class="dim">videos, música e imágenes para tu edición</small></h2>
       <div class="drop" id="dropMat"><p>Arrastra aquí videos, música o imágenes</p><p class="dim small">o</p><button class="primary" id="pickMat">Elegir archivos</button></div>
       <div class="tiles" id="matList">${tilesMat(info.material)}</div>
       <div id="upl"></div>
       <button class="primary big wide" id="recortar" ${info.material.some(f => f.tipo === 'video') ? '' : 'disabled'}>Recorta silencios y errores</button>
-      <p class="dim small">Convierte el audio en texto, quita los silencios y Claude quita lo repetido y ordena el guion para que se entienda.</p>
+      <p class="dim small">Opción 1 · Solo recorta: convierte el audio en texto, quita los silencios y Claude quita lo repetido y ordena el guion para que se entienda. Si quieres la edición completa, usa la opción 2 en Referencias: no hace falta recortar antes.</p>
       <div id="job"></div>
     </section>
 
     <section>
-      <h2><span class="num">2</span> Referencias <small class="dim">estilos que quieres copiar · se guardan para todos tus proyectos</small></h2>
+      <h2>Referencias <small class="dim">estilos que quieres copiar · se guardan para todos tus proyectos</small></h2>
       <div class="tiles" id="refList">${tilesRef(refs, linked)}</div>
       <div class="drop small" id="dropRef"><span>Arrastra referencias aquí o </span><button class="primary" id="pickRef">elegir archivos</button></div>
       <div id="uplRef"></div>
       <label class="reco"><span>¿Alguna recomendación para el video? <span class="dim">(opcional)</span></span>
         <textarea id="recomendacion" rows="3" placeholder="Ej: que sea corto, que empiece fuerte, tono más serio…"></textarea></label>
-      <button class="primary big wide" id="completa" ${info.procesado && linked.size ? '' : 'disabled'}>Edición completa basada en referencias</button>
-      <p class="dim small" id="completaInfo">${info.procesado ? 'Marca las referencias y Claude convierte tu video en lo que buscas, copiando su estilo.' : 'Disponible después de “Recorta silencios y errores”.'}</p>
+      <button class="primary big wide" id="completa" ${linked.size && info.material.some(f => f.tipo === 'video') ? '' : 'disabled'}>Edición completa basada en referencias</button>
+      <p class="dim small" id="completaInfo">${infoCompleta(info, linked.size)}</p>
     </section>
 
 
@@ -274,7 +279,8 @@ export async function renderProject(slug: string) {
         const ids = [...root().querySelectorAll<HTMLInputElement>('[data-ref]:checked')].map(x => x.dataset.ref!)
         await api.setReferencias(slug, ids)
         c.closest('.tile')?.classList.toggle('sel', c.checked)
-        ;($('completa') as HTMLButtonElement).disabled = !(cur.info.procesado && ids.length) || estadoCompleta === 'activa'
+        ;($('completa') as HTMLButtonElement).disabled = !(ids.length && cur.info.material.some(f => f.tipo === 'video')) || estadoCompleta === 'activa' || trabajando
+        if (estadoCompleta === 'libre' && !trabajando) $('completaInfo').textContent = infoCompleta(cur.info, ids.length)
       }
     })
   }
@@ -297,14 +303,18 @@ export async function renderProject(slug: string) {
 
   // --- botón 1: recortar silencios y errores ---------------------------------------------------------------
   const jobBox = $('job')
+  let trabajando = false
+  const hayVideo = () => cur.info.material.some(f => f.tipo === 'video')
+  /** Mientras corre un trabajo, las dos opciones se bloquean; al terminar con error o cancelar se liberan. */
+  const bloquear = (v: boolean) => { trabajando = v; ;($('recortar') as HTMLButtonElement).disabled = v || !hayVideo(); ;($('completa') as HTMLButtonElement).disabled = v || !(cur.info.referencias.length && hayVideo()) || estadoCompleta === 'activa' }
   async function seguir(jobId: string) {
-    ;($('recortar') as HTMLButtonElement).disabled = true
+    bloquear(true)
     for (;;) {
       const j = await api.trabajo(jobId)
       jobBox.innerHTML = jobHtml(j)
       if (j.status !== 'running') {
         if (j.status === 'done') await renderProject(slug)
-        else ($('recortar') as HTMLButtonElement).disabled = false
+        else bloquear(false)
         return
       }
       await new Promise(r => setTimeout(r, 700))
@@ -316,7 +326,7 @@ export async function renderProject(slug: string) {
     try { await api.cancelarTrabajo(b.dataset.cancelar!) } catch { b.disabled = false; b.textContent = 'Cancelar' }
   }
   $('recortar').onclick = async () => {
-    try { const { jobId } = await api.procesar(slug); void seguir(jobId) } catch (e) { jobBox.innerHTML = `<div class="warn">${esc((e as Error).message)}</div>` }
+    try { const { jobId } = await api.procesar(slug, 'recorte'); if (jobId) void seguir(jobId) } catch (e) { jobBox.innerHTML = `<div class="warn">${esc((e as Error).message)}</div>` }
   }
 
   // --- botón 2: edición completa (pedido a Claude + estado en vivo) -----------------------------------------------
@@ -336,14 +346,17 @@ export async function renderProject(slug: string) {
       setTimeout(refrescarCompleta, 1500)
     } else {
       estadoCompleta = 'libre'
-      btn.disabled = !(cur.info.procesado && cur.info.referencias.length)
+      btn.disabled = trabajando || !(cur.info.referencias.length && hayVideo())
       if (x?.estado === 'hecho') infoEl.innerHTML = `${ico('check')} Listo. Pulsa <b>Abrir editor</b> para ver y corregir el resultado.`
       if (x?.estado === 'cancelado') infoEl.textContent = 'Cancelado. Puedes volver a pedirlo.'
       if (x?.estado === 'error') infoEl.textContent = 'Claude no pudo terminar: ' + (x.nota ?? 'error')
     }
   }
   $('completa').onclick = async () => {
-    try { await api.pedirEdicionCompleta(slug, ($('recomendacion') as HTMLTextAreaElement).value.trim()); void refrescarCompleta() } catch (e) { infoEl.textContent = (e as Error).message }
+    try {
+      const r = await api.procesar(slug, 'completa', ($('recomendacion') as HTMLTextAreaElement).value.trim())     // si el material no está preparado, lo prepara en el mismo paso
+      if (r.jobId) void seguir(r.jobId); else void refrescarCompleta()
+    } catch (e) { infoEl.textContent = (e as Error).message }
   }
   void refrescarCompleta()
 
