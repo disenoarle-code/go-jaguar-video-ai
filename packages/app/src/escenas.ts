@@ -4,8 +4,8 @@ import { H, W } from './constants'
 /**
  * Escenas animadas con seudo-3D dibujadas con código (sin texto legible). Todo sale solo del tiempo `t` (nada de azar entre fotogramas),
  * así la vista previa y el MP4 exportado coinciden. Capa gráfica con `template: 'escena'` y `props`:
- *  - tipo 'claude'  : la chispa de Claude (rayos naranja con carita), enorme y con energía. `humor`: 'curioso' | 'loco' | 'triste' | 'feliz' | 'locura'
- *                     ('locura' = se vuelve loca y al final se deshace en tristeza). `lado`: 'izq' | 'der' | 'centro'; `tam`: factor de tamaño (1 = casi todo el ancho).
+ *  - tipo 'claude'  : el muñeco de Claude (naranja, 3D). `anim`: 'golpe' (vuela, te pega en la cabeza —el centro de su caja—, rebota, se marea y al final se cae) | 'baile' | 'quieto';
+ *                     `humor` al quedarse: 'loco' | 'triste' | 'feliz' | 'asustado'; `lado` desde donde entra: 'izq' | 'der' | 'centro'; `tam`: factor de tamaño; `y`: altura del golpe (fracción del alto, 0,2 = cabeza).
  *  - tipo 'pantalla': una pantalla a cuadro completo con un editor de video (`pantalla:'editor'`) o código (`pantalla:'codigo'`) en tiempo real,
  *                     con cámara que se mueve, golpes de zoom y glitch al entrar y salir.
  */
@@ -32,8 +32,8 @@ export interface Caja { x: number; y: number; w: number; h: number }
 export function cajaEscena(o: TextLayer): Caja {
   const pr = o.type === 'graphic' ? o.props ?? {} : {}
   if ((pr.tipo ?? 'claude') === 'pantalla') return { x: 0, y: 0, w: W, h: H }
-  const lado = pr.lado ?? 'centro', w = W * 0.92 * (parseFloat(pr.tam ?? '1') || 1)
-  return { x: (lado === 'izq' ? 0.36 : lado === 'der' ? 0.64 : 0.5) * W - w / 2, y: H * 0.3 - w / 2, w, h: w }
+  const lado = pr.lado ?? 'der', w = W * 0.7 * (parseFloat(pr.tam ?? '1') || 1), cy = (parseFloat(pr.y ?? '') || 0.2) * H
+  return { x: (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W - w / 2, y: cy - w / 2, w, h: w }
 }
 
 /** Proyecta un lienzo con perspectiva girándolo sobre el eje vertical (tiras), como las tarjetas de cristal. */
@@ -49,124 +49,140 @@ function proyectar(ctx: Ctx, cv: OffscreenCanvas, cx: number, cy: number, w: num
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// CHISPA DE CLAUDE
+// MUÑECO DE CLAUDE (seudo-3D: extrusión con volumen, brillo y squash & stretch)
 // ---------------------------------------------------------------------------------------------------------------------------
-interface Humor { loco: number; triste: number; feliz: number; curioso: number }
+interface Pose {
+  sx: number; sy: number                       // aplastado / estirado
+  brazoI: number; brazoD: number               // ángulos de los brazos (rad, 0 = abajo)
+  pata: number                                 // fase de las patitas
+  ojos: 'normal' | 'espiral' | 'llorando' | 'feliz' | 'asustado' | 'x'
+  boca: 'neutra' | 'o' | 'sonrisa' | 'triste' | 'grito'
+  mareo: number                                // 0..1 estrellitas dando vueltas
+  triste: number                               // 0..1 tinte azul y cejas caídas
+  tiembla: number                              // 0..1 temblor
+  sudor: number                                // 0..1 gotas de sudor
+}
+const poseBase = (): Pose => ({ sx: 1, sy: 1, brazoI: 0.45, brazoD: -0.45, pata: 0, ojos: 'normal', boca: 'neutra', mareo: 0, triste: 0, tiembla: 0, sudor: 0 })
 
-/** Los rayos de la chispa: afilados, de largos distintos y un poco curvos, con degradado de la punta al centro. */
-function rayos(c: Ctx, cx: number, cy: number, S: number, spin: number, largo: number, col0: string, col1: string, caida: number, t: number, alfa: number) {
-  const n = 14
-  c.save(); c.globalAlpha = alfa
-  for (let i = 0; i < n; i++) {
-    let dx = Math.cos((i / n) * Math.PI * 2 + spin), dy = Math.sin((i / n) * Math.PI * 2 + spin)
-    dy += caida * 0.95; const m = Math.hypot(dx, dy); dx /= m; dy /= m                                              // la gravedad los dobla hacia abajo
-    const L = S * (0.2 + 0.2 * alea(i * 1.7)) * largo * (1 + 0.1 * Math.sin(t * 6 + i * 1.3)), ancho = S * 0.045 * (0.8 + 0.5 * alea(i + 5))
-    const nx = -dy, ny = dx, tx = cx + dx * (S * 0.1 + L), ty = cy + dy * (S * 0.1 + L)
-    const g = c.createLinearGradient(cx, cy, tx, ty); g.addColorStop(0, col1); g.addColorStop(1, col0)
-    c.fillStyle = g; c.beginPath()
-    c.moveTo(cx + dx * S * 0.07 + nx * ancho, cy + dy * S * 0.07 + ny * ancho)
-    c.quadraticCurveTo(cx + dx * (S * 0.1 + L * 0.55) + nx * ancho * 0.55, cy + dy * (S * 0.1 + L * 0.55) + ny * ancho * 0.55, tx, ty)
-    c.quadraticCurveTo(cx + dx * (S * 0.1 + L * 0.55) - nx * ancho * 0.55, cy + dy * (S * 0.1 + L * 0.55) - ny * ancho * 0.55, cx + dx * S * 0.07 - nx * ancho, cy + dy * S * 0.07 - ny * ancho)
-    c.closePath(); c.fill()
+function pintarMuneco(c: Ctx, S: number, t: number, p: Pose) {
+  const cx = S / 2 + (p.tiembla ? Math.sin(t * 60) * S * 0.008 * p.tiembla : 0), cy = S * 0.52
+  const bw = S * 0.5, bh = S * 0.34, prof = S * 0.06
+  const naranja = mezcla('#e0714a', '#6f86bd', p.triste), oscuro = mezcla('#8f3a1e', '#33436b', p.triste), medio = mezcla('#b9502d', '#4d6196', p.triste)
+  c.save(); c.translate(cx, cy); c.scale(p.sx, p.sy); c.translate(-cx, -cy)
+  // patitas (4) con vaivén
+  const pata = (x: number, fase: number, col: string, dx: number, dy: number) => {
+    const ang = Math.sin(p.pata + fase) * 0.45; c.save(); c.translate(x + dx, cy + bh / 2 - S * 0.02 + dy); c.rotate(ang); c.fillStyle = col; c.beginPath(); c.roundRect(-S * 0.03, 0, S * 0.06, S * 0.11, S * 0.02); c.fill(); c.restore()
   }
+  for (let i = 0; i < 4; i++) { const x = cx - bw * 0.36 + i * bw * 0.24; pata(x, i * 1.7, oscuro, prof * 0.6, prof * 0.6); pata(x, i * 1.7, naranja, 0, 0) }
+  // cuerpo con volumen: capas desplazadas hacia abajo-derecha (cara lateral) y cara frontal con brillo
+  const cuerpo = (dx: number, dy: number, col: string) => { c.fillStyle = col; c.beginPath(); c.roundRect(cx - bw / 2 + dx, cy - bh / 2 + dy, bw, bh, S * 0.06); c.fill() }
+  for (let k = 12; k >= 1; k--) cuerpo((k / 12) * prof, (k / 12) * prof, mezcla(oscuro, medio, 1 - k / 12))
+  cuerpo(0, 0, naranja)
+  const g = c.createLinearGradient(0, cy - bh / 2, 0, cy + bh / 2); g.addColorStop(0, 'rgba(255,255,255,.42)'); g.addColorStop(0.4, 'rgba(255,255,255,.05)'); g.addColorStop(1, 'rgba(60,10,0,.28)')
+  c.fillStyle = g; c.beginPath(); c.roundRect(cx - bw / 2, cy - bh / 2, bw, bh, S * 0.06); c.fill()
+  c.fillStyle = 'rgba(255,255,255,.55)'; c.beginPath(); c.roundRect(cx - bw / 2 + S * 0.03, cy - bh / 2 + S * 0.02, bw * 0.38, S * 0.022, S * 0.011); c.fill()      // brillo
+  // brazos (cuadraditos con articulación)
+  const brazo = (lado: number, ang: number) => {
+    c.save(); c.translate(cx + lado * (bw / 2 - S * 0.005), cy - bh * 0.02); c.rotate(ang)
+    c.fillStyle = oscuro; c.beginPath(); c.roundRect(lado > 0 ? 0 + prof * 0.4 : -S * 0.1 + prof * 0.4, -S * 0.025 + prof * 0.4, S * 0.1, S * 0.15, S * 0.03); c.fill()
+    c.fillStyle = naranja; c.beginPath(); c.roundRect(lado > 0 ? 0 : -S * 0.1, -S * 0.025, S * 0.1, S * 0.15, S * 0.03); c.fill(); c.restore()
+  }
+  brazo(-1, p.brazoI * -1 + 0.0); brazo(1, p.brazoD * -1)
+  // cara
+  const ex = bw * 0.2, ey = cy - bh * 0.1
+  c.lineCap = 'round'; c.strokeStyle = '#2a1410'; c.fillStyle = '#2a1410'; c.lineWidth = S * 0.014
+  for (const l of [-1, 1]) {
+    const x = cx + l * ex
+    if (p.ojos === 'espiral') { c.beginPath(); for (let a = 0; a < 16; a += 0.4) { const r = S * 0.0045 * a; c.lineTo(x + Math.cos(a + t * 14 * l) * r, ey + Math.sin(a + t * 14 * l) * r) } c.stroke() }
+    else if (p.ojos === 'x') { const d = S * 0.03; c.beginPath(); c.moveTo(x - d, ey - d); c.lineTo(x + d, ey + d); c.moveTo(x + d, ey - d); c.lineTo(x - d, ey + d); c.stroke() }
+    else if (p.ojos === 'feliz') { c.beginPath(); c.arc(x, ey + S * 0.012, S * 0.03, Math.PI * 1.1, Math.PI * 1.9); c.stroke() }
+    else {
+      const gran = p.ojos === 'asustado' ? 1.3 : p.ojos === 'llorando' ? 1.15 : 1, blink = p.ojos === 'normal' && (t % 3.4) < 0.1 ? 0.15 : 1
+      c.fillStyle = '#2a1410'; c.beginPath(); c.roundRect(x - S * 0.024 * gran, ey - S * 0.05 * gran * blink, S * 0.048 * gran, S * 0.1 * gran * blink, S * 0.02); c.fill()
+      c.fillStyle = '#fff'; c.beginPath(); c.arc(x - S * 0.006, ey - S * 0.02 * gran, S * 0.009 * gran, 0, Math.PI * 2); c.fill()
+    }
+    if (p.triste > 0.05) { c.strokeStyle = '#2a1410'; c.lineWidth = S * 0.012; c.beginPath(); c.moveTo(x + l * S * 0.04, ey - S * 0.07 + p.triste * S * 0.012); c.lineTo(x - l * S * 0.04, ey - S * 0.07 - p.triste * S * 0.025); c.stroke() }
+  }
+  c.strokeStyle = '#2a1410'; c.fillStyle = '#2a1410'; c.lineWidth = S * 0.012
+  const my = cy + bh * 0.12
+  if (p.boca === 'o') { c.beginPath(); c.ellipse(cx, my + S * 0.015, S * 0.022, S * 0.03, 0, 0, Math.PI * 2); c.fill() }
+  else if (p.boca === 'grito') { c.beginPath(); c.ellipse(cx, my + S * 0.02, S * 0.04, S * 0.05, 0, 0, Math.PI * 2); c.fill(); c.fillStyle = '#ff7a80'; c.beginPath(); c.ellipse(cx, my + S * 0.04, S * 0.025, S * 0.018, 0, 0, Math.PI * 2); c.fill() }
+  else if (p.boca === 'sonrisa') { c.beginPath(); c.arc(cx, my - S * 0.01, S * 0.045, 0.1 * Math.PI, 0.9 * Math.PI); c.stroke() }
+  else if (p.boca === 'triste') { c.beginPath(); c.arc(cx, my + S * 0.05, S * 0.04, Math.PI * 1.15, Math.PI * 1.85); c.stroke() }
+  else { c.beginPath(); c.moveTo(cx - S * 0.025, my + S * 0.01); c.lineTo(cx + S * 0.025, my + S * 0.01); c.stroke() }
+  if (p.ojos === 'llorando') {                                                                                         // lágrimas
+    c.fillStyle = 'rgba(160,215,255,.95)'
+    for (let i = 0; i < 8; i++) { const l = i % 2 ? 1 : -1, f = (t * 1.6 + i * 0.19) % 1; c.globalAlpha = 1 - f; c.beginPath(); c.ellipse(cx + l * (ex + S * 0.012), ey + S * 0.05 + f * S * 0.22, S * 0.012, S * 0.02, 0, 0, Math.PI * 2); c.fill() }
+    c.globalAlpha = 1
+  }
+  if (p.sudor > 0.05) { c.fillStyle = 'rgba(170,225,255,.95)'; for (let i = 0; i < 3; i++) { const f = (t * 2.2 + i * 0.33) % 1, x = cx + (i - 1) * bw * 0.32; c.globalAlpha = p.sudor * (1 - f); c.beginPath(); c.ellipse(x, cy - bh / 2 - S * 0.02 + f * S * 0.1, S * 0.012, S * 0.02, 0, 0, Math.PI * 2); c.fill() } c.globalAlpha = 1 }
   c.restore()
+  if (p.mareo > 0.05) {                                                                                                // estrellitas dando vueltas sobre la cabeza
+    for (let i = 0; i < 4; i++) { const a = t * 6 + (i * Math.PI) / 2; c.fillStyle = `rgba(255,224,102,${p.mareo})`; estrella(c, cx + Math.cos(a) * S * 0.2, cy - bh / 2 - S * 0.07 + Math.sin(a) * S * 0.04, S * 0.03, a * 2) }
+  }
 }
 
 function estrella(c: Ctx, x: number, y: number, r: number, rot: number) {
   c.beginPath()
-  for (let i = 0; i < 8; i++) { const a = rot + (i * Math.PI) / 4, rr = i % 2 === 0 ? r : r * 0.28; c.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)) }
+  for (let i = 0; i < 8; i++) { const a = rot + (i * Math.PI) / 4, rr = i % 2 === 0 ? r : r * 0.3; c.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)) }
   c.closePath(); c.fill()
 }
 
-function pintarChispa(c: Ctx, S: number, t: number, h: Humor) {
-  const cx0 = S / 2, cy0 = S / 2
-  const jit = h.loco > 0.05 ? h.loco * S * 0.018 : 0, f = Math.floor(t * 24)
-  const cx = cx0 + (alea(f * 3.1) - 0.5) * 2 * jit, cy = cy0 + (alea(f * 5.7) - 0.5) * 2 * jit + h.triste * S * 0.03
-  const pulso = 1 + 0.06 * Math.sin(t * (6 + h.loco * 14 + h.feliz * 6)) + h.feliz * 0.07 * Math.abs(Math.sin(t * 7))
-  const spin = t * (0.45 + h.loco * 7 + h.curioso * 0.3) * (h.triste > 0.5 ? 0.2 : 1)
-  const largo = pulso * (1 - 0.42 * h.triste) * (1 + 0.25 * h.loco)
-  const col0 = mezcla('#ff7a00', '#7a8fc8', h.triste), col1 = mezcla('#ffe0b8', '#c9d4f0', h.triste)
-  // resplandor
-  const rg = c.createRadialGradient(cx0, cy0, 0, cx0, cy0, S * 0.5); rg.addColorStop(0, h.triste > 0.5 ? 'rgba(120,150,255,.38)' : 'rgba(255,130,40,.55)'); rg.addColorStop(1, 'rgba(255,130,40,0)')
-  c.fillStyle = rg; c.fillRect(0, 0, S, S)
-  // copias fantasma (separación de color) cuando está loca
-  if (h.loco > 0.1) for (const [dx, col] of [[-1, 'rgba(0,255,255,.55)'], [1, 'rgba(255,0,200,.55)']] as const) {
-    c.save(); c.globalCompositeOperation = 'lighter'
-    rayos(c, cx + dx * h.loco * S * 0.035, cy, S, spin + dx * 0.05, largo, col, col, 0, t, 0.7); c.restore()
-  }
-  rayos(c, cx, cy, S, spin, largo, col0, col1, h.triste * 0.9, t, 1)
-  // cara
-  const r = S * 0.125 * pulso
-  const dg = c.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r); dg.addColorStop(0, mezcla('#ffb066', '#aebbe0', h.triste)); dg.addColorStop(1, mezcla('#ff6a00', '#6a7db8', h.triste))
-  c.fillStyle = dg; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill()
-  const ex = r * 0.42, ey = cy - r * 0.12
-  c.fillStyle = '#fff'; c.strokeStyle = '#2a1410'; c.lineCap = 'round'; c.lineWidth = r * 0.12
-  if (h.loco > 0.4) {                                                                                                   // ojos en espiral y boca ondulada
-    for (const l of [-1, 1]) { c.beginPath(); for (let a = 0; a < 18; a += 0.35) { const rr = r * 0.03 * a; c.lineTo(cx + l * ex + Math.cos(a + t * 12 * l) * rr * 0.9, ey + Math.sin(a + t * 12 * l) * rr * 0.9) } c.stroke() }
-    c.beginPath(); for (let i = 0; i <= 12; i++) { const x = cx - r * 0.45 + (i / 12) * r * 0.9, y = cy + r * 0.5 + Math.sin(i * 1.6 + t * 20) * r * 0.1; i ? c.lineTo(x, y) : c.moveTo(x, y) } c.stroke()
-  } else if (h.feliz > 0.4) {                                                                                           // ojos felices ^ ^ y gran sonrisa
-    for (const l of [-1, 1]) { c.beginPath(); c.arc(cx + l * ex, ey + r * 0.1, r * 0.17, Math.PI * 1.1, Math.PI * 1.9); c.stroke() }
-    c.fillStyle = '#2a1410'; c.beginPath(); c.arc(cx, cy + r * 0.22, r * 0.4, 0.05 * Math.PI, 0.95 * Math.PI); c.closePath(); c.fill()
-    c.fillStyle = '#ff6f80'; c.beginPath(); c.ellipse(cx, cy + r * 0.62, r * 0.17, r * 0.1, 0, 0, Math.PI); c.fill()
-  } else {                                                                                                              // ojos normales / tristes (con brillo) y lágrimas
-    const mx = h.curioso * Math.sin(t * 2.2) * r * 0.08, blink = (t % 3.4) < 0.1 ? 0.2 : 1
-    for (const l of [-1, 1]) {
-      c.fillStyle = '#fff'; c.beginPath(); c.ellipse(cx + l * ex, ey, r * 0.2, r * 0.25 * blink * (1 + 0.15 * h.triste), 0, 0, Math.PI * 2); c.fill()
-      c.fillStyle = '#2a1410'; c.beginPath(); c.arc(cx + l * ex + mx * 2, ey + h.triste * r * 0.05, r * 0.11 * (1 + 0.3 * h.triste), 0, Math.PI * 2); c.fill()
-      c.fillStyle = '#fff'; c.beginPath(); c.arc(cx + l * ex + mx * 2 - r * 0.035, ey - r * 0.04, r * 0.035, 0, Math.PI * 2); c.fill()
-      if (h.triste > 0.1) { c.strokeStyle = '#2a1410'; c.lineWidth = r * 0.1; c.beginPath(); c.moveTo(cx + l * (ex + r * 0.26), ey - r * 0.33 + h.triste * r * 0.04); c.lineTo(cx + l * (ex - r * 0.2), ey - r * 0.33 - h.triste * r * 0.15); c.stroke() }
-    }
-    c.strokeStyle = '#2a1410'; c.lineWidth = r * 0.1
-    if (h.triste > 0.1) { c.beginPath(); c.arc(cx, cy + r * 0.75, r * 0.3, Math.PI * 1.15, Math.PI * 1.85); c.stroke() }
-    else { c.beginPath(); c.arc(cx, cy + r * 0.3, r * 0.28, 0.2 * Math.PI, 0.8 * Math.PI); c.stroke() }
-  }
-  if (h.triste > 0.1) {                                                                                                 // chorros de lágrimas
-    c.fillStyle = 'rgba(160,215,255,.92)'
-    for (let i = 0; i < 10; i++) {
-      const l = i % 2 ? 1 : -1, fase = (t * 1.5 + i * 0.173) % 1, x = cx + l * ex * (1.1 + 0.15 * alea(i)), y = ey + r * 0.2 + fase * S * 0.4
-      c.globalAlpha = (1 - fase) * clamp01(h.triste * 1.5); c.beginPath(); c.ellipse(x, y, r * 0.06, r * 0.1, 0, 0, Math.PI * 2); c.fill()
-    }
-    c.globalAlpha = 1
-  }
-  // chispas y confeti que salen disparados
-  if (h.loco > 0.1 || h.feliz > 0.1) {
-    const n = h.feliz > 0.1 ? 34 : 20, inten = Math.max(h.loco, h.feliz)
-    for (let i = 0; i < n; i++) {
-      const ciclo = 0.9 + alea(i) * 0.7, f2 = ((t + alea(i + 9) * 3) % ciclo) / ciclo, a = alea(i + 2) * Math.PI * 2
-      const rad = S * (0.18 + f2 * 0.42), x = cx0 + Math.cos(a) * rad, y = cy0 + Math.sin(a) * rad + (h.feliz > 0.1 ? f2 * f2 * S * 0.12 : 0)
-      c.globalAlpha = (1 - f2) * inten
-      c.fillStyle = h.feliz > 0.1 ? ['#ffd166', '#ff7a00', '#7bdff2', '#ff5d8f', '#b2f7ef'][i % 5] : (i % 2 ? '#ffe9b0' : '#ff9a3c')
-      if (h.feliz > 0.1 && i % 3 === 0) { c.save(); c.translate(x, y); c.rotate(t * 6 + i); c.fillRect(-S * 0.012, -S * 0.02, S * 0.024, S * 0.04); c.restore() } else estrella(c, x, y, S * (0.014 + 0.018 * alea(i + 4)), t * 4 + i)
-    }
-    c.globalAlpha = 1
-  }
-}
-
-function humorEn(humor: string, tt: number, dur: number): Humor {
-  const h: Humor = { loco: 0, triste: 0, feliz: 0, curioso: 0 }
-  if (humor === 'loco') h.loco = clamp01(tt / 0.6)
-  else if (humor === 'triste') h.triste = easeOut3((tt - 0.4) / 0.6)
-  else if (humor === 'feliz') h.feliz = easeOut3((tt - 0.1) / 0.3)
-  else if (humor === 'locura') { const s = easeInOut((tt - (dur - 1.5)) / 0.7); h.loco = clamp01(tt / 0.9) * (1 - s); h.triste = s }
-  else h.curioso = 1
-  return h
-}
-
-function dibujarChispa(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
-  if (o.type !== 'graphic') return
-  const pr = o.props ?? {}, b = cajaEscena(o), S = Math.round(b.w * 0.9)
-  const tt = t - o.start, dur = o.end - o.start, ex = clamp01((tt - (dur - 0.35)) / 0.35), lado = pr.lado ?? 'centro'
-  const { c, x } = lienzo('chispa', S, S); pintarChispa(x, S, tt, humorEn(pr.humor ?? 'curioso', tt, dur))
-  const k = elastico(tt / 0.7)
-  const giro = (1 - Math.min(k, 1)) * 5 + Math.sin(tt * 2) * 0.22 + (lado === 'izq' ? 0.1 : lado === 'der' ? -0.1 : 0)
-  const cx = b.x + b.w / 2, cy = b.y + b.h / 2 + Math.sin(tt * 3.2) * H * 0.008
-  const escala = k * (1 + ex * 0.9), alfa = clamp01(tt / 0.1) * (1 - ex)
-  // onda de choque al entrar
-  const ring = clamp01(tt / 0.55)
-  if (ring > 0 && ring < 1) { ctx.save(); ctx.strokeStyle = `rgba(255,170,80,${0.8 * (1 - ring)})`; ctx.lineWidth = W * 0.03 * (1 - ring); ctx.beginPath(); ctx.arc(cx, cy, b.w * 0.55 * easeOut3(ring), 0, Math.PI * 2); ctx.stroke(); ctx.restore() }
-  ctx.save(); ctx.translate(cx, cy); ctx.rotate(giro); ctx.translate(-cx, -cy)
-  proyectar(ctx, c, cx, cy, b.w, b.w, Math.sin(tt * 2.6) * 0.28, alfa, escala)
+/** Ráfaga del golpe (estilo cómic, DETRÁS del muñeco): estrella dentada amarilla con borde naranja que se abre, más un anillo. */
+function rafaga(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, R: number) {
+  if (u <= 0 || u >= 1) return
+  const e = easeOut3(u), r = R * (0.25 + 0.75 * e), a = 1 - u * u
+  ctx.save(); ctx.translate(x, y); ctx.rotate(0.25 * u)
+  ctx.beginPath()
+  for (let i = 0; i < 24; i++) { const ang = (i / 24) * Math.PI * 2, rr = i % 2 ? r * 0.62 : r * (0.9 + 0.25 * alea(i * 3.3)); ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr) }
+  ctx.closePath(); ctx.fillStyle = `rgba(255,224,90,${a})`; ctx.fill(); ctx.strokeStyle = `rgba(255,122,0,${a})`; ctx.lineWidth = R * 0.05; ctx.lineJoin = 'round'; ctx.stroke()
+  ctx.beginPath(); ctx.arc(0, 0, r * 1.15, 0, Math.PI * 2); ctx.strokeStyle = `rgba(255,255,255,${0.8 * (1 - u)})`; ctx.lineWidth = R * 0.07 * (1 - u); ctx.stroke()
   ctx.restore()
+}
+
+/**
+ * Animación del muñeco. `anim`: 'golpe' (vuela desde un lado, te pega en la cabeza —el punto de la caja—, rebota, queda mareado y al final se cae),
+ * 'baile' (entra de abajo y baila saltando) o 'quieto' (aparece con rebote). `humor` decide qué hace al quedarse: 'loco', 'triste', 'feliz', 'asustado'.
+ */
+function dibujarMuneco(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
+  if (o.type !== 'graphic') return
+  const pr = o.props ?? {}, b = cajaEscena(o), S = Math.round(b.w * 1.25)
+  const tt = t - o.start, dur = o.end - o.start, anim = pr.anim ?? 'golpe', humor = pr.humor ?? 'loco', lado = pr.lado ?? 'der'
+  const dir = lado === 'izq' ? -1 : 1
+  const P = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
+  const tV = anim === 'golpe' ? 0.7 : 0.45, tR = tV + 0.6, tS = Math.max(dur - 0.6, tR + 0.2), sal = clamp01((tt - tS) / 0.6)
+  const p = poseBase(); let x = P.x, y = P.y, rot = 0, esc = 1, ghost = 0, impacto = -1
+  const jug = (ojos: Pose['ojos'], boca: Pose['boca']) => { p.ojos = ojos; p.boca = boca }
+  if (tt < tV) {                                                                                                  // vuelo (acelera hacia la cabeza)
+    const u = tt / tV, e = Math.pow(u, 2.2)
+    x = P.x + dir * W * 0.8 * (1 - e); y = P.y - H * 0.3 * (1 - e) - Math.sin(Math.PI * u) * H * 0.07
+    rot = -dir * (1 - e) * 11; p.sx = 1 - 0.25 * u; p.sy = 1 + 0.35 * u; p.brazoI = 2.4; p.brazoD = -2.4; p.pata = tt * 30; jug('asustado', 'grito'); ghost = 1
+    if (anim !== 'golpe') { x = P.x; y = P.y + H * 0.5 * (1 - easeOut3(u)); rot = 0; ghost = 0 }
+  } else if (tt < tR) {                                                                                            // golpe + rebote
+    const u = (tt - tV) / (tR - tV)
+    impacto = (tt - tV) / 0.5
+    const sq = u < 0.18 ? 1 - u / 0.18 : 0, alto = Math.sin(Math.PI * clamp01((u - 0.18) / 0.82))
+    p.sx = 1 + 0.4 * sq - 0.08 * alto; p.sy = 1 - 0.45 * sq + 0.15 * alto; y = P.y - H * 0.1 * alto; rot = Math.sin(u * 14) * 0.12 * (1 - u); p.brazoI = 0.9 + 1.2 * (1 - u); p.brazoD = -0.9 - 1.2 * (1 - u); jug(u < 0.3 ? 'x' : 'espiral', 'o'); p.mareo = u
+    if (anim !== 'golpe') { p.sx = 1 + 0.12 * Math.sin(u * 20) * (1 - u); p.sy = 2 - p.sx; jug('feliz', 'sonrisa') }
+  } else {                                                                                                         // ya instalado: según el humor
+    const u = tt - tR
+    if (humor === 'triste') { p.triste = easeOut3(u / 0.5); p.sy = 0.94 - 0.03 * Math.sin(u * 3); p.sx = 1.04; p.brazoI = 0.05; p.brazoD = -0.05; jug('llorando', 'triste'); rot = 0.05 * Math.sin(u * 1.4) }
+    else if (humor === 'feliz') { const s = Math.abs(Math.sin(u * 6.5)); y = P.y - s * H * 0.045; p.sy = 1 + 0.12 * (1 - s) * -1 + 0.1 * s; p.sx = 1 - 0.06 * s; p.brazoI = 2.4 - s * 0.6; p.brazoD = -2.4 + s * 0.6; p.pata = u * 12; jug('feliz', 'sonrisa'); rot = Math.sin(u * 6.5) * 0.08 }
+    else if (humor === 'asustado') { p.tiembla = 1; p.sudor = 1; p.brazoI = 1.3 + Math.sin(u * 40) * 0.15; p.brazoD = -1.3 - Math.sin(u * 40) * 0.15; p.sy = 0.96; jug('asustado', 'o'); rot = Math.sin(u * 55) * 0.03 }
+    else { p.mareo = clamp01(1 - u / 1.2); p.brazoI = 1.4 + Math.sin(u * 14) * 1.0; p.brazoD = -1.4 - Math.sin(u * 14 + 1) * 1.0; p.pata = u * 18; p.tiembla = 0.6; jug('espiral', 'grito'); y = P.y + Math.sin(u * 22) * H * 0.006; rot = Math.sin(u * 9) * 0.12 }
+  }
+  if (sal > 0) {                                                                                                   // salida
+    if (anim === 'golpe') { const e = sal * sal; y += H * 0.85 * e; x += dir * W * 0.12 * e; rot += dir * 3.2 * e; p.brazoI = 2.4; p.brazoD = -2.4; p.ojos = 'asustado'; p.boca = 'grito' }
+    else { esc = 1 - easeOut3(sal) * 0.9; y += H * 0.1 * sal }
+  }
+  const { c, x: cx } = lienzo('muneco', S, S); pintarMuneco(cx, S, tt, p)
+  const w = b.w * 1.25
+  const pintar = (px: number, py: number, a: number, r: number, k: number) => { ctx.save(); ctx.globalAlpha = a; ctx.translate(px, py); ctx.rotate(r); ctx.scale(k, k); ctx.drawImage(c as unknown as CanvasImageSource, -w / 2, -w / 2, w, w); ctx.restore() }
+  // sombra en el aire y estela de movimiento
+  const alfa = clamp01(tt / 0.06)
+  if (ghost) for (let i = 3; i >= 1; i--) { const e2 = Math.pow(Math.max(0, tt / tV - i * 0.05), 2.2); pintar(P.x + dir * W * 0.8 * (1 - e2), P.y - H * 0.3 * (1 - e2) - Math.sin(Math.PI * Math.max(0, tt / tV - i * 0.05)) * H * 0.07, 0.16 * (4 - i) * alfa, rot - dir * i * 0.2, esc) }
+  if (impacto >= 0) rafaga(ctx, P.x, P.y - H * 0.01, impacto, b.w * 0.62)
+  pintar(x, y, alfa, rot, esc)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -274,5 +290,5 @@ function dibujarPantalla(ctx: CanvasRenderingContext2D, o: TextLayer, t: number)
 /** Dibuja la escena `o` (graphic con template 'escena') en el instante `t`. */
 export function dibujarEscena(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
   if (o.type !== 'graphic') return
-  if ((o.props?.tipo ?? 'claude') === 'pantalla') dibujarPantalla(ctx, o, t); else dibujarChispa(ctx, o, t)
+  if ((o.props?.tipo ?? 'claude') === 'pantalla') dibujarPantalla(ctx, o, t); else dibujarMuneco(ctx, o, t)
 }

@@ -57,3 +57,13 @@ dur=1.9; n=int(dur*SR); u=np.arange(n)/n
 env=(1-np.exp(-u*14))*np.exp(-u*2.2); fc=1700*np.exp(-u*1.9)+200
 ch=[reverb(hp(lp(pink(n), fc)*env*wobble(n,0.22,6),60),0.7,0.38) for _ in range(2)]
 save('SFX-suspiro.wav', ch[0], ch[1], 0.5)
+
+# 4) GOLPE DE AIRE (0.6 s): el muñeco te da en la cabeza. Soplido sordo con cuerpo grave que se apaga rápido; sin tono ni tambor
+dur=0.6; n=int(dur*SR); u=np.arange(n)/n; tt=u*dur
+env_aire=(1-np.exp(-tt*900))*np.exp(-tt*16); env_grave=(1-np.exp(-tt*500))*np.exp(-tt*9)
+ch=[]
+for c in range(2):
+    aire=lp(hp(pink(n),180), 1800*np.exp(-tt*5)+300)*env_aire
+    grave=lp(pink(n), np.full(n,150))*env_grave*1.6
+    ch.append(reverb(aire*0.9+grave, 0.35, 0.25))
+save('SFX-golpe-aire.wav', ch[0], ch[1], 0.6)
