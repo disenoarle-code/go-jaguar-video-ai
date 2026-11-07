@@ -99,6 +99,15 @@ Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.jso
 
 `scripts/efectos/sonidos.py <carpeta>` sintetiza swooshes de AIRE libres de derechos (ruido rosa suave que pasa por un filtro que se abre y se cierra, con modulación irregular, cola de reverberación y estéreo): `SFX-swoosh-izq-der/der-izq` (0,55 s, graves y suaves), `SFX-swoosh-grande` (1,1 s, para la entrada de la música) y `SFX-subida-aire-3.4s`. `scripts/efectos/luces.py <carpeta>` genera luces de lente (cálida, fría, dorada). Se dejan en `material/` del proyecto, el botón Importar (o `POST /preparar`) los trae al editor y se colocan con `add_overlay`. **Reglas del usuario:** pocos; **nunca tambores, golpes, impactos ni "dings"/campanas**: solo swooshes de aire, graves, de duración media (ni muy cortos ni muy largos), suaves de volumen (0,5–0,7) y nada robóticos (sin tonos sinusoidales). Colocación: subida que termina en la entrada de la música + swoosh grande en ella, y swoosh centrado (pico ~0,27 s después de su inicio) en 2 deslizamientos. Luces (video con `blend:'screen'`, `scale:1`, centradas en el corte, empiezan ~45 % de su duración antes) solo en 2 cortes fuertes. Para mezclar con `blend` en ffmpeg ambas entradas deben tener el mismo formato (`gbrp`) o el color sale magenta.
 
+## Subtítulos karaoke: sincronía con la voz (OBLIGATORIO revisarla)
+
+Los tiempos por palabra de Whisper se desfasan (hasta ~1 s), así que **no se usan** para karaoke. Pasos, siempre:
+1. Audio de origen: `ffmpeg -i <proxy o video> -vn -ac 1 -ar 16000 audio.wav`.
+2. Alinear: `~/.gojaguar-alinear/bin/python scripts/alinear-palabras.py audio.wav transcripciones/<video>.words.json analisis/<video>.palabras.json` (alineación forzada CTC con wav2vec2 en español, Apache 2.0). Instalación única y gratuita (~1,5 GB, pedir permiso antes): `python3 -m venv ~/.gojaguar-alinear && ~/.gojaguar-alinear/bin/pip install torch torchaudio transformers soundfile numpy`.
+3. Revisar: `python3 scripts/verificar-sincronia.py audio.wav analisis/<video>.palabras.json` (voz sobre silencio, pausas dentro de palabras, ventanas re-transcritas). Si dice `SINCRONÍA MALA`, no seguir.
+4. Armar las capas karaoke con los tiempos pasados a la línea de tiempo (en los cortes, restar lo eliminado), exportar desde la app a una carpeta temporal y revisar de punta a punta: `ffmpeg -i export.mp4 -vn -ac 1 -ar 16000 exp.wav` y `python3 scripts/verificar-sincronia.py exp.wav proyecto.gojaguar`. Restaurar la carpeta de exportación del usuario.
+5. Mirar a ojo 2-3 zonas (energía vs palabras) antes de decir "listo".
+
 ## Recetas
 
 - **Silencios:** ya los quita el botón. A mano: `ffmpeg -i proxy -vn -af silencedetect=noise=-32dB:d=0.45 -f null -`.

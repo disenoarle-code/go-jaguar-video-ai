@@ -1,87 +1,62 @@
 """
-Tiempos por palabra fiables para subtítulos karaoke. Whisper (-ml 1) da tiempos aproximados que se desfasan; aquí se anclan a las pausas
-REALES del audio (silencedetect) en los cierres de frase y las palabras se reparten dentro de cada tramo según su duración hablada estimada.
-Uso: python3 alinear-palabras.py <audio.wav> <palabras.json de whisper> <salida.json> ["palabra:inicio_de_pausa,…"]     (tiempos en segundos del archivo de origen)
-Anclas manuales opcionales: cada "palabra:segundo" ancla la PRIMERA aparición (en orden) de esa palabra a la pausa que empieza en ese segundo; sin ellas se emparejan solas.
+Tiempos por palabra para subtítulos karaoke, medidos sobre el AUDIO REAL con ALINEACIÓN FORZADA (CTC).
+
+Los tiempos por palabra de Whisper NO sirven para karaoke (se desfasan hasta ~1 s, y ~0,3 s aun en tramos cortos con -dtw). Aquí Whisper solo aporta el TEXTO
+(words.json); los tiempos salen de un modelo wav2vec2 en español (Apache 2.0: jonatasgrosman/wav2vec2-large-xlsr-53-spanish) que alinea ese texto con el audio
+letra por letra (torchaudio.functional.forced_align). Precisión típica ~30–50 ms.
+
+Instalación única (gratis, ~1,5 GB; el modelo se baja la primera vez):
+    python3 -m venv ~/.gojaguar-alinear && ~/.gojaguar-alinear/bin/pip install torch torchaudio transformers soundfile numpy
+Uso:
+    ~/.gojaguar-alinear/bin/python alinear-palabras.py <audio.wav 16k mono> <words.json (texto de referencia)> <salida.json>
+Salida: [{w, t0, t1}] en segundos del archivo de origen.  DESPUÉS correr SIEMPRE scripts/verificar-sincronia.py (ver CLAUDE.md).
 """
 import json, re, subprocess, sys
-wav, wjson, salida = sys.argv[1:4]
-MANUALES = [(x.rsplit(':', 1)[0], float(x.rsplit(':', 1)[1])) for x in sys.argv[4].split(',,')] if len(sys.argv) > 4 else None
-W = json.load(open(wjson))
-DUR = float(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',wav]))
-out = subprocess.run(['ffmpeg','-hide_banner','-nostats','-i',wav,'-af','silencedetect=noise=-34dB:d=0.12','-f','null','-'],capture_output=True,text=True).stderr
-pausas, st = [], None
-for l in out.split('\n'):
-    m = re.search(r'silence_start: ([\d.]+)', l)
-    if m: st = float(m.group(1))
-    m = re.search(r'silence_end: ([\d.]+)', l)
-    if m and st is not None: pausas.append((st, float(m.group(1)))); st = None
-if st is not None: pausas.append((st, DUR))
-inicio = pausas[0][1] if pausas and pausas[0][0] < 0.05 else 0.0
-fin = pausas[-1][0] if pausas and pausas[-1][1] >= DUR - 0.05 else DUR
-def peso(w):
-    w2 = re.sub(r'[^\wáéíóúñü]', '', w.lower()); return max(2, len(w2)) + 1.5
-# anclas: palabras con puntuación cuyo cierre debe coincidir con una pausa real. Se emparejan en ORDEN (programación dinámica) minimizando la distancia
-# entre el final que da Whisper y el inicio de la pausa; un punto exige una pausa más larga que una coma.
-puntuadas = [i for i, x in enumerate(W[:-1]) if re.search(r'[.,?!"]$', x['w'])]
-TOL, SESGO = 2.6, 0.6                           # Whisper suele dar los finales ~0,6 s tarde: se compensa antes de emparejar
-def costo(i, k):
-    a, b = pausas[k]; x = W[i]
-    d = abs(a - (x['t1'] - SESGO))
-    if not (inicio < a and b < fin) or d > TOL: return None
-    if re.search(r'[.?!]"?$', x['w']) and (b - a) < 0.2: return None
-    return d + (0 if (b - a) >= 0.2 else 0.3)
-SALTO = 0.3                                   # costo de no anclar una palabra / una pausa
-n, m = len(puntuadas), len(pausas)
-if MANUALES:
-    anclas, desde = {}, 0
-    for pal, seg in MANUALES:
-        i = next((j for j in range(desde, len(W) - 1) if W[j]['w'] == pal), None)
-        k = min(range(len(pausas)), key=lambda q: abs(pausas[q][0] - seg))
-        if i is not None and abs(pausas[k][0] - seg) < 0.1: anclas[i] = pausas[k]; desde = i + 1
-    n = m = 0
-D = [[0.0] * (m + 1) for _ in range(n + 1)]; B = [[None] * (m + 1) for _ in range(n + 1)]
-for i in range(n + 1):
-    for k in range(m + 1):
-        if i == 0 and k == 0: continue
-        best, how = float('inf'), None
-        if i > 0 and D[i-1][k] + SALTO < best: best, how = D[i-1][k] + SALTO, 'p'
-        pk = 2.5 if (pausas[k-1][1] - pausas[k-1][0]) >= 0.25 else 0.3          # una pausa larga casi siempre cae en una puntuación: no dejarla sin emparejar
-        if k > 0 and D[i][k-1] + pk < best: best, how = D[i][k-1] + pk, 'k'
-        if i > 0 and k > 0:
-            c = costo(puntuadas[i-1], k-1)
-            if c is not None and D[i-1][k-1] + c < best: best, how = D[i-1][k-1] + c, 'm'
-        D[i][k], B[i][k] = best, how
-if not MANUALES: anclas = {}
-i, k = n, m
-while i > 0 or k > 0:
-    h = B[i][k]
-    if h == 'm': anclas[puntuadas[i-1]] = pausas[k-1]; i -= 1; k -= 1
-    elif h == 'p': i -= 1
-    else: k -= 1
-cortes = [-1] + sorted(anclas) + [len(W) - 1]
-res = [None] * len(W)
-for n in range(len(cortes) - 1):
-    i0, i1 = cortes[n] + 1, cortes[n + 1]
-    s = anclas[cortes[n]][1] if cortes[n] >= 0 else inicio
-    e = anclas[cortes[n + 1]][0] if cortes[n + 1] in anclas else fin
-    # islas de habla del tramo (se descartan las pausas no ancladas que caen dentro)
-    isl, cur = [], s
-    for a, b in pausas:
-        if b <= s or a >= e: continue
-        if a - cur > 0.04: isl.append((cur, min(a, e)))
-        cur = max(cur, b)
-    if e - cur > 0.04: isl.append((cur, e))
-    if not isl: isl = [(s, e)]
-    tot = sum(b - a for a, b in isl); pesos = [peso(W[i]['w']) for i in range(i0, i1 + 1)]; tp = sum(pesos)
-    def real(x):
-        acc = 0.0
-        for a, b in isl:
-            if x <= acc + (b - a) + 1e-9: return a + (x - acc)
-            acc += b - a
-        return isl[-1][1]
-    c = 0.0
-    for i, p in zip(range(i0, i1 + 1), pesos):
-        res[i] = {'w': W[i]['w'], 't0': round(real(c / tp * tot), 3), 't1': round(real((c + p) / tp * tot - 1e-6), 3)}; c += p
-json.dump(res, open(salida, 'w'), ensure_ascii=False)
-print(f"{len(anclas)} anclas con pausas reales, {len(W)} palabras, voz de {inicio:.2f}s a {fin:.2f}s")
+import numpy as np
+import torch, torchaudio
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+
+wav, ref_json, salida = sys.argv[1:4]
+MODELO = 'jonatasgrosman/wav2vec2-large-xlsr-53-spanish'
+REF = [x for x in json.load(open(ref_json)) if re.search(r'\w', x['w'])]
+raw = subprocess.check_output(['ffmpeg', '-v', 'error', '-i', wav, '-f', 's16le', '-ac', '1', '-ar', '16000', '-'])
+audio = torch.from_numpy(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
+DUR = len(audio) / 16000
+
+proc = Wav2Vec2Processor.from_pretrained(MODELO); model = Wav2Vec2ForCTC.from_pretrained(MODELO).eval()
+vocab = proc.tokenizer.get_vocab()
+x = (audio - audio.mean()) / (audio.std() + 1e-7)
+with torch.inference_mode():
+    em = torch.log_softmax(model(x[None]).logits, dim=-1)[0]            # (cuadros, vocab), 1 cuadro = 20 ms
+FR = DUR / em.shape[0]
+
+# texto → fichas (una por letra; el espacio entre palabras es '|')
+def letras(w): return [c for c in re.sub(r'[^a-záéíóúñü]', '', w.lower()) if c in vocab]
+tokens, dueno = [], []
+for q, p in enumerate(REF):
+    cs = letras(p['w'])
+    if not cs: continue
+    if tokens: tokens.append(vocab['|']); dueno.append(-1)
+    for c in cs: tokens.append(vocab[c]); dueno.append(q)
+ali, _ = torchaudio.functional.forced_align(em[None], torch.tensor([tokens], dtype=torch.int32), blank=vocab['<pad>'])
+ali = ali[0].tolist()
+# recorrer el camino: cada ficha ocupa los cuadros donde se emite (se colapsan repeticiones)
+ini, fin, k, prev = {}, {}, -1, vocab['<pad>']
+for f, tok in enumerate(ali):
+    if tok != vocab['<pad>'] and tok != prev: k += 1
+    if tok != vocab['<pad>']:
+        q = dueno[k]
+        if q >= 0: ini.setdefault(q, f); fin[q] = f
+    prev = tok
+t0 = [None] * len(REF); t1 = [None] * len(REF)
+for q in ini: t0[q] = ini[q] * FR; t1[q] = (fin[q] + 1) * FR
+for q in range(len(REF)):                                              # palabras sin letras (números...): interpolar entre vecinas
+    if t0[q] is None:
+        a = next((r for r in range(q - 1, -1, -1) if t1[r] is not None), None); b = next((r for r in range(q + 1, len(REF)) if t0[r] is not None), None)
+        t0[q] = t1[a] if a is not None else 0.0; t1[q] = t0[b] if b is not None else DUR
+for q in range(len(REF)):                                              # cada palabra dura hasta que empieza la siguiente, salvo pausa > 0,3 s
+    nxt = t0[q + 1] if q + 1 < len(REF) else DUR
+    t1[q] = nxt if nxt - t1[q] < 0.3 else t1[q] + 0.12
+    t1[q] = max(t1[q], t0[q] + 0.05)
+json.dump([{'w': REF[q]['w'], 't0': round(float(t0[q]), 3), 't1': round(float(t1[q]), 3)} for q in range(len(REF))], open(salida, 'w'), ensure_ascii=False, indent=1)
+print(f'{len(REF)} palabras alineadas con {MODELO} → {salida}', file=sys.stderr)
