@@ -47,6 +47,8 @@ export interface Transform {
   scale: number
   rotation: number     // grados (eje Z)
   opacity: number      // 0..1
+  /** Estirado extra por eje (solo capas de texto/gráficos), multiplica a `scale`; 1 = sin estirar. */
+  sx?: number; sy?: number
 }
 
 /** Valor animado: `t` en segundos desde el inicio de la capa. */

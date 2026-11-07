@@ -27,12 +27,36 @@ const easeOut3 = (x: number) => 1 - Math.pow(1 - clamp01(x), 3)
 const easeBack = (x: number) => { const c1 = 1.70158, c3 = c1 + 1, v = clamp01(x); return 1 + c3 * Math.pow(v - 1, 3) + c1 * Math.pow(v - 1, 2) }
 const FONT_BRAND = (px: number, w = 900) => `${w} ${px}px Figtree, "Segoe UI", system-ui, sans-serif`
 
-/** Caja final (sin animación) de un overlay; sirve para dibujar y para hacer hit-test. */
+/** Medidas del karaoke en reposo (mismas fórmulas que drawKaraoke): ancho de la línea más larga y número de líneas. */
+function karaokeMedidas(ctx: CanvasRenderingContext2D, o: TextLayer) {
+  let palabras: [string, number, number][] = []
+  try { palabras = JSON.parse(o.props?.palabras ?? '[]') } catch { /* sin palabras */ }
+  const size = W * 0.092
+  ctx.save(); ctx.font = FONT_BRAND(size, 800); ctx.letterSpacing = `${size * 0.01}px`
+  const space = ctx.measureText(' ').width + size * 0.24, ws = palabras.map(p => ctx.measureText(p[0]).width)
+  ctx.restore()
+  const total = ws.reduce((a, b) => a + b, 0) + space * Math.max(0, palabras.length - 1)
+  const mitad = Math.ceil(palabras.length / 2)
+  const lw = (idx: number[]) => idx.reduce((a, i) => a + ws[i], 0) + space * Math.max(0, idx.length - 1)
+  const todas = palabras.map((_, i) => i)
+  const lineas = total > W * 0.88 ? [todas.slice(0, mitad), todas.slice(mitad)] : [todas]
+  return { size, lh: size * 1.18, n: lineas.length, w: Math.max(...lineas.map(lw), size) }
+}
+
+/** Caja final (sin animación ni transformación del usuario) de un overlay, en el lienzo; sirve para dibujar y para hacer hit-test. */
 export function boundsOf(ctx: CanvasRenderingContext2D, o: TextLayer): Rect {
   if (o.type === 'graphic' && o.template === 'lanzamiento') return { x: W * 0.08, y: H * 0.20, w: W * 0.84, h: H * 0.42 }
   if (o.type === 'graphic' && o.template === 'glass') { const lado = o.props?.lado ?? 'izq', w = W * 0.58; return { x: (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W - w / 2, y: H * 0.17 - w * 0.2, w, h: w * 0.4 } }
-  if (o.type === 'graphic' && o.template === 'pildora') return { x: W * 0.1, y: H * 0.07, w: W * 0.8, h: H * 0.08 }
-  if (o.type === 'subtitle' && o.template === 'karaoke') return { x: W * 0.05, y: H * 0.72, w: W * 0.9, h: H * 0.16 }
+  if (o.type === 'graphic' && o.template === 'pildora') {
+    const size = W * 0.074; ctx.save(); ctx.font = FONT_BRAND(size, 900); ctx.letterSpacing = `${size * 0.03}px`
+    const tw = ctx.measureText((o.props?.texto ?? o.text).toUpperCase()).width; ctx.restore()
+    const pw = tw + size * 1.6, ph = size * 1.75
+    return { x: W / 2 - pw / 2, y: H * 0.105 - ph / 2, w: pw, h: ph }
+  }
+  if (o.type === 'subtitle' && o.template === 'karaoke') {
+    const m = karaokeMedidas(ctx, o), w = m.w + m.size * 0.4, h = m.n * m.lh
+    return { x: W / 2 - w / 2, y: H * 0.8 - h / 2, w, h }
+  }
   ctx.save()
   ctx.font = FONT(o)
   const tw = ctx.measureText(o.text).width
@@ -43,73 +67,141 @@ export function boundsOf(ctx: CanvasRenderingContext2D, o: TextLayer): Rect {
   return { x: o.transform.x * W - w / 2, y: o.transform.y * H - h / 2, w, h }
 }
 
+// --- geometría: posición, tamaño, estirado y giro que el usuario puede cambiar con el mouse -----------------
+export interface Pt { x: number; y: number }
+export interface Geom { b: Rect; D: Pt; F: Pt; rot: number; sx: number; sy: number; auto: boolean }
+/** Margen invisible (px del lienzo de 1080 de ancho) que respeta la posición INICIAL de lo que entra a pantalla; el usuario puede pasarse. */
+export const MARGEN = 4
+/** Plantillas: se dibujan en su lugar por defecto y `transform.x/y` = 0,5 significa "ahí"; mover suma un desplazamiento. */
+const esPlantilla = (o: TextLayer) => (o.type === 'subtitle' && o.template === 'karaoke') || (o.type === 'graphic' && ['lanzamiento', 'glass', 'pildora'].includes(o.template))
+const sinCambios = (t: TextLayer['transform']) => t.x === 0.5 && t.y === 0.5 && (t.scale ?? 1) === 1 && !t.rotation && (t.sx ?? 1) === 1 && (t.sy ?? 1) === 1
+
+export function geomOf(ctx: CanvasRenderingContext2D, o: TextLayer): Geom {
+  const b = boundsOf(ctx, o), t = o.transform, pl = esPlantilla(o)
+  const D = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
+  let F = pl ? { x: D.x + (t.x - 0.5) * W, y: D.y + (t.y - 0.5) * H } : { ...D }
+  const k = t.scale || 1
+  let sx = k * (t.sx ?? 1), sy = k * (t.sy ?? 1), auto = false
+  if (pl && sinCambios(t)) {                                       // posición inicial: dentro del margen de 4 px (si no cabe, se achica un poco)
+    const m = MARGEN * (W / 1080), s = Math.min(1, (W - 2 * m) / b.w, (H - 2 * m) / b.h)
+    const hw = (b.w * s) / 2, hh = (b.h * s) / 2
+    const fx = Math.min(Math.max(F.x, m + hw), W - m - hw), fy = Math.min(Math.max(F.y, m + hh), H - m - hh)
+    if (s < 1 || fx !== F.x || fy !== F.y) { auto = true; sx = sy = s; F = { x: fx, y: fy } }
+  }
+  return { b, D, F, rot: ((t.rotation || 0) * Math.PI) / 180, sx, sy, auto }
+}
+/** Transform equivalente a lo que se ve ahora (para "hornear" el ajuste automático del margen antes de que el usuario lo mueva). */
+export function transformEfectivo(g: Geom, o: TextLayer): TextLayer['transform'] {
+  const t = o.transform
+  if (!g.auto) return { ...t, sx: t.sx ?? 1, sy: t.sy ?? 1 }
+  return { ...t, x: 0.5 + (g.F.x - g.D.x) / W, y: 0.5 + (g.F.y - g.D.y) / H, scale: g.sx, sx: 1, sy: 1 }
+}
+const aCanvas = (g: Geom, px: number, py: number): Pt => {
+  const dx = (px - g.D.x) * g.sx, dy = (py - g.D.y) * g.sy, c = Math.cos(g.rot), s = Math.sin(g.rot)
+  return { x: g.F.x + dx * c - dy * s, y: g.F.y + dx * s + dy * c }
+}
+const aLocal = (g: Geom, x: number, y: number): Pt => {
+  const dx = x - g.F.x, dy = y - g.F.y, c = Math.cos(-g.rot), s = Math.sin(-g.rot)
+  return { x: g.D.x + (dx * c - dy * s) / g.sx, y: g.D.y + (dx * s + dy * c) / g.sy }
+}
+const aplicar = (ctx: CanvasRenderingContext2D, g: Geom) => { ctx.translate(g.F.x, g.F.y); ctx.rotate(g.rot); ctx.scale(g.sx, g.sy); ctx.translate(-g.D.x, -g.D.y) }
+
+const RAD = () => W * 0.017
+export type Asa = { tipo: 'borrar' | 'girar' } | { tipo: 'esquina' | 'lado'; i: number }
+/** Puntos de las asas en el lienzo: esquinas [tl,tr,br,bl], lados [arriba,derecha,abajo,izquierda], botón borrar y asa de giro. */
+export function asasDe(g: Geom) {
+  const { b } = g, r = RAD(), c = Math.cos(g.rot), s = Math.sin(g.rot)
+  const esq = [aCanvas(g, b.x, b.y), aCanvas(g, b.x + b.w, b.y), aCanvas(g, b.x + b.w, b.y + b.h), aCanvas(g, b.x, b.y + b.h)]
+  const lados = [aCanvas(g, b.x + b.w / 2, b.y), aCanvas(g, b.x + b.w, b.y + b.h / 2), aCanvas(g, b.x + b.w / 2, b.y + b.h), aCanvas(g, b.x, b.y + b.h / 2)]
+  const off = (p: Pt, dx: number, dy: number): Pt => ({ x: p.x + dx * c - dy * s, y: p.y + dx * s + dy * c })
+  const dentro = (p: Pt): Pt => ({ x: Math.min(Math.max(p.x, r * 1.1), W - r * 1.1), y: Math.min(Math.max(p.y, r * 1.1), H - r * 1.1) })     // que no se salgan del lienzo
+  return { esq, lados, borrar: dentro(off(esq[0], -r * 1.5, -r * 1.5)), girar: dentro(off(lados[2], 0, r * 3.6)), r }
+}
+export function hitAsa(g: Geom, x: number, y: number): Asa | null {
+  const h = asasDe(g), tol = h.r * 1.7, cerca = (p: Pt) => Math.hypot(p.x - x, p.y - y) <= tol
+  if (cerca(h.borrar)) return { tipo: 'borrar' }
+  if (cerca(h.girar)) return { tipo: 'girar' }
+  for (let i = 0; i < 4; i++) if (cerca(h.esq[i])) return { tipo: 'esquina', i }
+  for (let i = 0; i < 4; i++) if (cerca(h.lados[i])) return { tipo: 'lado', i }
+  return null
+}
+function dibujarAsas(ctx: CanvasRenderingContext2D, g: Geom) {
+  const h = asasDe(g), r = h.r
+  ctx.save(); ctx.setLineDash([]); ctx.lineJoin = 'round'; ctx.lineCap = 'round'
+  ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = r * 0.5
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(2, W * 0.0028)
+  ctx.beginPath(); h.esq.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath(); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(h.lados[2].x, h.lados[2].y); ctx.lineTo(h.girar.x, h.girar.y); ctx.stroke()
+  ctx.fillStyle = '#fff'
+  for (const p of h.esq) { ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.8, 0, Math.PI * 2); ctx.fill() }
+  h.lados.forEach((p, i) => {                                       // barritas en el medio de cada lado, giradas con la caja
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(g.rot + (i % 2 ? Math.PI / 2 : 0)); ctx.beginPath(); ctx.roundRect(-r * 0.95, -r * 0.32, r * 1.9, r * 0.64, r * 0.32); ctx.fill(); ctx.restore()
+  })
+  ctx.shadowBlur = 0
+  ctx.beginPath(); ctx.arc(h.borrar.x, h.borrar.y, r * 1.05, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill()        // borrar (×)
+  ctx.strokeStyle = '#333'; ctx.lineWidth = r * 0.22; const d = r * 0.4
+  ctx.beginPath(); ctx.moveTo(h.borrar.x - d, h.borrar.y - d); ctx.lineTo(h.borrar.x + d, h.borrar.y + d); ctx.moveTo(h.borrar.x + d, h.borrar.y - d); ctx.lineTo(h.borrar.x - d, h.borrar.y + d); ctx.stroke()
+  ctx.beginPath(); ctx.arc(h.girar.x, h.girar.y, r * 1.05, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill()           // girar (↻)
+  ctx.strokeStyle = '#333'; ctx.lineWidth = r * 0.2
+  ctx.beginPath(); ctx.arc(h.girar.x, h.girar.y, r * 0.5, -Math.PI * 0.15, Math.PI * 1.45); ctx.stroke()
+  const ax = h.girar.x + r * 0.5 * Math.cos(-Math.PI * 0.15), ay = h.girar.y + r * 0.5 * Math.sin(-Math.PI * 0.15)
+  ctx.beginPath(); ctx.moveTo(ax - r * 0.05, ay - r * 0.42); ctx.lineTo(ax, ay + 0.02 * r); ctx.lineTo(ax + r * 0.4, ay - r * 0.12); ctx.stroke()
+  ctx.restore()
+}
+
 export function visibleOverlays(p: Project, t: number) {
   return p.layers.filter(isTextLayer).filter(o => t >= o.start && t < o.end)
 }
 
 export function drawOverlays(ctx: CanvasRenderingContext2D, p: Project, t: number, selectedId: string | null) {
   for (const o of visibleOverlays(p, t)) {
-    const b = boundsOf(ctx, o)
-    if (o.type === 'subtitle' && o.template === 'karaoke') {
-      drawKaraoke(ctx, o, t)
-      if (o.id === selectedId) { ctx.save(); ctx.strokeStyle = '#e8b152'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.restore() }
-      continue
-    }
-    if (o.type === 'graphic' && (o.template === 'glass' || o.template === 'pildora')) {
-      o.template === 'glass' ? drawGlass(ctx, o, t) : drawPildora(ctx, o, t)
-      if (o.id === selectedId) { ctx.save(); ctx.strokeStyle = '#e8b152'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.restore() }
-      continue
-    }
-    if (o.type === 'graphic' && o.template === 'lanzamiento') {
-      drawLanzamiento(ctx, o, t)
-      if (o.id === selectedId) { ctx.save(); ctx.strokeStyle = '#e8b152'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.strokeRect(b.x, b.y, b.w, b.h); ctx.restore() }
-      continue
-    }
-    ctx.save()
-    ctx.font = FONT(o)
-    ctx.textBaseline = 'middle'
-    if (o.type === 'subtitle') {
-      ctx.textAlign = 'center'
-      ctx.lineJoin = 'round'
-      ctx.lineWidth = o.size / 5
-      ctx.strokeStyle = 'rgba(0,0,0,.9)'
-      ctx.strokeText(o.text, o.transform.x * W, o.transform.y * H)
-      ctx.fillStyle = o.color
-      ctx.fillText(o.text, o.transform.x * W, o.transform.y * H)
-    } else {
-      // Gráfico animado: la barra entra deslizando y sale con fade.
-      const a = ease((t - o.start) / 0.45)
-      const out = Math.min(Math.max((o.end - t) / 0.3, 0), 1)
-      const dx = (1 - a) * -(b.x + b.w + 20)
-      ctx.globalAlpha = out
-      ctx.translate(dx, 0)
-      ctx.fillStyle = 'rgba(15,16,24,.88)'
-      ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 14); ctx.fill()
-      ctx.fillStyle = o.color
-      ctx.beginPath(); ctx.roundRect(b.x, b.y, 10, b.h, [14, 0, 0, 14]); ctx.fill()
-      const pulse = 0.65 + 0.35 * Math.sin((t - o.start) * 6)
-      ctx.globalAlpha = out * pulse
-      ctx.beginPath(); ctx.arc(b.x + b.w - o.size * 0.5, b.y + b.h / 2, o.size * 0.14, 0, Math.PI * 2); ctx.fill()
-      ctx.globalAlpha = out
-      ctx.fillStyle = '#fff'
-      ctx.textAlign = 'left'
-      ctx.fillText(o.text, b.x + o.size * 0.7, b.y + b.h / 2 + 1)
+    const g = geomOf(ctx, o), b = g.b
+    ctx.save(); aplicar(ctx, g)
+    if (o.type === 'subtitle' && o.template === 'karaoke') drawKaraoke(ctx, o, t)
+    else if (o.type === 'graphic' && o.template === 'glass') drawGlass(ctx, o, t)
+    else if (o.type === 'graphic' && o.template === 'pildora') drawPildora(ctx, o, t)
+    else if (o.type === 'graphic' && o.template === 'lanzamiento') drawLanzamiento(ctx, o, t)
+    else {
+      ctx.font = FONT(o)
+      ctx.textBaseline = 'middle'
+      if (o.type === 'subtitle') {
+        ctx.textAlign = 'center'
+        ctx.lineJoin = 'round'
+        ctx.lineWidth = o.size / 5
+        ctx.strokeStyle = 'rgba(0,0,0,.9)'
+        ctx.strokeText(o.text, o.transform.x * W, o.transform.y * H)
+        ctx.fillStyle = o.color
+        ctx.fillText(o.text, o.transform.x * W, o.transform.y * H)
+      } else {
+        // Gráfico animado: la barra entra deslizando y sale con fade.
+        const a = ease((t - o.start) / 0.45)
+        const out = Math.min(Math.max((o.end - t) / 0.3, 0), 1)
+        const dx = (1 - a) * -(b.x + b.w + 20)
+        ctx.globalAlpha = out
+        ctx.translate(dx, 0)
+        ctx.fillStyle = 'rgba(15,16,24,.88)'
+        ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, 14); ctx.fill()
+        ctx.fillStyle = o.color
+        ctx.beginPath(); ctx.roundRect(b.x, b.y, 10, b.h, [14, 0, 0, 14]); ctx.fill()
+        const pulse = 0.65 + 0.35 * Math.sin((t - o.start) * 6)
+        ctx.globalAlpha = out * pulse
+        ctx.beginPath(); ctx.arc(b.x + b.w - o.size * 0.5, b.y + b.h / 2, o.size * 0.14, 0, Math.PI * 2); ctx.fill()
+        ctx.globalAlpha = out
+        ctx.fillStyle = '#fff'
+        ctx.textAlign = 'left'
+        ctx.fillText(o.text, b.x + o.size * 0.7, b.y + b.h / 2 + 1)
+      }
     }
     ctx.restore()
-    if (o.id === selectedId) {
-      ctx.save()
-      ctx.strokeStyle = '#e8b152'; ctx.lineWidth = 2; ctx.setLineDash([8, 6])
-      ctx.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8)
-      ctx.restore()
-    }
+    if (o.id === selectedId) dibujarAsas(ctx, g)
   }
 }
 
 export function hitOverlay(ctx: CanvasRenderingContext2D, p: Project, t: number, x: number, y: number): TextLayer | null {
   const vis = visibleOverlays(p, t)
   for (let i = vis.length - 1; i >= 0; i--) {
-    const b = boundsOf(ctx, vis[i])
-    if (x >= b.x - 6 && x <= b.x + b.w + 6 && y >= b.y - 6 && y <= b.y + b.h + 6) return vis[i]
+    const g = geomOf(ctx, vis[i]), q = aLocal(g, x, y), b = g.b, tol = 6 / Math.min(g.sx, g.sy)
+    if (q.x >= b.x - tol && q.x <= b.x + b.w + tol && q.y >= b.y - tol && q.y <= b.y + b.h + tol) return vis[i]
   }
   return null
 }

@@ -7,7 +7,7 @@ import { H, W } from './constants'
 import { ico } from './icons'
 import { runBench } from './bench'
 import { loadAsset } from './media'
-import { hitOverlay } from './overlays'
+import { geomOf, hitAsa, hitOverlay, transformEfectivo, visibleOverlays } from './overlays'
 import { Player } from './player'
 import { Timeline } from './timeline'
 
@@ -207,30 +207,66 @@ export async function bootEditor(slug: string) {
     const r = cv.getBoundingClientRect()
     return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H }
   }
-  let pdrag: { id: string; dx: number; dy: number } | null = null
+  // "Aplicar a todos": mover/cambiar un subtítulo lo cambia en todos (casilla del inspector, activada por defecto)
+  const aplicarTodos = () => { try { return localStorage.getItem('gj.aplicarTodos') !== '0' } catch { return true } }
+  type Gesto = { kind: 'mover' | 'escalar' | 'estirar' | 'girar'; id: string; m0: { x: number; y: number }; t0: TextLayer['transform']; F0: { x: number; y: number }; rot: number; i: number; movido: boolean }
+  let gesto: Gesto | null = null
+  const capaVisible = () => {
+    const s = store.selection
+    return s?.type === 'layer' ? visibleOverlays(store.project, player.time()).find(l => l.id === s.id) : undefined
+  }
   cv.addEventListener('mousedown', e => {
-    const m = toVideo(e)
+    const m = toVideo(e), L = capaVisible()
+    if (L) {
+      const g = geomOf(player.ctx, L), a = hitAsa(g, m.x, m.y)
+      if (a?.tipo === 'borrar') { deleteSelected(); return }
+      if (a) {
+        store.beginTx()
+        gesto = { kind: a.tipo === 'girar' ? 'girar' : a.tipo === 'esquina' ? 'escalar' : 'estirar', id: L.id, m0: m, t0: transformEfectivo(g, L), F0: g.F, rot: g.rot, i: a.tipo === 'esquina' || a.tipo === 'lado' ? a.i : 0, movido: false }
+        return
+      }
+    }
     const o = hitOverlay(player.ctx, store.project, player.time(), m.x, m.y)
     if (!o) { store.select(null); return }
     store.select({ type: 'layer', id: o.id })
     store.beginTx()
-    pdrag = { id: o.id, dx: o.transform.x * W - m.x, dy: o.transform.y * H - m.y }
+    gesto = { kind: 'mover', id: o.id, m0: m, t0: transformEfectivo(geomOf(player.ctx, o), o), F0: geomOf(player.ctx, o).F, rot: 0, i: 0, movido: false }
   })
+  const CURSOR = ['ns-resize', 'ew-resize', 'ns-resize', 'ew-resize'], CURSOR_ESQ = ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize']
   cv.addEventListener('mousemove', e => {
-    const m = toVideo(e)
-    cv.style.cursor = hitOverlay(player.ctx, store.project, player.time(), m.x, m.y) ? 'move' : 'default'
+    if (gesto) return
+    const m = toVideo(e), L = capaVisible(), a = L ? hitAsa(geomOf(player.ctx, L), m.x, m.y) : null
+    cv.style.cursor = a ? (a.tipo === 'borrar' ? 'pointer' : a.tipo === 'girar' ? 'grab' : a.tipo === 'esquina' ? CURSOR_ESQ[a.i] : a.tipo === 'lado' ? CURSOR[a.i] : 'default') : hitOverlay(player.ctx, store.project, player.time(), m.x, m.y) ? 'move' : 'default'
   })
   window.addEventListener('mousemove', e => {
-    if (!pdrag) return
-    const m = toVideo(e)
+    if (!gesto) return
+    const m = toVideo(e), G = gesto, t0 = G.t0
+    if (!G.movido && Math.hypot(m.x - G.m0.x, m.y - G.m0.y) < 2) return
+    G.movido = true
+    const nt: Partial<TextLayer['transform']> = {}
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
+    if (G.kind === 'mover') { nt.x = clamp(t0.x + (m.x - G.m0.x) / W, 0, 1); nt.y = clamp(t0.y + (m.y - G.m0.y) / H, 0, 1) }
+    else if (G.kind === 'escalar') nt.scale = clamp(t0.scale * (Math.hypot(m.x - G.F0.x, m.y - G.F0.y) / Math.max(Math.hypot(G.m0.x - G.F0.x, G.m0.y - G.F0.y), 8)), 0.1, 6)
+    else if (G.kind === 'estirar') {
+      const c = Math.cos(-G.rot), s = Math.sin(-G.rot), loc = (p: { x: number; y: number }) => ({ x: (p.x - G.F0.x) * c - (p.y - G.F0.y) * s, y: (p.x - G.F0.x) * s + (p.y - G.F0.y) * c })
+      const a = loc(m), a0 = loc(G.m0)
+      if (G.i % 2) nt.sx = clamp((t0.sx ?? 1) * (Math.abs(a.x) / Math.max(Math.abs(a0.x), 8)), 0.15, 8)
+      else nt.sy = clamp((t0.sy ?? 1) * (Math.abs(a.y) / Math.max(Math.abs(a0.y), 8)), 0.15, 8)
+    } else {
+      let r = (t0.rotation || 0) + ((Math.atan2(m.y - G.F0.y, m.x - G.F0.x) - Math.atan2(G.m0.y - G.F0.y, G.m0.x - G.F0.x)) * 180) / Math.PI
+      r = ((r + 180) % 360 + 360) % 360 - 180
+      const q = Math.round(r / 45) * 45; if (Math.abs(r - q) < 3) r = q                      // se pega a 0°, 45°, 90°…
+      nt.rotation = r
+    }
     store.live(p => {
-      const l = p.layers.find(q => q.id === pdrag!.id)!
-      l.transform.x = Math.min(Math.max((m.x + pdrag!.dx) / W, 0), 1)
-      l.transform.y = Math.min(Math.max((m.y + pdrag!.dy) / H, 0), 1)
+      const l = p.layers.find(q => q.id === G.id) as TextLayer | undefined; if (!l) return
+      const objetivos = l.type === 'subtitle' && aplicarTodos() ? (p.layers.filter(q => q.type === 'subtitle') as TextLayer[]) : [l]
+      l.transform = { ...t0, ...nt }
+      for (const q of objetivos) if (q !== l) q.transform = { ...l.transform }
     })
     player.dirty = true
   })
-  window.addEventListener('mouseup', () => { if (pdrag) { store.endTx(); pdrag = null } })
+  window.addEventListener('mouseup', () => { if (gesto) { store.endTx(); gesto = null } })
 
   // --- menú de transición al tocar un corte entre dos clips ---------------------------------
   let cutMenu: HTMLElement | null = null
@@ -378,6 +414,13 @@ export async function bootEditor(slug: string) {
       const id = lay.id
       const T = (pr: Project) => pr.layers.find(o => o.id === id) as TextLayer
       insp.insertAdjacentHTML('beforeend', `<h3>${lay.type === 'subtitle' ? 'Subtítulo' : 'Gráfico'} ${id}</h3>`)
+      if (lay.type === 'subtitle') {
+        const lab = document.createElement('label'); lab.className = 'chk'; lab.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;margin:6px 0'
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = aplicarTodos(); cb.style.cssText = 'width:auto;margin:0'
+        cb.onchange = () => { try { localStorage.setItem('gj.aplicarTodos', cb.checked ? '1' : '0') } catch { /* sin almacenamiento */ } }
+        lab.append(cb, 'Aplicar a todos los subtítulos'); insp.append(lab)
+        insp.insertAdjacentHTML('beforeend', '<p class="hint" style="margin:0 0 8px">Mover, agrandar, estirar o girar un subtítulo lo hace en todos. Desmárcalo para cambiar solo este.</p>')
+      }
       field('Texto', input('text', lay.text, (pr, v) => { T(pr).text = v }))
       field('Tamaño', input('number', lay.size, (pr, v) => { T(pr).size = Math.max(10, parseFloat(v) || 10) }, { min: '10', max: '200' }))
       field('Color', input('color', lay.color, (pr, v) => { T(pr).color = v }))
