@@ -55,7 +55,7 @@ describe('fxAt y proyectos antiguos', () => {
     exec(s, { op: 'set_zoom', clip: c.id, zoom: { kind: 'punch', amount: 0.22, duration: 0.35 } })
     expect(fxAt(s.project.clips[0], undefined, 0, 2).zoom).toBeCloseTo(1.22)
     expect(fxAt(s.project.clips[0], undefined, 1, 2).zoom).toBeCloseTo(1.025)
-    expect(fxAt(undefined, undefined, 0.3, 1)).toEqual({ zoom: 1, shift: 0, flash: 0 })
+    expect(fxAt(undefined, undefined, 0.3, 1)).toEqual({ zoom: 1, shift: 0, shiftY: 0, flash: 0 })
   })
   it('un proyecto v1 con fx único se convierte en zoom + transición', () => {
     const s = three()
@@ -75,5 +75,15 @@ describe('fxAt y proyectos antiguos', () => {
     const back = parseProject(serialize(s.project))
     expect(back.clips[0].zoom).toEqual({ kind: 'pull', amount: 0.2 }); expect(back.clips[1].transition?.kind).toBe('dip')
     expect(back.music).toEqual({ assetId: 'a2', srcIn: 10.29, volume: 0.9, fadeOut: 0.9 }); expect(back.format).toMatchObject({ width: 1080, height: 1920 })
+  })
+})
+
+describe('temblor de cámara', () => {
+  it('deja margen de zoom, se mueve en x e y y entra/sale suave', () => {
+    const s = three(); exec(s, { op: 'set_zoom', clip: s.project.clips[0].id, zoom: { kind: 'temblor', amount: 0.2 } })
+    const c = s.project.clips[0], a = fxAt(c, undefined, 1.0, 2), b = fxAt(c, undefined, 1.013, 2), z = fxAt(c, undefined, 0, 2)
+    expect(a.zoom).toBeCloseTo(1.1); expect(z.shift).toBeCloseTo(0); expect(z.shiftY).toBeCloseTo(0)
+    expect(Math.abs(a.shift - b.shift) + Math.abs(a.shiftY - b.shiftY)).toBeGreaterThan(0.01)
+    expect(Math.abs(a.shift)).toBeLessThanOrEqual(0.86)
   })
 })
