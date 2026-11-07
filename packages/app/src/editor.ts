@@ -7,7 +7,7 @@ import { H, W } from './constants'
 import { ico } from './icons'
 import { runBench } from './bench'
 import { loadAsset } from './media'
-import { geomOf, hitAsa, hitOverlay, transformEfectivo, visibleOverlays } from './overlays'
+import { geomOf, guias, hitAsa, hitOverlay, transformEfectivo, visibleOverlays } from './overlays'
 import { Player } from './player'
 import { Timeline } from './timeline'
 
@@ -259,7 +259,17 @@ export async function bootEditor(slug: string) {
     G.movido = true
     const nt: Partial<TextLayer['transform']> = {}
     const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
-    if (G.kind === 'mover') { nt.x = clamp(t0.x + (m.x - G.m0.x) / W, 0, 1); nt.y = clamp(t0.y + (m.y - G.m0.y) / H, 0, 1) }
+    if (G.kind === 'mover') {
+      // imán al centro de la pantalla (Alt lo desactiva): el centro del elemento se pega a la mitad y se muestra la guía
+      let cx = G.F0.x + (m.x - G.m0.x), cy = G.F0.y + (m.y - G.m0.y)
+      const thr = 8 * (W / cv.getBoundingClientRect().width)
+      guias.x = guias.y = false
+      if (!e.altKey) {
+        if (Math.abs(cx - W / 2) < thr) { cx = W / 2; guias.x = true }
+        if (Math.abs(cy - H / 2) < thr) { cy = H / 2; guias.y = true }
+      }
+      nt.x = clamp(t0.x + (cx - G.F0.x) / W, 0, 1); nt.y = clamp(t0.y + (cy - G.F0.y) / H, 0, 1)
+    }
     else if (G.kind === 'escalar') nt.scale = clamp(t0.scale * (Math.hypot(m.x - G.F0.x, m.y - G.F0.y) / Math.max(Math.hypot(G.m0.x - G.F0.x, G.m0.y - G.F0.y), 8)), 0.1, 6)
     else if (G.kind === 'estirar') {
       const c = Math.cos(-G.rot), s = Math.sin(-G.rot), loc = (p: { x: number; y: number }) => ({ x: (p.x - G.F0.x) * c - (p.y - G.F0.y) * s, y: (p.x - G.F0.x) * s + (p.y - G.F0.y) * c })
@@ -280,7 +290,7 @@ export async function bootEditor(slug: string) {
     })
     player.dirty = true
   })
-  window.addEventListener('mouseup', () => { if (gesto) { store.endTx(); gesto = null } })
+  window.addEventListener('mouseup', () => { if (gesto) { store.endTx(); gesto = null; guias.x = guias.y = false; player.dirty = true } })
 
   // --- menú de transición al tocar un corte entre dos clips ---------------------------------
   let cutMenu: HTMLElement | null = null

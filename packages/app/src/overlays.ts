@@ -149,6 +149,16 @@ function dibujarAsas(ctx: CanvasRenderingContext2D, g: Geom) {
   ctx.restore()
 }
 
+/** Guías del imán al mover (solo en el editor): línea fina que cruza todo el video cuando el centro del elemento queda justo en el centro de la pantalla. */
+export const guias = { x: false, y: false }
+function dibujarGuias(ctx: CanvasRenderingContext2D) {
+  ctx.save(); ctx.strokeStyle = 'rgba(125,211,252,.95)'; ctx.lineWidth = Math.max(1.5, W * 0.0018); ctx.setLineDash([])
+  ctx.beginPath()
+  if (guias.x) { ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H) }
+  if (guias.y) { ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2) }
+  ctx.stroke(); ctx.restore()
+}
+
 export function visibleOverlays(p: Project, t: number) {
   return p.layers.filter(isTextLayer).filter(o => t >= o.start && t < o.end)
 }
@@ -195,6 +205,7 @@ export function drawOverlays(ctx: CanvasRenderingContext2D, p: Project, t: numbe
     ctx.restore()
     if (o.id === selectedId) dibujarAsas(ctx, g)
   }
+  if (selectedId && (guias.x || guias.y)) dibujarGuias(ctx)
 }
 
 export function hitOverlay(ctx: CanvasRenderingContext2D, p: Project, t: number, x: number, y: number): TextLayer | null {
