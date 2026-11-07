@@ -113,6 +113,10 @@ Los tiempos por palabra de Whisper se desfasan (hasta ~1 s), así que **no se us
 5. Si escribiste `proyecto.gojaguar` en disco con el editor abierto, **recarga la página del editor** (`location.reload()`): no detecta cambios externos, sigue mostrando (y guardando) la versión vieja. Comprueba con `JSON.parse(editor.serialize())`.
 6. Mirar a ojo 2-3 zonas (energía vs palabras) antes de decir "listo".
 
+## Momentos sin voz que hay que reconocer y cortar
+
+No basta con quitar silencios: el usuario también quiere cortar tramos en que **no habla** aunque haya ruido (toca el celular, mira a otro lado, ruido de caja o de micrófono). Al preparar una edición, lista los huecos sin voz ≥ 0,5 s (energía baja entre palabras alineadas, también al inicio y al final del video), mira fotogramas de cada uno (`ffmpeg … fps=5 … tile`) y corta los que no son habla; deja ~0,1 s antes de la siguiente palabra. Si cortas, mueve también las capas, los superpuestos y los tiempos `props.palabras` de los karaoke (`delete_range` no los mueve) y vuelve a pasar la revisión de sincronía.
+
 ## Recetas
 
 - **Silencios:** ya los quita el botón. A mano: `ffmpeg -i proxy -vn -af silencedetect=noise=-32dB:d=0.45 -f null -`.

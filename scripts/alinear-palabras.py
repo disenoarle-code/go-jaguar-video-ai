@@ -54,9 +54,16 @@ for q in range(len(REF)):                                              # palabra
     if t0[q] is None:
         a = next((r for r in range(q - 1, -1, -1) if t1[r] is not None), None); b = next((r for r in range(q + 1, len(REF)) if t0[r] is not None), None)
         t0[q] = t1[a] if a is not None else 0.0; t1[q] = t0[b] if b is not None else DUR
+# energía del audio (10 ms): el CTC corta la última palabra antes de una pausa muy pronto; se alarga hasta donde la voz realmente se apaga
+_n = len(audio) // 160
+_db = 20 * np.log10(np.sqrt((audio[:_n * 160].reshape(_n, 160) ** 2).mean(dim=1)) + 1e-9).numpy()
+def fin_de_voz(a, b, umbral=-36.0):
+    k, ka, kb = int(a * 100), int(a * 100), min(int(b * 100), _n - 1)
+    while k < kb and not (_db[k:k + 6] < umbral).all(): k += 1
+    return max(k / 100, a)
 for q in range(len(REF)):                                              # cada palabra dura hasta que empieza la siguiente, salvo pausa > 0,3 s
     nxt = t0[q + 1] if q + 1 < len(REF) else DUR
-    t1[q] = nxt if nxt - t1[q] < 0.3 else t1[q] + 0.12
+    t1[q] = nxt if nxt - t1[q] < 0.3 else min(max(t1[q] + 0.12, min(fin_de_voz(t1[q], nxt), t1[q] + 0.45)), nxt)
     t1[q] = max(t1[q], t0[q] + 0.05)
 json.dump([{'w': REF[q]['w'], 't0': round(float(t0[q]), 3), 't1': round(float(t1[q]), 3)} for q in range(len(REF))], open(salida, 'w'), ensure_ascii=False, indent=1)
 print(f'{len(REF)} palabras alineadas con {MODELO} → {salida}', file=sys.stderr)
