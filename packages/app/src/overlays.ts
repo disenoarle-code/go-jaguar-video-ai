@@ -70,8 +70,8 @@ export function boundsOf(ctx: CanvasRenderingContext2D, o: TextLayer): Rect {
 // --- geometría: posición, tamaño, estirado y giro que el usuario puede cambiar con el mouse -----------------
 export interface Pt { x: number; y: number }
 export interface Geom { b: Rect; D: Pt; F: Pt; rot: number; sx: number; sy: number; auto: boolean }
-/** Margen invisible (px del lienzo de 1080 de ancho) que respeta la posición INICIAL de lo que entra a pantalla; el usuario puede pasarse. */
-export const MARGEN = 4
+/** Margen invisible que respeta la posición INICIAL de lo que entra a pantalla (fracción del ancho / alto); el usuario puede pasarse a mano. */
+export const MARGEN_X = 0.05, MARGEN_Y = 0.03
 /** Plantillas: se dibujan en su lugar por defecto y `transform.x/y` = 0,5 significa "ahí"; mover suma un desplazamiento. */
 const esPlantilla = (o: TextLayer) => (o.type === 'subtitle' && o.template === 'karaoke') || (o.type === 'graphic' && ['lanzamiento', 'glass', 'pildora'].includes(o.template))
 const sinCambios = (t: TextLayer['transform']) => t.x === 0.5 && t.y === 0.5 && (t.scale ?? 1) === 1 && !t.rotation && (t.sx ?? 1) === 1 && (t.sy ?? 1) === 1
@@ -82,10 +82,10 @@ export function geomOf(ctx: CanvasRenderingContext2D, o: TextLayer): Geom {
   let F = pl ? { x: D.x + (t.x - 0.5) * W, y: D.y + (t.y - 0.5) * H } : { ...D }
   const k = t.scale || 1
   let sx = k * (t.sx ?? 1), sy = k * (t.sy ?? 1), auto = false
-  if (pl && sinCambios(t)) {                                       // posición inicial: dentro del margen de 4 px (si no cabe, se achica un poco)
-    const m = MARGEN * (W / 1080), s = Math.min(1, (W - 2 * m) / b.w, (H - 2 * m) / b.h)
+  if (pl && sinCambios(t)) {                                       // posición inicial: dentro del margen (si no cabe, se achica un poco)
+    const mx = MARGEN_X * W, my = MARGEN_Y * H, s = Math.min(1, (W - 2 * mx) / b.w, (H - 2 * my) / b.h)
     const hw = (b.w * s) / 2, hh = (b.h * s) / 2
-    const fx = Math.min(Math.max(F.x, m + hw), W - m - hw), fy = Math.min(Math.max(F.y, m + hh), H - m - hh)
+    const fx = Math.min(Math.max(F.x, mx + hw), W - mx - hw), fy = Math.min(Math.max(F.y, my + hh), H - my - hh)
     if (s < 1 || fx !== F.x || fy !== F.y) { auto = true; sx = sy = s; F = { x: fx, y: fy } }
   }
   return { b, D, F, rot: ((t.rotation || 0) * Math.PI) / 180, sx, sy, auto }
