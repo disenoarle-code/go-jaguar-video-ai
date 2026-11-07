@@ -289,7 +289,8 @@ function drawLanzamiento(ctx: CanvasRenderingContext2D, o: TextLayer, t: number)
 
 // ======================== Estilo "glass" (cristal) y subtítulos karaoke ========================
 
-const VIOLETA = '#8b5cf6', LAVANDA = '#c4b5fd'
+/** Color de marca de Go Jaguar (naranja): palabra resaltada del karaoke y acento por defecto de las plantillas. Cambia solo esta línea para cambiarlo en todo. */
+export const NARANJA = '#ff7a00', NARANJA_OSCURO = '#b34700'
 
 /** Subtítulos karaoke: las palabras del grupo se ven juntas; la que se dice se agranda y se pinta de lavanda con brillo, las dichas en blanco y las que faltan atenuadas. */
 function drawKaraoke(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
@@ -314,8 +315,8 @@ function drawKaraoke(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
       const k = activa ? 1 + 0.12 * Math.sin(Math.PI * Math.min((t - a) / Math.max(b - a, 0.05), 1)) + 0.04 : 1
       ctx.save(); ctx.translate(x + ws[i] / 2, y); ctx.scale(k, k)
       ctx.lineJoin = 'round'; ctx.lineWidth = size / 5; ctx.strokeStyle = 'rgba(14,6,36,.92)'; ctx.strokeText(w, -ws[i] / 2, 0)
-      if (activa) { ctx.shadowColor = VIOLETA; ctx.shadowBlur = size * 0.5 }
-      ctx.fillStyle = activa ? LAVANDA : '#fff'; ctx.globalAlpha = ent * (dicha || activa ? 1 : 0.55)
+      if (activa) { ctx.shadowColor = NARANJA; ctx.shadowBlur = size * 0.5 }
+      ctx.fillStyle = activa ? NARANJA : '#fff'; ctx.globalAlpha = ent * (dicha || activa ? 1 : 0.55)
       ctx.fillText(w, -ws[i] / 2, 0); ctx.restore()
       x += ws[i] + space
     }
@@ -326,14 +327,14 @@ function drawKaraoke(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
 /** Píldora de título: texto grande en mayúsculas sobre un degradado violeta, entra con rebote y se inclina un poco. */
 function drawPildora(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
   if (o.type !== 'graphic') return
-  const texto = (o.props?.texto ?? o.text).toUpperCase(), acc = o.props?.acento ?? VIOLETA
+  const texto = (o.props?.texto ?? o.text).toUpperCase(), acc = o.props?.acento ?? NARANJA
   const tt = t - o.start, dur = o.end - o.start, ent = easeBack(tt / 0.5), ex = clamp01((tt - (dur - 0.3)) / 0.3)
   const size = W * 0.074; ctx.save()
   ctx.font = FONT_BRAND(size, 900); ctx.letterSpacing = `${size * 0.03}px`; ctx.textBaseline = 'middle'
   const tw = ctx.measureText(texto).width, pw = tw + size * 1.6, ph = size * 1.75, cx = W / 2, cy = H * 0.105
   ctx.translate(cx, cy); const s = (0.55 + 0.45 * ent) * (1 - 0.1 * ex); ctx.scale(s, s); ctx.rotate((1 - Math.min(ent, 1)) * -0.12)
   ctx.globalAlpha = clamp01(tt / 0.2) * (1 - ex)
-  const g = ctx.createLinearGradient(-pw / 2, 0, pw / 2, 0); g.addColorStop(0, acc); g.addColorStop(1, '#5b21b6')
+  const g = ctx.createLinearGradient(-pw / 2, 0, pw / 2, 0); g.addColorStop(0, acc); g.addColorStop(1, NARANJA_OSCURO)
   ctx.shadowColor = acc; ctx.shadowBlur = size * 0.9
   ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(-pw / 2, -ph / 2, pw, ph, ph * 0.3); ctx.fill()
   ctx.shadowColor = 'transparent'; ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1.5, size * 0.04); ctx.stroke()
@@ -357,21 +358,21 @@ function dibujarIcono(c: CanvasRenderingContext2D | OffscreenCanvasRenderingCont
  */
 function drawGlass(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
   if (o.type !== 'graphic') return
-  const pr = o.props ?? {}, titulo = pr.titulo ?? o.text, sub = pr.sub ?? '', acc = pr.acento ?? VIOLETA, lado = pr.lado ?? 'izq', icono = pr.icono ?? 'chispa'
+  const pr = o.props ?? {}, titulo = pr.titulo ?? o.text, sub = pr.sub ?? '', acc = pr.acento ?? NARANJA, lado = pr.lado ?? 'izq', icono = pr.icono ?? 'chispa'
   const tt = t - o.start, dur = o.end - o.start, k = easeBack(tt / 0.7), ex = clamp01((tt - (dur - 0.4)) / 0.4)
   const dir = lado === 'der' ? -1 : 1
   const w = W * 0.58, h = w * 0.4, cw = Math.ceil(w * 2), chh = Math.ceil(h * 2)
   // 1) contenido a doble resolución
   const cv = new OffscreenCanvas(cw, chh), c = cv.getContext('2d')!
   c.scale(2, 2)
-  const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, 'rgba(255,255,255,.30)'); g.addColorStop(0.5, 'rgba(210,190,255,.14)'); g.addColorStop(1, 'rgba(255,255,255,.07)')
+  const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, 'rgba(255,255,255,.30)'); g.addColorStop(0.5, 'rgba(255,200,150,.14)'); g.addColorStop(1, 'rgba(255,255,255,.07)')
   c.fillStyle = g; c.beginPath(); c.roundRect(1, 1, w - 2, h - 2, h * 0.16); c.fill()
-  const bg = c.createLinearGradient(0, 0, w, h); bg.addColorStop(0, 'rgba(255,255,255,.85)'); bg.addColorStop(0.45, 'rgba(255,255,255,.18)'); bg.addColorStop(1, 'rgba(196,181,253,.55)')
+  const bg = c.createLinearGradient(0, 0, w, h); bg.addColorStop(0, 'rgba(255,255,255,.85)'); bg.addColorStop(0.45, 'rgba(255,255,255,.18)'); bg.addColorStop(1, 'rgba(255,160,80,.55)')
   c.strokeStyle = bg; c.lineWidth = 1.6; c.stroke()
   const brillo = c.createLinearGradient(0, 0, 0, h * 0.5); brillo.addColorStop(0, 'rgba(255,255,255,.22)'); brillo.addColorStop(1, 'rgba(255,255,255,0)')
   c.fillStyle = brillo; c.beginPath(); c.roundRect(3, 3, w - 6, h * 0.46, [h * 0.14, h * 0.14, h * 0.3, h * 0.3]); c.fill()
   const ir = h * 0.2, ix = h * 0.3 + ir * 0.15, iy = h / 2
-  const ig = c.createLinearGradient(ix - ir, iy - ir, ix + ir, iy + ir); ig.addColorStop(0, acc); ig.addColorStop(1, '#5b21b6')
+  const ig = c.createLinearGradient(ix - ir, iy - ir, ix + ir, iy + ir); ig.addColorStop(0, acc); ig.addColorStop(1, NARANJA_OSCURO)
   c.shadowColor = acc; c.shadowBlur = ir * 0.9; c.fillStyle = ig; c.beginPath(); c.arc(ix, iy, ir * 1.28, 0, Math.PI * 2); c.fill(); c.shadowBlur = 0
   dibujarIcono(c, icono, ix, iy, ir * 0.72)
   c.fillStyle = '#fff'; c.textBaseline = 'middle'; const tx = ix + ir * 1.28 + h * 0.14

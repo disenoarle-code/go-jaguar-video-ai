@@ -103,6 +103,10 @@ Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.jso
 
 ⌘B (o S) corta el clip en el cabezal; **Q** borra lo anterior del clip bajo el cabezal; **W** borra lo posterior; los botones `][` de la barra hacen lo mismo y muestran la tecla al pasar el mouse. Borrar y recortar bordes (`delete_range`, `trim`) **corren juntos** las capas, los tiempos de las palabras del karaoke (`props.palabras`) y los superpuestos/sonidos que vienen después (`rippleTodo` en `commands.ts`): no hace falta moverlos a mano.
 
+## Color de marca
+
+La palabra resaltada del karaoke y el acento por defecto de las plantillas usan el naranja de Go Jaguar: `NARANJA` (hoy `#ff7a00`, valor provisional: el repo no tiene el hex oficial) en `packages/app/src/overlays.ts`. Cámbialo solo ahí. Las tarjetas de cristal y píldoras 3D siguen disponibles como plantillas, pero el usuario no las quiere por defecto en los videos.
+
 ## Subtítulos y gráficos: mover, escalar, estirar, girar (en la vista previa)
 
 Al seleccionar un subtítulo o gráfico en el video aparece una caja con asas: arrastrar dentro = mover; esquinas = agrandar/achicar; barritas de los lados = estirar (`transform.sx`/`sy`); asa de abajo = girar (se pega a 0°/45°/90°…); × = borrar. En subtítulos hay una casilla **"Aplicar a todos los subtítulos"** (activada por defecto, `localStorage gj.aplicarTodos`): mover/escalar/girar uno lo hace en todos; desmarcada, solo el seleccionado. Las plantillas (`karaoke`, `glass`, `pildora`, `lanzamiento`) se dibujan en su lugar por defecto y `transform.x/y = 0,5` significa "ahí" (mover suma un desplazamiento); la posición INICIAL respeta un margen invisible del 5 % a los lados y 3 % arriba/abajo (`MARGEN_X`/`MARGEN_Y` en `overlays.ts`) y, si no cabe, se achica; al moverlo a mano puede salirse. La exportación aplica el mismo transform (mismo código `overlays.ts`).
