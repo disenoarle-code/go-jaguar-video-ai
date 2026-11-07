@@ -2,14 +2,17 @@ import type { TextLayer } from '@gojaguar/core'
 import { H, W } from './constants'
 
 /**
- * Escenas animadas con seudo-3D dibujadas con código (sin texto legible): el muñeco de Claude y una persona trabajando frente a un Mac.
- * Todo sale solo del tiempo `t` (nada de azar entre fotogramas), así la vista previa y el MP4 exportado coinciden.
- * Capa gráfica con `template: 'escena'` y `props`: tipo ('claude' | 'trabajo'), humor ('triste' | 'curioso' | 'feliz'), pantalla ('editor' | 'codigo'), lado ('izq' | 'der' | 'centro').
+ * Escenas animadas con seudo-3D dibujadas con código (sin texto legible). Todo sale solo del tiempo `t` (nada de azar entre fotogramas),
+ * así la vista previa y el MP4 exportado coinciden. Capa gráfica con `template: 'escena'` y `props`:
+ *  - tipo 'claude'  : la chispa de Claude (rayos naranja con carita), enorme y con energía. `humor`: 'curioso' | 'loco' | 'triste' | 'feliz' | 'locura'
+ *                     ('locura' = se vuelve loca y al final se deshace en tristeza). `lado`: 'izq' | 'der' | 'centro'; `tam`: factor de tamaño (1 = casi todo el ancho).
+ *  - tipo 'pantalla': una pantalla a cuadro completo con un editor de video (`pantalla:'editor'`) o código (`pantalla:'codigo'`) en tiempo real,
+ *                     con cámara que se mueve, golpes de zoom y glitch al entrar y salir.
  */
-const NARANJA_CLAUDE = '#d97757'
 const clamp01 = (x: number) => Math.min(Math.max(x, 0), 1)
 const easeOut3 = (x: number) => 1 - Math.pow(1 - clamp01(x), 3)
-const easeBack = (x: number) => { const c1 = 1.70158, c3 = c1 + 1, v = clamp01(x); return 1 + c3 * Math.pow(v - 1, 3) + c1 * Math.pow(v - 1, 2) }
+const easeInOut = (x: number) => { const v = clamp01(x); return v < 0.5 ? 4 * v * v * v : 1 - Math.pow(-2 * v + 2, 3) / 2 }
+const elastico = (x: number) => { const v = clamp01(x); return v === 0 ? 0 : v === 1 ? 1 : Math.pow(2, -9 * v) * Math.sin((v * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1 }
 const alea = (i: number) => { const s = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return s - Math.floor(s) }      // azar determinista
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
@@ -17,16 +20,20 @@ const lienzos = new Map<string, OffscreenCanvas>()
 function lienzo(clave: string, w: number, h: number) {
   let c = lienzos.get(clave)
   if (!c || c.width !== w || c.height !== h) { c = new OffscreenCanvas(w, h); lienzos.set(clave, c) }
-  const x = c.getContext('2d')!; x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, w, h); return { c, x }
+  const x = c.getContext('2d')!; x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1; x.clearRect(0, 0, w, h); return { c, x }
+}
+const mezcla = (a: string, b: string, k: number) => {
+  const p = (s: string) => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)), A = p(a), B = p(b)
+  return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * clamp01(k)).toString(16).padStart(2, '0')).join('')
 }
 
 export interface Caja { x: number; y: number; w: number; h: number }
 /** Caja de reposo de la escena (para hit-test, asas y margen). */
 export function cajaEscena(o: TextLayer): Caja {
   const pr = o.type === 'graphic' ? o.props ?? {} : {}
-  if ((pr.tipo ?? 'claude') === 'trabajo') { const w = W * 0.94, h = w * 0.82; return { x: W * 0.5 - w / 2, y: H * 0.30 - h / 2, w, h } }
-  const lado = pr.lado ?? 'der', w = W * 0.66
-  return { x: (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W - w / 2, y: H * 0.2 - w / 2, w, h: w }
+  if ((pr.tipo ?? 'claude') === 'pantalla') return { x: 0, y: 0, w: W, h: H }
+  const lado = pr.lado ?? 'centro', w = W * 0.92 * (parseFloat(pr.tam ?? '1') || 1)
+  return { x: (lado === 'izq' ? 0.36 : lado === 'der' ? 0.64 : 0.5) * W - w / 2, y: H * 0.3 - w / 2, w, h: w }
 }
 
 /** Proyecta un lienzo con perspectiva girándolo sobre el eje vertical (tiras), como las tarjetas de cristal. */
@@ -42,192 +49,230 @@ function proyectar(ctx: Ctx, cv: OffscreenCanvas, cx: number, cy: number, w: num
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// MUÑECO DE CLAUDE
+// CHISPA DE CLAUDE
 // ---------------------------------------------------------------------------------------------------------------------------
-function pintarClaude(c: Ctx, S: number, t: number, humor: string) {
-  const triste = humor === 'triste' ? easeOut3((t - 0.5) / 0.7) : 0
-  const feliz = humor === 'feliz' ? easeOut3((t - 0.3) / 0.4) : 0
-  const resp = Math.sin(t * 3.1) * 0.008 * S                       // respira
-  const temblor = triste > 0.4 ? Math.sin(t * 46) * 0.0035 * S * triste : 0
-  const salto = feliz ? -Math.abs(Math.sin(t * 6)) * 0.05 * S * feliz : 0
-  const bx = S * 0.5 + temblor, by = S * 0.54 + triste * 0.03 * S + resp + salto
-  const bw = S * 0.62, bh = S * 0.40 * (1 - 0.07 * triste)
-  // resplandor y sombra en el suelo
-  const rg = c.createRadialGradient(S / 2, S * 0.55, 0, S / 2, S * 0.55, S * 0.55); rg.addColorStop(0, humor === 'triste' ? 'rgba(120,150,255,.28)' : 'rgba(255,140,80,.35)'); rg.addColorStop(1, 'rgba(0,0,0,0)')
+interface Humor { loco: number; triste: number; feliz: number; curioso: number }
+
+/** Los rayos de la chispa: afilados, de largos distintos y un poco curvos, con degradado de la punta al centro. */
+function rayos(c: Ctx, cx: number, cy: number, S: number, spin: number, largo: number, col0: string, col1: string, caida: number, t: number, alfa: number) {
+  const n = 14
+  c.save(); c.globalAlpha = alfa
+  for (let i = 0; i < n; i++) {
+    let dx = Math.cos((i / n) * Math.PI * 2 + spin), dy = Math.sin((i / n) * Math.PI * 2 + spin)
+    dy += caida * 0.95; const m = Math.hypot(dx, dy); dx /= m; dy /= m                                              // la gravedad los dobla hacia abajo
+    const L = S * (0.2 + 0.2 * alea(i * 1.7)) * largo * (1 + 0.1 * Math.sin(t * 6 + i * 1.3)), ancho = S * 0.045 * (0.8 + 0.5 * alea(i + 5))
+    const nx = -dy, ny = dx, tx = cx + dx * (S * 0.1 + L), ty = cy + dy * (S * 0.1 + L)
+    const g = c.createLinearGradient(cx, cy, tx, ty); g.addColorStop(0, col1); g.addColorStop(1, col0)
+    c.fillStyle = g; c.beginPath()
+    c.moveTo(cx + dx * S * 0.07 + nx * ancho, cy + dy * S * 0.07 + ny * ancho)
+    c.quadraticCurveTo(cx + dx * (S * 0.1 + L * 0.55) + nx * ancho * 0.55, cy + dy * (S * 0.1 + L * 0.55) + ny * ancho * 0.55, tx, ty)
+    c.quadraticCurveTo(cx + dx * (S * 0.1 + L * 0.55) - nx * ancho * 0.55, cy + dy * (S * 0.1 + L * 0.55) - ny * ancho * 0.55, cx + dx * S * 0.07 - nx * ancho, cy + dy * S * 0.07 - ny * ancho)
+    c.closePath(); c.fill()
+  }
+  c.restore()
+}
+
+function estrella(c: Ctx, x: number, y: number, r: number, rot: number) {
+  c.beginPath()
+  for (let i = 0; i < 8; i++) { const a = rot + (i * Math.PI) / 4, rr = i % 2 === 0 ? r : r * 0.28; c.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)) }
+  c.closePath(); c.fill()
+}
+
+function pintarChispa(c: Ctx, S: number, t: number, h: Humor) {
+  const cx0 = S / 2, cy0 = S / 2
+  const jit = h.loco > 0.05 ? h.loco * S * 0.018 : 0, f = Math.floor(t * 24)
+  const cx = cx0 + (alea(f * 3.1) - 0.5) * 2 * jit, cy = cy0 + (alea(f * 5.7) - 0.5) * 2 * jit + h.triste * S * 0.03
+  const pulso = 1 + 0.06 * Math.sin(t * (6 + h.loco * 14 + h.feliz * 6)) + h.feliz * 0.07 * Math.abs(Math.sin(t * 7))
+  const spin = t * (0.45 + h.loco * 7 + h.curioso * 0.3) * (h.triste > 0.5 ? 0.2 : 1)
+  const largo = pulso * (1 - 0.42 * h.triste) * (1 + 0.25 * h.loco)
+  const col0 = mezcla('#ff7a00', '#7a8fc8', h.triste), col1 = mezcla('#ffe0b8', '#c9d4f0', h.triste)
+  // resplandor
+  const rg = c.createRadialGradient(cx0, cy0, 0, cx0, cy0, S * 0.5); rg.addColorStop(0, h.triste > 0.5 ? 'rgba(120,150,255,.38)' : 'rgba(255,130,40,.55)'); rg.addColorStop(1, 'rgba(255,130,40,0)')
   c.fillStyle = rg; c.fillRect(0, 0, S, S)
-  c.fillStyle = 'rgba(0,0,0,.35)'; c.beginPath(); c.ellipse(S / 2, S * 0.84, bw * 0.62 * (1 + salto / S), S * 0.035, 0, 0, Math.PI * 2); c.fill()
-  const cuerpo = (dx: number, dy: number, col: string) => {
-    c.fillStyle = col
-    c.beginPath(); c.roundRect(bx - bw / 2 + dx, by - bh / 2 + dy, bw, bh, S * 0.04); c.fill()                         // cuerpo
-    const brazo = (lado: number) => {                                                                              // brazos: caídos si está triste
-      const ang = (0.35 + triste * 0.5 - feliz * 1.1 * Math.abs(Math.sin(t * 6))) * lado
-      c.save(); c.translate(bx + lado * (bw / 2) + dx, by + dy - bh * 0.05); c.rotate(ang); c.beginPath(); c.roundRect(lado > 0 ? -S * 0.005 : -S * 0.075, -S * 0.02, S * 0.08, S * 0.11, S * 0.025); c.fill(); c.restore()
-    }
-    brazo(1); brazo(-1)
-    for (let i = 0; i < 4; i++) { c.beginPath(); c.roundRect(bx - bw * 0.36 + i * bw * 0.24 + dx, by + bh / 2 - S * 0.005 + dy, S * 0.055, S * 0.085, S * 0.015); c.fill() }   // patitas
+  // copias fantasma (separación de color) cuando está loca
+  if (h.loco > 0.1) for (const [dx, col] of [[-1, 'rgba(0,255,255,.55)'], [1, 'rgba(255,0,200,.55)']] as const) {
+    c.save(); c.globalCompositeOperation = 'lighter'
+    rayos(c, cx + dx * h.loco * S * 0.035, cy, S, spin + dx * 0.05, largo, col, col, 0, t, 0.7); c.restore()
   }
-  cuerpo(S * 0.03, S * 0.03, '#8a3d22'); cuerpo(S * 0.016, S * 0.016, '#b4532f')                                       // extrusión (profundidad)
-  cuerpo(0, 0, NARANJA_CLAUDE)
-  const g = c.createLinearGradient(0, by - bh / 2, 0, by + bh / 2); g.addColorStop(0, 'rgba(255,255,255,.32)'); g.addColorStop(0.45, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(0,0,0,.22)')
-  c.fillStyle = g; c.beginPath(); c.roundRect(bx - bw / 2, by - bh / 2, bw, bh, S * 0.04); c.fill()
+  rayos(c, cx, cy, S, spin, largo, col0, col1, h.triste * 0.9, t, 1)
   // cara
-  const ey = by - bh * 0.1 + triste * 0.02 * S, ex = bw * 0.2
-  const mira = humor === 'curioso' ? Math.sin(t * 2.2) * S * 0.012 : 0, parpadeo = (t % 3.2) < 0.12 ? 0.15 : 1
-  c.fillStyle = '#2a1410'
-  for (const l of [-1, 1]) {
-    const eh = S * 0.085 * parpadeo * (1 - 0.35 * triste) * (feliz ? 0.6 : 1)
-    c.beginPath(); c.roundRect(bx + l * ex - S * 0.022 + mira, ey - eh / 2, S * 0.044, Math.max(eh, S * 0.01), S * 0.012); c.fill()
-    if (triste > 0.05) {                                                                                           // cejas caídas hacia afuera
-      c.strokeStyle = '#2a1410'; c.lineWidth = S * 0.014; c.lineCap = 'round'
-      c.beginPath(); c.moveTo(bx + l * (ex + S * 0.05), ey - S * 0.075 + triste * S * 0.02); c.lineTo(bx + l * (ex - S * 0.045), ey - S * 0.075 - triste * S * 0.035); c.stroke()
+  const r = S * 0.125 * pulso
+  const dg = c.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r); dg.addColorStop(0, mezcla('#ffb066', '#aebbe0', h.triste)); dg.addColorStop(1, mezcla('#ff6a00', '#6a7db8', h.triste))
+  c.fillStyle = dg; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill()
+  const ex = r * 0.42, ey = cy - r * 0.12
+  c.fillStyle = '#fff'; c.strokeStyle = '#2a1410'; c.lineCap = 'round'; c.lineWidth = r * 0.12
+  if (h.loco > 0.4) {                                                                                                   // ojos en espiral y boca ondulada
+    for (const l of [-1, 1]) { c.beginPath(); for (let a = 0; a < 18; a += 0.35) { const rr = r * 0.03 * a; c.lineTo(cx + l * ex + Math.cos(a + t * 12 * l) * rr * 0.9, ey + Math.sin(a + t * 12 * l) * rr * 0.9) } c.stroke() }
+    c.beginPath(); for (let i = 0; i <= 12; i++) { const x = cx - r * 0.45 + (i / 12) * r * 0.9, y = cy + r * 0.5 + Math.sin(i * 1.6 + t * 20) * r * 0.1; i ? c.lineTo(x, y) : c.moveTo(x, y) } c.stroke()
+  } else if (h.feliz > 0.4) {                                                                                           // ojos felices ^ ^ y gran sonrisa
+    for (const l of [-1, 1]) { c.beginPath(); c.arc(cx + l * ex, ey + r * 0.1, r * 0.17, Math.PI * 1.1, Math.PI * 1.9); c.stroke() }
+    c.fillStyle = '#2a1410'; c.beginPath(); c.arc(cx, cy + r * 0.22, r * 0.4, 0.05 * Math.PI, 0.95 * Math.PI); c.closePath(); c.fill()
+    c.fillStyle = '#ff6f80'; c.beginPath(); c.ellipse(cx, cy + r * 0.62, r * 0.17, r * 0.1, 0, 0, Math.PI); c.fill()
+  } else {                                                                                                              // ojos normales / tristes (con brillo) y lágrimas
+    const mx = h.curioso * Math.sin(t * 2.2) * r * 0.08, blink = (t % 3.4) < 0.1 ? 0.2 : 1
+    for (const l of [-1, 1]) {
+      c.fillStyle = '#fff'; c.beginPath(); c.ellipse(cx + l * ex, ey, r * 0.2, r * 0.25 * blink * (1 + 0.15 * h.triste), 0, 0, Math.PI * 2); c.fill()
+      c.fillStyle = '#2a1410'; c.beginPath(); c.arc(cx + l * ex + mx * 2, ey + h.triste * r * 0.05, r * 0.11 * (1 + 0.3 * h.triste), 0, Math.PI * 2); c.fill()
+      c.fillStyle = '#fff'; c.beginPath(); c.arc(cx + l * ex + mx * 2 - r * 0.035, ey - r * 0.04, r * 0.035, 0, Math.PI * 2); c.fill()
+      if (h.triste > 0.1) { c.strokeStyle = '#2a1410'; c.lineWidth = r * 0.1; c.beginPath(); c.moveTo(cx + l * (ex + r * 0.26), ey - r * 0.33 + h.triste * r * 0.04); c.lineTo(cx + l * (ex - r * 0.2), ey - r * 0.33 - h.triste * r * 0.15); c.stroke() }
     }
+    c.strokeStyle = '#2a1410'; c.lineWidth = r * 0.1
+    if (h.triste > 0.1) { c.beginPath(); c.arc(cx, cy + r * 0.75, r * 0.3, Math.PI * 1.15, Math.PI * 1.85); c.stroke() }
+    else { c.beginPath(); c.arc(cx, cy + r * 0.3, r * 0.28, 0.2 * Math.PI, 0.8 * Math.PI); c.stroke() }
   }
-  if (triste > 0.1) {                                                                                              // boca triste y lágrima
-    c.strokeStyle = '#2a1410'; c.lineWidth = S * 0.012; c.beginPath(); c.arc(bx, ey + S * 0.115, S * 0.03, Math.PI * 1.15, Math.PI * 1.85); c.stroke()
-    const p = ((t - 0.9) % 1.3) / 1.3
-    if (t > 0.9) { c.fillStyle = 'rgba(150,210,255,.9)'; const tx = bx - ex - S * 0.01, ty = ey + S * 0.03 + p * S * 0.2; c.beginPath(); c.ellipse(tx, ty, S * 0.011, S * 0.017, 0, 0, Math.PI * 2); c.fill() }
-  } else if (feliz > 0.1) { c.strokeStyle = '#2a1410'; c.lineWidth = S * 0.012; c.beginPath(); c.arc(bx, ey + S * 0.06, S * 0.03, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke() }
-  if (triste > 0.3) {                                                                                              // nubecita de lluvia sobre la cabeza
-    const nx = bx + S * 0.02, ny = by - bh / 2 - S * 0.14, a = clamp01(triste)
-    c.fillStyle = `rgba(70,80,110,${0.9 * a})`
-    for (const [dx, dy, r] of [[-0.07, 0.01, 0.06], [0, -0.02, 0.075], [0.075, 0.012, 0.055], [0.01, 0.025, 0.07]]) { c.beginPath(); c.arc(nx + dx * S, ny + dy * S, r * S, 0, Math.PI * 2); c.fill() }
-    c.strokeStyle = `rgba(160,200,255,${0.85 * a})`; c.lineWidth = S * 0.008; c.lineCap = 'round'
-    for (let i = 0; i < 6; i++) { const f = (t * 1.6 + i * 0.37) % 1, x = nx + (i - 2.5) * S * 0.035; c.beginPath(); c.moveTo(x, ny + S * 0.06 + f * S * 0.12); c.lineTo(x - S * 0.004, ny + S * 0.075 + f * S * 0.12); c.stroke() }
+  if (h.triste > 0.1) {                                                                                                 // chorros de lágrimas
+    c.fillStyle = 'rgba(160,215,255,.92)'
+    for (let i = 0; i < 10; i++) {
+      const l = i % 2 ? 1 : -1, fase = (t * 1.5 + i * 0.173) % 1, x = cx + l * ex * (1.1 + 0.15 * alea(i)), y = ey + r * 0.2 + fase * S * 0.4
+      c.globalAlpha = (1 - fase) * clamp01(h.triste * 1.5); c.beginPath(); c.ellipse(x, y, r * 0.06, r * 0.1, 0, 0, Math.PI * 2); c.fill()
+    }
+    c.globalAlpha = 1
+  }
+  // chispas y confeti que salen disparados
+  if (h.loco > 0.1 || h.feliz > 0.1) {
+    const n = h.feliz > 0.1 ? 34 : 20, inten = Math.max(h.loco, h.feliz)
+    for (let i = 0; i < n; i++) {
+      const ciclo = 0.9 + alea(i) * 0.7, f2 = ((t + alea(i + 9) * 3) % ciclo) / ciclo, a = alea(i + 2) * Math.PI * 2
+      const rad = S * (0.18 + f2 * 0.42), x = cx0 + Math.cos(a) * rad, y = cy0 + Math.sin(a) * rad + (h.feliz > 0.1 ? f2 * f2 * S * 0.12 : 0)
+      c.globalAlpha = (1 - f2) * inten
+      c.fillStyle = h.feliz > 0.1 ? ['#ffd166', '#ff7a00', '#7bdff2', '#ff5d8f', '#b2f7ef'][i % 5] : (i % 2 ? '#ffe9b0' : '#ff9a3c')
+      if (h.feliz > 0.1 && i % 3 === 0) { c.save(); c.translate(x, y); c.rotate(t * 6 + i); c.fillRect(-S * 0.012, -S * 0.02, S * 0.024, S * 0.04); c.restore() } else estrella(c, x, y, S * (0.014 + 0.018 * alea(i + 4)), t * 4 + i)
+    }
+    c.globalAlpha = 1
   }
 }
 
-function dibujarClaude(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
+function humorEn(humor: string, tt: number, dur: number): Humor {
+  const h: Humor = { loco: 0, triste: 0, feliz: 0, curioso: 0 }
+  if (humor === 'loco') h.loco = clamp01(tt / 0.6)
+  else if (humor === 'triste') h.triste = easeOut3((tt - 0.4) / 0.6)
+  else if (humor === 'feliz') h.feliz = easeOut3((tt - 0.1) / 0.3)
+  else if (humor === 'locura') { const s = easeInOut((tt - (dur - 1.5)) / 0.7); h.loco = clamp01(tt / 0.9) * (1 - s); h.triste = s }
+  else h.curioso = 1
+  return h
+}
+
+function dibujarChispa(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
   if (o.type !== 'graphic') return
-  const pr = o.props ?? {}, b = cajaEscena(o), S = Math.round(b.w * 1.5)
-  const tt = t - o.start, dur = o.end - o.start, k = easeBack(tt / 0.75), ex = clamp01((tt - (dur - 0.45)) / 0.45), lado = pr.lado ?? 'der'
-  const { c, x } = lienzo('claude', S, S); pintarClaude(x, S, tt, pr.humor ?? 'triste')
-  const dir = lado === 'izq' ? -1 : 1
-  const th = dir * ((1 - Math.min(k, 1.1)) * 1.4 + ex * 1.2) + Math.sin(tt * 1.6) * 0.07 + dir * -0.16
-  const cx = b.x + b.w / 2 + dir * ex * W * 0.08, cy = b.y + b.h / 2 + Math.sin(tt * 2.3) * H * 0.006 + (1 - Math.min(k, 1)) * H * 0.04
-  proyectar(ctx, c, cx, cy, b.w, b.h, th, clamp01(tt / 0.2) * (1 - ex), 0.45 + 0.55 * Math.min(k, 1.08))
+  const pr = o.props ?? {}, b = cajaEscena(o), S = Math.round(b.w * 0.9)
+  const tt = t - o.start, dur = o.end - o.start, ex = clamp01((tt - (dur - 0.35)) / 0.35), lado = pr.lado ?? 'centro'
+  const { c, x } = lienzo('chispa', S, S); pintarChispa(x, S, tt, humorEn(pr.humor ?? 'curioso', tt, dur))
+  const k = elastico(tt / 0.7)
+  const giro = (1 - Math.min(k, 1)) * 5 + Math.sin(tt * 2) * 0.22 + (lado === 'izq' ? 0.1 : lado === 'der' ? -0.1 : 0)
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2 + Math.sin(tt * 3.2) * H * 0.008
+  const escala = k * (1 + ex * 0.9), alfa = clamp01(tt / 0.1) * (1 - ex)
+  // onda de choque al entrar
+  const ring = clamp01(tt / 0.55)
+  if (ring > 0 && ring < 1) { ctx.save(); ctx.strokeStyle = `rgba(255,170,80,${0.8 * (1 - ring)})`; ctx.lineWidth = W * 0.03 * (1 - ring); ctx.beginPath(); ctx.arc(cx, cy, b.w * 0.55 * easeOut3(ring), 0, Math.PI * 2); ctx.stroke(); ctx.restore() }
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(giro); ctx.translate(-cx, -cy)
+  proyectar(ctx, c, cx, cy, b.w, b.w, Math.sin(tt * 2.6) * 0.28, alfa, escala)
+  ctx.restore()
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// PERSONA TRABAJANDO EN UN MAC
+// PANTALLA A CUADRO COMPLETO (editor de video / código)
 // ---------------------------------------------------------------------------------------------------------------------------
-function pintarPantalla(c: Ctx, w: number, h: number, t: number, tipo: string) {
-  c.fillStyle = '#0d0f17'; c.fillRect(0, 0, w, h)
-  const luces = ['#ff5f57', '#febc2e', '#28c840']; luces.forEach((col, i) => { c.fillStyle = col; c.beginPath(); c.arc(h * 0.05 + i * h * 0.05, h * 0.05, h * 0.016, 0, Math.PI * 2); c.fill() })
-  if (tipo === 'codigo') {
-    c.fillStyle = '#141826'; c.fillRect(0, h * 0.1, w * 0.18, h * 0.9)
-    for (let i = 0; i < 9; i++) { c.fillStyle = i === 2 ? '#3b4a7a' : '#242a40'; c.fillRect(w * 0.02, h * 0.15 + i * h * 0.07, w * (0.06 + 0.06 * alea(i)), h * 0.025) }
-    const cols = ['#ff9e64', '#7aa2f7', '#9ece6a', '#bb9af7', '#e0af68', '#c0caf5']
-    const nl = 13, cps = 46, total = t * cps                         // caracteres por segundo
-    let usado = 0
-    for (let l = 0; l < nl; l++) {
-      const ind = Math.floor(alea(l * 3.1) * 3) * 0.05, y = h * 0.14 + l * h * 0.062
-      const segs = 2 + Math.floor(alea(l + 9) * 4); let x = w * (0.22 + ind)
-      c.fillStyle = '#3a4160'; c.fillRect(w * 0.195, y, w * 0.012, h * 0.022)
-      for (let s = 0; s < segs; s++) {
-        const largo = 4 + Math.floor(alea(l * 7 + s) * 10), vis = clamp01((total - usado) / largo); usado += largo
-        c.fillStyle = cols[Math.floor(alea(l * 5 + s * 2.3) * cols.length)]
-        const ww = w * 0.0145 * largo * vis; if (ww > 0) { c.beginPath(); c.roundRect(x, y, ww, h * 0.024, 3); c.fill() }
-        x += w * 0.0145 * largo + w * 0.012
-      }
+const BW = 540, BH = 960
+
+function flecha(c: Ctx, x: number, y: number, s: number) {
+  c.fillStyle = '#fff'; c.strokeStyle = '#111'; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + s * 1.5); c.lineTo(x + s * 0.4, y + s * 1.15); c.lineTo(x + s * 0.7, y + s * 1.75); c.lineTo(x + s * 0.95, y + s * 1.6); c.lineTo(x + s * 0.65, y + s * 1.05); c.lineTo(x + s * 1.1, y + s * 1.05); c.closePath(); c.fill(); c.stroke()
+}
+
+function pintarEditor(c: Ctx, t: number) {
+  c.fillStyle = '#0d0f17'; c.fillRect(0, 0, BW, BH)
+  for (let i = 0; i < 3; i++) { c.fillStyle = ['#ff5f57', '#febc2e', '#28c840'][i]; c.beginPath(); c.arc(22 + i * 20, 22, 6, 0, Math.PI * 2); c.fill() }
+  // vista previa
+  const py = 48, ph = 400, hue = (t * 40) % 360
+  const g = c.createLinearGradient(16, py, BW - 16, py + ph); g.addColorStop(0, `hsl(${hue},70%,28%)`); g.addColorStop(1, `hsl(${(hue + 80) % 360},75%,40%)`)
+  c.fillStyle = g; c.beginPath(); c.roundRect(16, py, BW - 32, ph, 14); c.fill()
+  c.fillStyle = 'rgba(255,255,255,.9)'; c.beginPath(); c.arc(BW / 2 + Math.sin(t * 2.3) * 120, py + ph * 0.5 + Math.cos(t * 3.1) * 60, 46, 0, Math.PI * 2); c.fill()
+  c.fillStyle = 'rgba(0,0,0,.25)'; c.beginPath(); c.arc(BW / 2 + Math.sin(t * 2.3 + 1) * 140, py + ph * 0.6, 90, 0, Math.PI * 2); c.fill()
+  // herramientas
+  for (let i = 0; i < 7; i++) { const on = Math.floor(t * 4) % 7 === i; c.fillStyle = on ? '#ff7a00' : '#222738'; c.beginPath(); c.roundRect(16 + i * 74, 470, 62, 46, 10); c.fill(); c.fillStyle = on ? '#fff' : '#4a5270'; c.beginPath(); c.arc(16 + i * 74 + 31, 493, 9, 0, Math.PI * 2); c.fill() }
+  // línea de tiempo: los clips entran rebotando
+  const ty = 540; c.fillStyle = '#10131e'; c.fillRect(0, ty, BW, BH - ty)
+  for (let i = 0; i < 40; i++) { c.fillStyle = '#2f3652'; c.fillRect(14 + i * 13, ty + 12, 1.5, i % 4 === 0 ? 14 : 7) }
+  const colores = ['#ff7a00', '#2ec4b6', '#9b5de5', '#4cc9f0', '#f15bb5', '#90be6d']
+  for (let r = 0; r < 5; r++) {
+    let x = 14 - ((t * (14 + r * 6)) % 60)
+    for (let i = 0; i < 9; i++) {
+      const w0 = 40 + alea(r * 9 + i) * 90, ap = clamp01((t * 1.7 - (r * 0.15 + i * 0.1)) / 0.3), rebote = ap < 1 ? Math.sin(ap * Math.PI) * 10 : 0
+      c.fillStyle = colores[(r * 3 + i) % colores.length]; c.beginPath(); c.roundRect(x, ty + 40 + r * 64 - rebote, w0 * easeOut3(ap), 52, 9); c.fill()
+      if (r === 1) { c.fillStyle = 'rgba(0,0,0,.28)'; for (let k = 0; k < w0 / 6 * easeOut3(ap); k++) c.fillRect(x + 4 + k * 6, ty + 66 - Math.abs(Math.sin(k * 1.3 + t * 9)) * 18, 3, Math.abs(Math.sin(k * 1.3 + t * 9)) * 30 + 4) }
+      x += w0 + 8
     }
-    if (Math.floor(t * 2.2) % 2 === 0) { c.fillStyle = '#e8e8e8'; c.fillRect(w * 0.5 + Math.sin(t) * w * 0.02, h * 0.14 + Math.min(12, Math.floor(total / 40)) * h * 0.062, w * 0.008, h * 0.04) }
-  } else {
-    // editor de video en tiempo real: panel de medios, vista previa, ajustes y línea de tiempo con el cabezal en movimiento
-    c.fillStyle = '#161a27'; c.fillRect(0, h * 0.1, w * 0.22, h * 0.52)
-    for (let i = 0; i < 6; i++) { const cx = w * 0.015 + (i % 2) * w * 0.1, cy = h * 0.13 + Math.floor(i / 2) * h * 0.16; const g = c.createLinearGradient(cx, cy, cx + w * 0.09, cy + h * 0.13); g.addColorStop(0, ['#3b6ea5', '#a55a3b', '#4f9a6a'][i % 3]); g.addColorStop(1, '#1a1f30'); c.fillStyle = g; c.beginPath(); c.roundRect(cx, cy, w * 0.09, h * 0.13, 4); c.fill() }
-    const px = w * 0.24, pw = w * 0.5, ph = h * 0.5
-    const pg = c.createLinearGradient(px, h * 0.1, px + pw, h * 0.1 + ph); pg.addColorStop(0, '#2a2f55'); pg.addColorStop(1, '#8a4a2a'); c.fillStyle = pg; c.beginPath(); c.roundRect(px, h * 0.11, pw, ph, 6); c.fill()
-    c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(px + pw * (0.3 + 0.4 * ((t * 0.18) % 1)), h * 0.11 + ph * 0.55, ph * 0.11, 0, Math.PI * 2); c.fill()      // sujeto que se mueve
-    c.fillStyle = '#161a27'; c.fillRect(w * 0.76, h * 0.1, w * 0.24, h * 0.52)
-    for (let i = 0; i < 5; i++) { c.fillStyle = '#2a3048'; c.fillRect(w * 0.78, h * 0.15 + i * h * 0.09, w * 0.2, h * 0.012); c.fillStyle = '#ff7a00'; c.beginPath(); c.arc(w * (0.79 + 0.17 * (0.5 + 0.5 * Math.sin(t * (0.8 + i * 0.35) + i))), h * 0.156 + i * h * 0.09, h * 0.014, 0, Math.PI * 2); c.fill() }
-    // línea de tiempo
-    const ty = h * 0.66; c.fillStyle = '#10131e'; c.fillRect(0, ty, w, h - ty)
-    const filas = [['#4f9a6a', 5], ['#3b6ea5', 7], ['#a55a3b', 4]] as const
-    filas.forEach(([col, n], r) => {
-      let x = w * 0.03
-      for (let i = 0; i < n; i++) {
-        const ancho = w * (0.07 + 0.09 * alea(r * 9 + i)), crec = clamp01((t * 0.9 - (r * 0.2 + i * 0.12)) / 0.35)
-        c.fillStyle = col; c.globalAlpha = 0.9; c.beginPath(); c.roundRect(x, ty + h * 0.03 + r * h * 0.1, ancho * crec, h * 0.075, 3); c.fill(); c.globalAlpha = 1
-        x += ancho + w * 0.012
-      }
-    })
-    for (let i = 0; i < 60; i++) { c.fillStyle = '#3a4160'; c.fillRect(w * 0.03 + i * w * 0.0155, ty + h * 0.34 - (i % 4 === 0 ? h * 0.02 : h * 0.008) * 1, 1.5, h * 0.02) }
-    const hx = w * (0.1 + 0.8 * ((t * 0.16) % 1)); c.fillStyle = '#fff'; c.fillRect(hx, ty, 2, h - ty); c.beginPath(); c.moveTo(hx - 6, ty); c.lineTo(hx + 8, ty); c.lineTo(hx + 1, ty + 9); c.fill()
   }
+  const hx = 14 + ((t * 0.55) % 1) * (BW - 28); c.fillStyle = '#fff'; c.fillRect(hx, ty, 3, BH - ty); c.beginPath(); c.moveTo(hx - 8, ty); c.lineTo(hx + 11, ty); c.lineTo(hx + 1.5, ty + 12); c.fill()
+  // avisos que saltan
+  for (let i = 0; i < 3; i++) {
+    const f = ((t + i * 0.45) % 1.35) / 1.35, k = elastico(f * 3), y = 62 + i * 54
+    if (f < 0.75) { c.save(); c.translate(BW - 54, y); c.scale(k, k); c.fillStyle = '#1f2a22'; c.beginPath(); c.roundRect(-34, -22, 68, 44, 12); c.fill(); c.strokeStyle = '#3ddc84'; c.lineWidth = 5; c.lineCap = 'round'; c.beginPath(); c.moveTo(-12, 0); c.lineTo(-3, 9); c.lineTo(14, -10); c.stroke(); c.restore() }
+  }
+  // cursor que va y hace clic
+  const paso = Math.floor(t / 0.9), fr = (t % 0.9) / 0.9, A = [paso, paso + 1].map(p => [60 + alea(p * 1.9) * 420, 150 + alea(p * 4.3) * 700])
+  const e = easeInOut(fr * 1.6), mx = A[0][0] + (A[1][0] - A[0][0]) * e, my = A[0][1] + (A[1][1] - A[0][1]) * e
+  if (fr > 0.62) { c.strokeStyle = `rgba(255,255,255,${1 - (fr - 0.62) / 0.38})`; c.lineWidth = 3; c.beginPath(); c.arc(mx, my, 8 + (fr - 0.62) * 90, 0, Math.PI * 2); c.stroke() }
+  flecha(c, mx, my, 22)
 }
 
-/** Escena completa dentro de un lienzo de w×h: cuarto oscuro, escritorio, Mac con pantalla animada y una persona tecleando. */
-function pintarTrabajo(c: Ctx, w: number, h: number, t: number, pantalla: string) {
-  const fondo = c.createLinearGradient(0, 0, 0, h); fondo.addColorStop(0, '#171a36'); fondo.addColorStop(0.7, '#241a30'); fondo.addColorStop(1, '#0f0c16'); c.fillStyle = fondo; c.fillRect(0, 0, w, h)
-  const ventana = c.createRadialGradient(w * 0.12, h * 0.15, 0, w * 0.12, h * 0.15, w * 0.45); ventana.addColorStop(0, 'rgba(255,170,90,.22)'); ventana.addColorStop(1, 'rgba(255,170,90,0)'); c.fillStyle = ventana; c.fillRect(0, 0, w, h)
-  // escritorio con perspectiva
-  const mesa = c.createLinearGradient(0, h * 0.72, 0, h); mesa.addColorStop(0, '#3a2a22'); mesa.addColorStop(1, '#1d1410'); c.fillStyle = mesa
-  c.beginPath(); c.moveTo(0, h * 0.8); c.lineTo(w, h * 0.74); c.lineTo(w, h); c.lineTo(0, h); c.fill()
-  c.strokeStyle = 'rgba(255,255,255,.05)'; c.lineWidth = 2; for (let i = 0; i < 7; i++) { c.beginPath(); c.moveTo(w * (i / 6), h); c.lineTo(w * (0.4 + i * 0.03), h * 0.77); c.stroke() }
-  const tecleo = (v: number) => Math.sin(t * 17 + v) * 0.5 + 0.5
-  // pantalla del Mac (giro de ~30°): se dibuja en un lienzo aparte y se pega por tiras con altura distinta a izquierda y derecha
-  const sw = 720, sh = 440; const { c: pc, x: px } = lienzo('pantalla', sw, sh); pintarPantalla(px, sw, sh, t, pantalla)
-  const L = { x: w * 0.44, t: h * 0.27, b: h * 0.66 }, R = { x: w * 0.94, t: h * 0.17, b: h * 0.7 }
-  // brillo de la pantalla sobre la escena
-  const gl = c.createRadialGradient(w * 0.7, h * 0.45, 0, w * 0.7, h * 0.45, w * 0.55); gl.addColorStop(0, pantalla === 'codigo' ? 'rgba(120,150,255,.35)' : 'rgba(255,200,150,.30)'); gl.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gl; c.fillRect(0, 0, w, h)
-  // base y teclado
-  c.fillStyle = '#9aa0ab'; c.beginPath(); c.moveTo(L.x - w * 0.01, L.b + h * 0.01); c.lineTo(R.x + w * 0.02, R.b + h * 0.01); c.lineTo(R.x + w * 0.05, R.b + h * 0.13); c.lineTo(L.x - w * 0.09, L.b + h * 0.14); c.closePath(); c.fill()
-  c.fillStyle = '#1b1d24'; c.beginPath(); c.moveTo(L.x + w * 0.0, L.b + h * 0.03); c.lineTo(R.x, R.b + h * 0.03); c.lineTo(R.x + w * 0.03, R.b + h * 0.115); c.lineTo(L.x - w * 0.07, L.b + h * 0.125); c.closePath(); c.fill()
-  for (let r = 0; r < 4; r++) for (let k = 0; k < 14; k++) {                                                          // teclas que parpadean al teclear
-    const u = k / 13, v = r / 3, x0 = L.x - w * 0.06 + u * (R.x - L.x + w * 0.09) + v * -w * 0.0, yTop = (L.b + h * 0.04 + (R.b - L.b) * u) + v * (h * 0.075) - (1 - u) * 0
-    const act = alea(k * 13 + r + Math.floor(t * 9)) > 0.82
-    c.fillStyle = act ? 'rgba(255,190,120,.95)' : 'rgba(255,255,255,.14)'; c.fillRect(x0 - v * w * 0.03, yTop, w * 0.026, h * 0.016)
+function pintarCodigo(c: Ctx, t: number) {
+  c.fillStyle = '#0a0c13'; c.fillRect(0, 0, BW, BH)
+  for (let i = 0; i < 3; i++) { c.fillStyle = ['#ff5f57', '#febc2e', '#28c840'][i]; c.beginPath(); c.arc(22 + i * 20, 22, 6, 0, Math.PI * 2); c.fill() }
+  const cols = ['#ff9e64', '#7aa2f7', '#9ece6a', '#bb9af7', '#e0af68', '#c0caf5', '#2ac3de']
+  const lh = 26, cps = 520, total = t * cps
+  let usado = 0, cursor: [number, number] | null = null
+  const scroll = Math.max(0, total / 42 - 26) * lh                      // al llenarse la pantalla el código sube
+  for (let l = 0; l < 90; l++) {
+    const y = 56 + l * lh - scroll; const segs = 3 + Math.floor(alea(l + 9) * 4), ind = Math.floor(alea(l * 3.1) * 3) * 26; let x = 56 + ind
+    const inicio = usado
+    for (let s = 0; s < segs; s++) {
+      const largo = 4 + Math.floor(alea(l * 7 + s) * 9), vis = clamp01((total - usado) / largo); usado += largo
+      if (y > 36 && y < 780 && vis > 0) { c.fillStyle = cols[Math.floor(alea(l * 5 + s * 2.3) * cols.length)]; c.beginPath(); c.roundRect(x, y, 8.2 * largo * vis, 13, 3); c.fill(); cursor = [x + 8.2 * largo * vis, y] }
+      x += 8.2 * largo + 9
+    }
+    if (y > 36 && y < 780 && total > inicio) { c.fillStyle = '#3a4160'; c.fillRect(16, y, 18, 12) }
+    if (usado > total + 40) break
   }
-  // la pantalla en sí
-  const N = 48
-  for (let i = 0; i < N; i++) {
-    const u0 = i / N, u1 = (i + 1) / N, x0 = L.x + (R.x - L.x) * u0, x1 = L.x + (R.x - L.x) * u1
-    const t0 = L.t + (R.t - L.t) * u0, b0 = L.b + (R.b - L.b) * u0, t1 = L.t + (R.t - L.t) * u1, b1 = L.b + (R.b - L.b) * u1
-    c.drawImage(pc as unknown as CanvasImageSource, u0 * sw, 0, sw / N + 0.5, sh, x0, (t0 + t1) / 2, x1 - x0 + 0.8, ((b0 - t0) + (b1 - t1)) / 2)
-  }
-  c.strokeStyle = '#c7ccd6'; c.lineWidth = 5; c.beginPath(); c.moveTo(L.x, L.t); c.lineTo(R.x, R.t); c.lineTo(R.x, R.b); c.lineTo(L.x, L.b); c.closePath(); c.stroke()
-  // persona (de espaldas, 3/4): torso, cabeza, cabello y brazos que teclean
-  const px0 = w * 0.2, py0 = h * 0.42, respira = Math.sin(t * 2.4) * h * 0.004, mueve = Math.sin(t * 1.3) * w * 0.006
-  const sombra = c.createLinearGradient(px0 - w * 0.2, 0, px0 + w * 0.25, 0); sombra.addColorStop(0, '#2a2d4a'); sombra.addColorStop(0.7, '#3d3f66'); sombra.addColorStop(1, '#6a6fa8')
-  c.fillStyle = sombra; c.beginPath(); c.moveTo(px0 - w * 0.2, h * 0.95); c.quadraticCurveTo(px0 - w * 0.2, py0 + h * 0.17, px0 - w * 0.09, py0 + h * 0.12 + respira); c.lineTo(px0 + w * 0.09, py0 + h * 0.12 + respira)
-  c.quadraticCurveTo(px0 + w * 0.2, py0 + h * 0.17, px0 + w * 0.2, h * 0.95); c.closePath(); c.fill()                                                // torso (sudadera)
-  c.fillStyle = '#d6a07e'; c.fillRect(px0 - w * 0.025 + mueve, py0 + h * 0.06 + respira, w * 0.05, h * 0.08)                                              // cuello
-  c.beginPath(); c.ellipse(px0 + mueve, py0 + respira, w * 0.075, h * 0.1, 0.12, 0, Math.PI * 2); c.fill()                                               // cabeza
-  const pelo = c.createLinearGradient(px0 - w * 0.07, py0 - h * 0.1, px0 + w * 0.08, py0 + h * 0.05); pelo.addColorStop(0, '#1a1320'); pelo.addColorStop(1, '#4a3a58'); c.fillStyle = pelo
-  c.beginPath(); c.ellipse(px0 + mueve - w * 0.004, py0 - h * 0.012 + respira, w * 0.08, h * 0.095, 0.1, Math.PI * 0.95, Math.PI * 2.15); c.fill()
-  c.beginPath(); c.ellipse(px0 + mueve - w * 0.03, py0 + h * 0.03 + respira, w * 0.05, h * 0.075, 0.2, 0, Math.PI * 2); c.fill()
-  c.fillStyle = 'rgba(160,190,255,.55)'; c.beginPath(); c.ellipse(px0 + mueve + w * 0.062, py0 + h * 0.005 + respira, w * 0.014, h * 0.075, 0.1, -1.2, 1.2); c.fill()  // luz de la pantalla en el borde
-  const brazo = (lado: number) => {                                                                                                                       // hombro → codo → mano sobre el teclado
-    const sx = px0 + lado * w * 0.12, sy = py0 + h * 0.15 + respira, mano = tecleo(lado * 2) * h * 0.02
-    const hx = L.x + w * (0.05 + 0.12 * (lado > 0 ? 1 : 0)), hy = L.b + h * 0.1 - mano, ex = (sx + hx) / 2 + lado * w * 0.015, ey = Math.max(sy, hy) + h * 0.06
-    c.strokeStyle = '#3a3c60'; c.lineCap = 'round'; c.lineWidth = h * 0.055; c.beginPath(); c.moveTo(sx, sy); c.lineTo(ex, ey); c.stroke()
-    c.strokeStyle = '#4a4d78'; c.lineWidth = h * 0.045; c.beginPath(); c.moveTo(ex, ey); c.lineTo(hx, hy); c.stroke()
-    c.fillStyle = '#d6a07e'; c.beginPath(); c.arc(hx, hy, h * 0.026, 0, Math.PI * 2); c.fill()
-  }
-  brazo(-1); brazo(1)
-  // partículas de luz y viñeta
-  for (let i = 0; i < 14; i++) { const f = (t * (0.05 + 0.04 * alea(i)) + alea(i + 3)) % 1; c.fillStyle = `rgba(255,220,180,${0.35 * Math.sin(Math.PI * f)})`; c.beginPath(); c.arc(w * alea(i + 7), h * (1 - f), 2 + 3 * alea(i + 11), 0, Math.PI * 2); c.fill() }
-  const vg = c.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, h * 0.9); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.55)'); c.fillStyle = vg; c.fillRect(0, 0, w, h)
+  if (cursor && Math.floor(t * 4) % 2 === 0) { c.fillStyle = '#fff'; c.fillRect(cursor[0] + 2, cursor[1] - 3, 9, 19) }
+  // terminal de abajo: barra de progreso que se llena y se pone verde con visto
+  c.fillStyle = '#11141f'; c.fillRect(0, 800, BW, BH - 800)
+  const prog = clamp01(((t * 0.45) % 1.2) / 1.0), ok = ((t * 0.45) % 1.2) > 1.0
+  c.fillStyle = '#1d2233'; c.beginPath(); c.roundRect(24, 850, BW - 48, 26, 13); c.fill()
+  c.fillStyle = ok ? '#3ddc84' : '#ff7a00'; c.beginPath(); c.roundRect(24, 850, (BW - 48) * prog, 26, 13); c.fill()
+  if (ok) { c.strokeStyle = '#3ddc84'; c.lineWidth = 10; c.lineCap = 'round'; c.beginPath(); c.moveTo(BW / 2 - 28, 920); c.lineTo(BW / 2 - 6, 942); c.lineTo(BW / 2 + 34, 898); c.stroke() }
 }
 
-function dibujarTrabajo(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
+function dibujarPantalla(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
   if (o.type !== 'graphic') return
-  const pr = o.props ?? {}, b = cajaEscena(o), cw = Math.round(b.w), ch = Math.round(b.h)
-  const tt = t - o.start, dur = o.end - o.start, k = easeBack(tt / 0.7), ex = clamp01((tt - (dur - 0.4)) / 0.4)
-  const { c, x } = lienzo('trabajo', cw, ch)
-  const zoom = 1 + 0.07 * clamp01(tt / Math.max(dur, 0.1))                                    // empuje lento de cámara dentro de la escena
-  x.save(); x.translate(cw / 2, ch / 2); x.scale(zoom, zoom); x.translate(-cw / 2, -ch / 2); pintarTrabajo(x, cw, ch, tt, pr.pantalla ?? 'editor'); x.restore()
-  x.globalCompositeOperation = 'destination-in'; x.fillStyle = '#000'; x.beginPath(); x.roundRect(0, 0, cw, ch, cw * 0.035); x.fill(); x.globalCompositeOperation = 'source-over'
-  x.strokeStyle = 'rgba(255,255,255,.45)'; x.lineWidth = 3; x.beginPath(); x.roundRect(1.5, 1.5, cw - 3, ch - 3, cw * 0.035); x.stroke()
-  const th = (1 - Math.min(k, 1.1)) * -1.25 + ex * 1.1 + Math.sin(tt * 1.3) * 0.035 + 0.05
-  const cx = b.x + b.w / 2, cy = b.y + b.h / 2 + Math.sin(tt * 1.9) * H * 0.004
-  const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, b.w * 0.7); rg.addColorStop(0, 'rgba(255,140,60,.25)'); rg.addColorStop(1, 'rgba(255,140,60,0)')
-  ctx.save(); ctx.globalAlpha = clamp01(tt / 0.2) * (1 - ex); ctx.fillStyle = rg; ctx.fillRect(cx - b.w, cy - b.h, b.w * 2, b.h * 2); ctx.restore()
-  proyectar(ctx, c, cx, cy, b.w, b.h, th, clamp01(tt / 0.2) * (1 - ex), 0.8 + 0.2 * Math.min(k, 1.06))
+  const pr = o.props ?? {}, tt = t - o.start, dur = o.end - o.start
+  const ex = clamp01((tt - (dur - 0.4)) / 0.4), ent = clamp01(tt / 0.35)
+  const { c, x } = lienzo('pantalla', BW, BH)
+  // cámara virtual: deriva continua + un golpe de zoom cada 1,1 s
+  const golpe = Math.pow(Math.max(0, 1 - ((tt + 0.2) % 1.1) / 0.28), 2), Z = 1 + 0.07 + 0.05 * Math.sin(tt * 1.3) + 0.13 * golpe
+  x.save(); x.translate(BW / 2 + Math.sin(tt * 0.9) * 26, BH / 2 + Math.cos(tt * 1.1) * 40); x.scale(Z, Z); x.translate(-BW / 2, -BH / 2)
+  if (pr.pantalla === 'codigo') pintarCodigo(x, tt); else pintarEditor(x, tt)
+  x.restore()
+  const vg = x.createRadialGradient(BW / 2, BH / 2, BH * 0.3, BW / 2, BH / 2, BH * 0.65); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.6)'); x.fillStyle = vg; x.fillRect(0, 0, BW, BH)
+  // composición: entra con golpe de zoom + glitch por franjas, sale igual
+  const gl = Math.max(1 - tt / 0.35, ex), esc = (1 + 0.28 * (1 - easeOut3(ent)) + 0.35 * ex)
+  const cx = W / 2, cy = H / 2
+  ctx.save(); ctx.globalAlpha = clamp01(tt / 0.08) * (1 - ex * 0.9)
+  ctx.translate(cx, cy); ctx.scale(esc, esc); ctx.translate(-cx, -cy)
+  if (gl > 0.02) {
+    const N = 16
+    for (let i = 0; i < N; i++) {
+      const sy = (i / N) * BH, hh = BH / N + 1, off = (alea(i * 7 + Math.floor(tt * 20)) - 0.5) * 2 * gl * 60
+      ctx.drawImage(c as unknown as CanvasImageSource, 0, sy, BW, hh, off, (i / N) * H, W, H / N + 1)
+    }
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha *= 0.55 * gl
+    ctx.drawImage(c as unknown as CanvasImageSource, 0, 0, BW, BH, -gl * 26, 0, W, H); ctx.drawImage(c as unknown as CanvasImageSource, 0, 0, BW, BH, gl * 26, 0, W, H)
+  } else { ctx.translate(cx, cy); ctx.rotate(Math.sin(tt * 1.7) * 0.012); ctx.scale(1.06, 1.06); ctx.translate(-cx, -cy); ctx.drawImage(c as unknown as CanvasImageSource, 0, 0, BW, BH, 0, 0, W, H) }   // a cuadro completo, con un ligero vaivén
+  ctx.restore()
+  const flash = Math.max(0, 1 - tt / 0.18); if (flash > 0) { ctx.save(); ctx.fillStyle = `rgba(255,255,255,${0.7 * flash})`; ctx.fillRect(0, 0, W, H); ctx.restore() }
 }
 
 /** Dibuja la escena `o` (graphic con template 'escena') en el instante `t`. */
 export function dibujarEscena(ctx: CanvasRenderingContext2D, o: TextLayer, t: number) {
   if (o.type !== 'graphic') return
-  if ((o.props?.tipo ?? 'claude') === 'trabajo') dibujarTrabajo(ctx, o, t); else dibujarClaude(ctx, o, t)
+  if ((o.props?.tipo ?? 'claude') === 'pantalla') dibujarPantalla(ctx, o, t); else dibujarChispa(ctx, o, t)
 }

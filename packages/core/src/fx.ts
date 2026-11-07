@@ -5,11 +5,12 @@ export interface FxState {
   zoom: number     // 1 = sin zoom
   shift: number    // -1..1: desplazamiento horizontal como fracción del margen que deja el zoom
   shiftY: number   // lo mismo en vertical (temblor de cámara)
+  glitch: number   // 0..1: separación de color RGB + sacudida al empezar el clip (efecto 'glitch')
   flash: number    // >0 destello blanco, <0 oscurecer (fundido a negro), 0..1
 }
 
 export const ZOOM_DEFAULTS: Record<ZoomKind, { amount: number; duration?: number }> = {
-  push: { amount: 0.14 }, pull: { amount: 0.14 }, punch: { amount: 0.22, duration: 0.35 }, temblor: { amount: 0.12 },
+  push: { amount: 0.14 }, pull: { amount: 0.14 }, punch: { amount: 0.22, duration: 0.35 }, temblor: { amount: 0.12 }, glitch: { amount: 0.5, duration: 0.4 },
 }
 export const TRANSITION_DEFAULTS: Record<TransitionKind, { duration: number; intensity: number }> = {
   slide: { duration: 0.44, intensity: 1 }, flash: { duration: 0.3, intensity: 1 }, dip: { duration: 0.5, intensity: 1 },
@@ -28,6 +29,7 @@ const TEMBLOR_RAMPA = 0.15, TEMBLOR_ALCANCE = 0.85
 function zoomDelta(z: ZoomFx | undefined, t: number, dur: number) {
   if (!z) return 0
   if (z.kind === 'temblor') return z.amount * 0.5       // el zoom deja margen para que el temblor no muestre bordes
+  if (z.kind === 'glitch') return 0.06 * Math.max(0, 1 - t / (z.duration ?? 0.4))
   const p = dur > 0 ? t / dur : 0
   if (z.kind === 'push') return z.amount * p
   if (z.kind === 'pull') return z.amount * (1 - p)
@@ -48,9 +50,13 @@ function apply(s: FxState, tr: Transition, e: number, side: 1 | -1) {
  * Mismas fórmulas que el render (server/exportar.ts): lo que ves en el editor es lo que sale en el MP4.
  */
 export function fxAt(clip: Clip | undefined, next: Clip | undefined, t: number, dur: number): FxState {
-  const s: FxState = { zoom: 1, shift: 0, shiftY: 0, flash: 0 }
+  const s: FxState = { zoom: 1, shift: 0, shiftY: 0, glitch: 0, flash: 0 }
   if (!clip) return s
   s.zoom += zoomDelta(clip.zoom, t, dur)
+  if (clip.zoom?.kind === 'glitch') {
+    const env = Math.max(0, 1 - t / (clip.zoom.duration ?? 0.4)), a = clip.zoom.amount
+    s.glitch = Math.min(1, a * 2 * env); s.shift += 0.9 * env * ruido(t * 1.9, 0.5); s.shiftY += 0.35 * env * ruido(t * 1.9, 3.1)
+  }
   if (clip.zoom?.kind === 'temblor') {
     const env = Math.min(1, Math.max(0, Math.min(t / TEMBLOR_RAMPA, (dur - t) / TEMBLOR_RAMPA)))
     s.shift += TEMBLOR_ALCANCE * env * ruido(t, 0); s.shiftY += TEMBLOR_ALCANCE * env * ruido(t, 2.4)

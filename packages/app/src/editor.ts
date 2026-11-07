@@ -416,13 +416,13 @@ export async function bootEditor(slug: string) {
         exec(store, { op: 'set_zoom', clip: id, zoom: v === 'zoom' ? { kind: 'push', ...ZOOM_DEFAULTS.push } : null })))
       if (clip.zoom) {
         const zk = clip.zoom.kind
-        field('Tipo de zoom', select([['push', 'Acercar (lento)'], ['pull', 'Alejar (lento)'], ['punch', 'Golpe de zoom'], ['temblor', 'Temblor de cámara']], zk, v => {
+        field('Tipo de zoom', select([['push', 'Acercar (lento)'], ['pull', 'Alejar (lento)'], ['punch', 'Golpe de zoom'], ['temblor', 'Temblor de cámara'], ['glitch', 'Glitch RGB']], zk, v => {
           const k = v as ZoomKind, keep = ['push', 'pull'].includes(zk) && ['push', 'pull'].includes(k) ? clip.zoom!.amount : ZOOM_DEFAULTS[k].amount     // al pasar entre acercar/alejar se conserva la intensidad
           exec(store, { op: 'set_zoom', clip: id, zoom: { kind: k, amount: keep, duration: ZOOM_DEFAULTS[k].duration } })
         }))
         insp.insertAdjacentHTML('beforeend', `<p class="hint">${ZOOM_INFO[zk].hint}</p>`)
         slider('Intensidad', clip.zoom.amount, 0.05, 0.5, 0.01, pct, (pr, n) => { const z = C(pr).zoom; if (z) z.amount = n })
-        if (zk === 'punch') slider('Duración del golpe', clip.zoom.duration ?? 0.35, 0.1, 1, 0.05, sec, (pr, n) => { const z = C(pr).zoom; if (z) z.duration = n })
+        if (zk === 'punch' || zk === 'glitch') slider('Duración del golpe', clip.zoom.duration ?? 0.35, 0.1, 1, 0.05, sec, (pr, n) => { const z = C(pr).zoom; if (z) z.duration = n })
       }
 
       // ---- TRANSICIONES: la del corte es UNA sola; aquí se ve como entrada de este clip y como salida del anterior ----

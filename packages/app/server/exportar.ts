@@ -52,6 +52,9 @@ function fxExpr(clip: Clip, next: Clip | undefined, D: number, fps: number) {
       const n = (k: number) => `(sin(2*PI*17*(${t})+${num(k)})+0.7*sin(2*PI*29*(${t})+${num(1.3 + 1.7 * k)})+0.5*sin(2*PI*43*(${t})+${num(2.1 + 0.6 * k)}))/2.2`
       const env = `min(1,max(0,min((${t})/0.15,(${num(D)}-(${t}))/0.15)))`
       zs.push(`${num(zm.amount * 0.5)}`); ss.push(`0.85*${env}*(${n(0)})`); sy.push(`0.85*${env}*(${n(2.4)})`)
+    } else if (zm.kind === 'glitch') {
+      const gd = num(zm.duration ?? 0.4), env = `max(0,1-(${t})/${gd})`, n = (k: number) => `(sin(2*PI*17*1.9*(${t})+${num(k)})+0.7*sin(2*PI*29*1.9*(${t})+${num(1.3 + 1.7 * k)})+0.5*sin(2*PI*43*1.9*(${t})+${num(2.1 + 0.6 * k)}))/2.2`
+      zs.push(`0.06*${env}`); ss.push(`0.9*${env}*(${n(0.5)})`); sy.push(`0.35*${env}*(${n(3.1)})`)
     } else if (zm.kind === 'push') zs.push(`${num(zm.amount)}*${t}/${num(D)}`)
     else if (zm.kind === 'pull') zs.push(`${num(zm.amount)}*(1-${t}/${num(D)})`)
     else zs.push(`${num(zm.amount)}*${ease(`${t}/${num(zm.duration ?? 0.35)}`)}+0.05*${t}/${num(D)}`)
@@ -68,6 +71,7 @@ function fxExpr(clip: Clip, next: Clip | undefined, D: number, fps: number) {
   return {
     z: zs.length ? `1+${zs.join('+')}` : '1',
     x: 'iw/2-(iw/zoom/2)' + (ss.length ? `+(iw-iw/zoom)/2*(${ss.join('+')})` : ''),
+    glitch: zm && zm.kind === 'glitch' ? { amt: zm.amount, dur: zm.duration ?? 0.4 } : null,
     y: 'ih/2-(ih/zoom/2)' + (sy.length ? `+(ih-ih/zoom)/2*(${sy.join('+')})` : ''),
     flash: fs.length ? `clip(${fs.join('+')},-1,1)` : '',
   }
@@ -103,8 +107,10 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     const fx = fxExpr(c, placed[i + 1]?.clip, D, fps)
     if (!ts('main').hidden) {
     const eq = fx.flash ? `,eq=brightness='${fx.flash}':eval=frame` : ''
+    const gpx = fx.glitch ? Math.max(2, Math.round(fx.glitch.amt * 0.04 * W)) : 0       // separación de color en px de salida (igual que la vista previa: 4 % del ancho × intensidad)
+    const gl = fx.glitch ? `,format=gbrp,rgbashift=rh=-${gpx}:bh=${gpx}:enable='lt(t,${num(fx.glitch.dur)})',format=yuv420p` : ''
     vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
-      + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps}${eq},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v${i}]`)
+      + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps}${eq}${gl},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v${i}]`)
     vlabels.push(`[v${i}]`)
     }
     if (!ts('main').muted && c.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(c.speed)},volume=${num(c.volume)},atrim=0:${num(D)},adelay=${Math.round(pl.start * 1000)}:all=1[ac${i}]`)

@@ -30,11 +30,12 @@ export class Player {
   private ctxStart = 0
   private nodes: AudioScheduledSourceNode[] = []
   private layer = new OffscreenCanvas(W, H)
+  private glitchTmp: OffscreenCanvas | null = null
   private layerCtx = this.layer.getContext('2d')!
   /** Música decodificada (por id de asset) y su envolvente para la línea de tiempo. */
   music = new Map<string, AudioBuffer>()
   musicPeaks = new Map<string, Float32Array>()
-  private fx: FxState = { zoom: 1, shift: 0, shiftY: 0, flash: 0 }
+  private fx: FxState = { zoom: 1, shift: 0, shiftY: 0, glitch: 0, flash: 0 }
   private fxKey = ''
   private sizeKey = ''
 
@@ -241,12 +242,12 @@ export class Player {
     const tracks = this.store.project.tracks ?? {}
     const loc = tracks.main?.hidden ? null : locate(this.store.project, t)
     const cl = this.store.project.clips
-    this.fx = loc ? fxAt(loc.placed.clip, cl[cl.indexOf(loc.placed.clip) + 1], t - loc.placed.start, loc.placed.end - loc.placed.start) : { zoom: 1, shift: 0, shiftY: 0, flash: 0 }
+    this.fx = loc ? fxAt(loc.placed.clip, cl[cl.indexOf(loc.placed.clip) + 1], t - loc.placed.start, loc.placed.end - loc.placed.start) : { zoom: 1, shift: 0, shiftY: 0, glitch: 0, flash: 0 }
     if (loc) {
       const asset = this.assets.get(loc.placed.clip.assetId)
       if (asset) {
         const idx = asset.source.idxAt(loc.srcTime)
-        const fk = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}`
+        const fk = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}|${this.fx.glitch.toFixed(3)}`
         const key = `${asset.info.id}:${idx}`
         if (key !== this.layerKey || fk !== this.fxKey) {
           const f = asset.source.peek(idx)
@@ -299,6 +300,16 @@ export class Player {
     this.layerCtx.fillStyle = '#000'; this.layerCtx.fillRect(0, 0, W, H)
     const dx = this.fx.shift * (fw * k * (z - 1)) / 2   // el efecto "slide" desplaza la ventana de recorte
     const dy = this.fx.shiftY * (fh * k * (z - 1)) / 2
+    if (this.fx.glitch > 0.01) {                       // glitch: tres copias con un solo canal de color (R, G, B) desplazadas en horizontal y sumadas
+      const d = this.fx.glitch * 0.02 * W, tmp = (this.glitchTmp ??= new OffscreenCanvas(W, H)), t = tmp.getContext('2d')!
+      for (const [off, col] of [[-d, '#ff0000'], [0, '#00ff00'], [d, '#0000ff']] as const) {
+        t.globalCompositeOperation = 'source-over'; t.clearRect(0, 0, W, H)
+        try { t.drawImage(f, (W - w) / 2 - dx + off * 0.0, (H - h) / 2 - dy, w, h) } catch { /* frame cerrado */ }
+        t.globalCompositeOperation = 'multiply'; t.fillStyle = col; t.fillRect(0, 0, W, H)
+        this.layerCtx.globalCompositeOperation = 'lighter'; this.layerCtx.drawImage(tmp, off, 0); this.layerCtx.globalCompositeOperation = 'source-over'
+      }
+      return
+    }
     try { this.layerCtx.drawImage(f, (W - w) / 2 - dx, (H - h) / 2 - dy, w, h) } catch { /* frame cerrado por el LRU */ }
   }
 
@@ -310,7 +321,7 @@ export class Player {
         const w = this.wanted
         const f = await w.asset.source.getFrame(w.idx)
         this.blit(f)
-        this.layerKey = w.key; this.fxKey = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}`
+        this.layerKey = w.key; this.fxKey = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}|${this.fx.glitch.toFixed(3)}`
         this.dirty = true
       }
     } finally { this.pumping = false }

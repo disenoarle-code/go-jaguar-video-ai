@@ -16,9 +16,9 @@ export interface AssetInfo {
 }
 
 /** Zoom: un EFECTO del clip. `push` se acerca, `pull` se aleja (durante todo el clip), `punch` entra con un golpe de zoom y se asienta. */
-export type ZoomKind = 'push' | 'pull' | 'punch' | 'temblor'
-export const ZOOM_KINDS: ZoomKind[] = ['push', 'pull', 'punch', 'temblor']
-export interface ZoomFx { kind: ZoomKind; amount: number; duration?: number }   // amount: cuánto zoom (0,14 = 14 %; en 'temblor' es la intensidad del temblor); duration: solo punch
+export type ZoomKind = 'push' | 'pull' | 'punch' | 'temblor' | 'glitch'
+export const ZOOM_KINDS: ZoomKind[] = ['push', 'pull', 'punch', 'temblor', 'glitch']
+export interface ZoomFx { kind: ZoomKind; amount: number; duration?: number }   // amount: cuánto zoom (0,14 = 14 %; en 'temblor' es la intensidad del temblor); duration: punch y glitch (cuánto dura el golpe); en 'glitch' amount = intensidad del corte de color
 
 /**
  * Transición: vive en el CORTE entre dos clips. Se guarda en el clip que entra, pero es una sola:
@@ -63,7 +63,7 @@ interface LayerBase {
 
 /** Subtítulo. `template` 'karaoke' dibuja las palabras de `props.palabras` (JSON [[palabra,inicio,fin],…] en segundos de la línea de tiempo) resaltando la que se está diciendo. */
 export interface SubtitleLayer extends LayerBase { type: 'subtitle'; text: string; size: number; color: string; template?: string; props?: Record<string, string> }
-/** Gráfico. `template`: 'lowerthird' (barra con texto), 'lanzamiento' (rótulo animado de lanzamiento), 'glass' (tarjeta de cristal que entra con perspectiva 3D: props titulo, sub, icono, lado, acento) 'pildora' (píldora de título con texto grande: props texto, acento) o 'escena' (animación 3D sin texto: props tipo 'claude' | 'trabajo', humor 'triste' | 'curioso' | 'feliz', pantalla 'editor' | 'codigo', lado). */
+/** Gráfico. `template`: 'lowerthird' (barra con texto), 'lanzamiento' (rótulo animado de lanzamiento), 'glass' (tarjeta de cristal que entra con perspectiva 3D: props titulo, sub, icono, lado, acento) 'pildora' (píldora de título con texto grande: props texto, acento) o 'escena' (animación 3D sin texto: props tipo 'claude' (chispa) | 'pantalla' (editor o código a cuadro completo), humor 'curioso' | 'loco' | 'triste' | 'feliz' | 'locura', pantalla 'editor' | 'codigo', lado). */
 export interface GraphicLayer extends LayerBase { type: 'graphic'; template: string; text: string; size: number; color: string; props?: Record<string, string> }
 /** Reservados para etapas posteriores (el modelo ya los soporta; aún no se dibujan). */
 export interface ImageLayer extends LayerBase { type: 'image'; assetId: string }
