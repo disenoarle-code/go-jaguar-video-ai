@@ -106,7 +106,8 @@ Los tiempos por palabra de Whisper se desfasan (hasta ~1 s), así que **no se us
 2. Alinear: `~/.gojaguar-alinear/bin/python scripts/alinear-palabras.py audio.wav transcripciones/<video>.words.json analisis/<video>.palabras.json` (alineación forzada CTC con wav2vec2 en español, Apache 2.0). Instalación única y gratuita (~1,5 GB, pedir permiso antes): `python3 -m venv ~/.gojaguar-alinear && ~/.gojaguar-alinear/bin/pip install torch torchaudio transformers soundfile numpy`.
 3. Revisar: `python3 scripts/verificar-sincronia.py audio.wav analisis/<video>.palabras.json` (voz sobre silencio, pausas dentro de palabras, ventanas re-transcritas). Si dice `SINCRONÍA MALA`, no seguir.
 4. Armar las capas karaoke con los tiempos pasados a la línea de tiempo (en los cortes, restar lo eliminado), exportar desde la app a una carpeta temporal y revisar de punta a punta: `ffmpeg -i export.mp4 -vn -ac 1 -ar 16000 exp.wav` y `python3 scripts/verificar-sincronia.py exp.wav proyecto.gojaguar`. Restaurar la carpeta de exportación del usuario.
-5. Mirar a ojo 2-3 zonas (energía vs palabras) antes de decir "listo".
+5. Si escribiste `proyecto.gojaguar` en disco con el editor abierto, **recarga la página del editor** (`location.reload()`): no detecta cambios externos, sigue mostrando (y guardando) la versión vieja. Comprueba con `JSON.parse(editor.serialize())`.
+6. Mirar a ojo 2-3 zonas (energía vs palabras) antes de decir "listo".
 
 ## Recetas
 
