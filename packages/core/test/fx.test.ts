@@ -55,7 +55,7 @@ describe('fxAt y proyectos antiguos', () => {
     exec(s, { op: 'set_zoom', clip: c.id, zoom: { kind: 'punch', amount: 0.22, duration: 0.35 } })
     expect(fxAt(s.project.clips[0], undefined, 0, 2).zoom).toBeCloseTo(1.22)
     expect(fxAt(s.project.clips[0], undefined, 1, 2).zoom).toBeCloseTo(1.025)
-    expect(fxAt(undefined, undefined, 0.3, 1)).toEqual({ zoom: 1, shift: 0, shiftY: 0, flash: 0 })
+    expect(fxAt(undefined, undefined, 0.3, 1)).toEqual({ zoom: 1, shift: 0, shiftY: 0, glitch: 0, flash: 0 })
   })
   it('un proyecto v1 con fx único se convierte en zoom + transición', () => {
     const s = three()
