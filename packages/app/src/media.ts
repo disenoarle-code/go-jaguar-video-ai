@@ -1,12 +1,13 @@
 import { createFile, DataStream, MP4BoxBuffer } from 'mp4box'
 import type { AssetInfo } from '@gojaguar/core'
 
-interface VSample { data: Uint8Array; sync: boolean }
+interface VSample { data: Uint8Array; sync: boolean; t: number }   // t = instante real del fotograma en segundos (PTS)
 
 /**
  * Decodifica frames sueltos con WebCodecs. El proxy es "todo keyframes",
  * así que cualquier frame se decodifica de forma independiente (scrub instantáneo).
  * Se usa el índice de frame como timestamp para casar salida <-> petición.
+ * El instante de cada frame sale de su PTS real (no de índice/fps): si el video tiene huecos o fps variable, el índice se desfasa del audio.
  */
 export class FrameSource {
   private decoder: VideoDecoder
@@ -24,7 +25,12 @@ export class FrameSource {
   }
 
   get frameCount() { return this.samples.length }
-  idxAt(t: number) { return Math.min(Math.max(Math.floor(t * this.fps + 1e-6), 0), this.samples.length - 1) }
+  /** Índice del último frame cuyo PTS es ≤ t (búsqueda binaria): así imagen y audio quedan sincronizados aunque falten frames. */
+  idxAt(t: number) {
+    const ss = this.samples; let lo = 0, hi = ss.length - 1
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (ss[mid].t <= t + 1e-6) lo = mid; else hi = mid - 1 }
+    return lo
+  }
   peek(idx: number) { return this.cache.get(idx) ?? null }
 
   private onFrame(f: VideoFrame) {
@@ -110,13 +116,15 @@ export async function loadAsset(info: AssetInfo, actx: AudioContext, onThumb: ()
       file.flush()
     }
     file.onSamples = (_id, _u, ss) => {
-      for (const s of ss) samples.push({ data: s.data as Uint8Array, sync: s.is_sync })
+      for (const s of ss) samples.push({ data: s.data as Uint8Array, sync: s.is_sync, t: s.cts / s.timescale })
       if (samples.length >= total) resolve()
     }
     file.appendBuffer(MP4BoxBuffer.fromArrayBuffer(buf.slice(0), 0))
     file.flush()
   })
 
+  samples.sort((a, b) => a.t - b.t)
+  const t0 = samples[0]?.t ?? 0; if (t0) for (const x of samples) x.t -= t0      // el primer frame es el instante 0
   const sup = await VideoDecoder.isConfigSupported(config)
   if (!sup.supported) throw new Error('Códec no soportado: ' + config.codec)
   asset.info = { ...info, fps }
@@ -140,7 +148,7 @@ export async function loadAsset(info: AssetInfo, actx: AudioContext, onThumb: ()
   void (async () => {
     const thumbSrc = new FrameSource(samples, config, fps)
     for (let s = 0; s < Math.ceil(info.duration); s++) {
-      const f = await thumbSrc.getFrame(Math.min(Math.round(s * fps), thumbSrc.frameCount - 1))
+      const f = await thumbSrc.getFrame(thumbSrc.idxAt(s))
       // "object-fit: cover": se recorta el centro del frame con la proporción de la miniatura, nunca se estira
       const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight, ar = THUMB_W / THUMB_H
       const sw = fw / fh > ar ? fh * ar : fw, sh = fw / fh > ar ? fh : fw / ar

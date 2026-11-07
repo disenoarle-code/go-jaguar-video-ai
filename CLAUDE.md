@@ -121,6 +121,10 @@ Los tiempos por palabra de Whisper se desfasan (hasta ~1 s), así que **no se us
 
 No basta con quitar silencios: el usuario también quiere cortar tramos en que **no habla** aunque haya ruido (toca el celular, mira a otro lado, ruido de caja o de micrófono). Al preparar una edición, lista los huecos sin voz ≥ 0,5 s (energía baja entre palabras alineadas, también al inicio y al final del video), mira fotogramas de cada uno (`ffmpeg … fps=5 … tile`) y corta los que no son habla; deja ~0,1 s antes de la siguiente palabra. Tras cortar vuelve a pasar la revisión de sincronía. Ojo: `silencedetect`/energía baja NO es lo mismo que voz: golpes del celular y ruidos de boca parecen "voz" con un umbral flojo; el fin real de la última palabra es el del alineador, no el de la cola de ruido.
 
+## Sincronía audio/video de la vista previa (proxies)
+
+La vista previa busca el fotograma por su **PTS real** (`FrameSource.idxAt` en `media.ts`), no por índice÷fps. Motivo (2026-11-07): el decodificador por hardware (VideoToolbox) fallaba en los primeros cuadros de los videos Sony sin dar error y el proxy salía con **11 fotogramas de menos** (hueco de 0,4 s en t=0,1); con índice÷fps el video iba hasta 0,37 s adelantado al audio. `makeProxy` ahora repite por software si ffmpeg dice "failed to decode" y fuerza fps constante. Tras crear un proxy comprueba que no tenga huecos: `ffprobe -select_streams v -show_entries frame=pts_time -of csv=p=0 proxy.mp4` (saltos > 0,06 s = mal) y que los frames igualen a los del original.
+
 ## Recetas
 
 - **Silencios:** ya los quita el botón. A mano: `ffmpeg -i proxy -vn -af silencedetect=noise=-32dB:d=0.45 -f null -`.

@@ -489,11 +489,12 @@ async function probe(file: string) {
 async function makeProxy(src: string, dst: string, duration: number, onPct: (p: number) => void) {
   const base = ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-y']
   const tmp = dst + '.part.mp4'   // si se cancela a medias no queda un proxy roto
-  const enc = ['-vf', 'scale=640:-2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-g', '1', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', tmp]
+  const enc = ['-vf', 'scale=640:-2', '-fps_mode', 'cfr', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-g', '1', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', tmp]
   const track = (s: string) => { const m = /out_time_us=(\d+)/.exec(s.split('\n').filter(l => l.startsWith('out_time_us=')).pop() ?? ''); if (m) onPct(Math.min(1, Number(m[1]) / 1e6 / duration)) }
   const hw = process.platform === 'darwin' && !process.env.GOJAGUAR_NO_HWACCEL ? ['-hwaccel', 'videotoolbox'] : []
   let r = await run('ffmpeg', [...base, ...hw, '-i', src, ...enc], track)
-  if (r.code !== 0 && hw.length) r = await run('ffmpeg', [...base, '-i', src, ...enc], track)
+  // el decodificador por hardware a veces falla en los primeros cuadros SIN dar error de salida: salen frames de menos y el video se adelanta al audio → se repite por software
+  if (hw.length && (r.code !== 0 || /failed to decode|No frame decoded|Error submitting packet/i.test(r.err))) r = await run('ffmpeg', [...base, '-i', src, ...enc], track)
   if (r.code !== 0) { await fsp.rm(tmp, { force: true }); throw new Error(r.err === 'cancelado' ? 'Cancelado' : 'ffmpeg falló: ' + r.err.slice(-300)) }
   await fsp.rename(tmp, dst)
 }
