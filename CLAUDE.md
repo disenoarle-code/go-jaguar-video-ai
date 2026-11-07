@@ -31,6 +31,14 @@ Al abrir esta carpeta, **arranca en segundo plano**: `npm run vigilar`. Termina 
 
 Los pedidos viven en `biblioteca/solicitudes/*.json`.
 
+## Referencias en el editor (qué subió y qué seleccionó el usuario)
+
+En el panel derecho del editor hay dos pestañas, **Medios** y **Referencias**. En Referencias el usuario importa videos (diálogo del sistema; se enlazan, no se copian), los **selecciona** tocándolos (✓ dorado) y se ordenan con un criterio MIXTO: lo nuevo y lo que más (y más recientemente) se usa va primero (`puntaje` = 45 % recencia de subida, decae en ~10 días + 55 % frecuencia de uso, decae en ~45 días; el uso cuenta proyectos distintos que la eligieron + pedidos a Claude que la incluyeron, y se guarda en `biblioteca/referencias/uso.json`).
+
+**Cómo saber qué referencia se subió o seleccionó (léelo SIEMPRE antes de actuar cuando el usuario diga "la referencia", "la nueva referencia", "el video que acabo de subir", etc.):** `biblioteca/proyectos/<slug>/referencias-activas.json` (la app lo actualiza solo en cada cambio): `seleccionadas` (las que el usuario tiene marcadas ahora: nombre, ruta del video, si ya tienen `perfilDeEstilo`), `ultimaSubida` (la subida más reciente y si está seleccionada) y `eventos` (últimos 20: `subida` / `seleccionada` / `deseleccionada` con fecha). "La nueva referencia" = la `ultimaSubida` (o el evento `subida` más reciente). Analízala por su `ruta` (cortes por escena, fotogramas, subtítulos, paleta, zooms) y guarda su perfil en `biblioteca/referencias/<nombre>.estilo.json`; si ya hay perfil, reúsalo.
+
+**Navegación:** en el editor ya no hay botón "Proyectos": el logo guarda y lleva a la página principal (todos los proyectos). Desde allí, un proyecto con edición abre DIRECTO el editor; la página de proyecto (material, prompt, referencias, botón "Recorta silencios") solo se ve para proyectos sin edición, o sea para la primera edición.
+
 ## La biblioteca (media lake)
 
 Carpeta `biblioteca/` (configurable con `GOJAGUAR_BIBLIOTECA`; no va a git):

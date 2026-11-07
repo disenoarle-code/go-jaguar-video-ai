@@ -5,7 +5,7 @@ export type Tipo = 'video' | 'audio' | 'imagen'
 export interface Ritmo { bpm: number; bpmAlt: number | null; confianza: number; duracion: number }
 export interface ProyectoResumen { slug: string; name: string; createdAt: string; ultimaEdicion: string; procesado: boolean; tieneEditor: boolean; material: number; referencias: number; duracion: number; preview: (Miniatura & { tipo: 'edicion' | 'material' }) | null }
 export type Modo = 'enlace' | 'copia'
-export interface Referencia { id: string; nombre: string; size: number; agregada: string; modo: Modo; existe: boolean; ruta: string; perfilDeEstilo: boolean; preview: Miniatura }
+export interface Referencia { id: string; nombre: string; size: number; agregada: string; modo: Modo; existe: boolean; ruta: string; perfilDeEstilo: boolean; preview: Miniatura; usos: number; ultimoUso: string | null; puntaje: number; nueva: boolean }
 export interface ArchivoInfo { name: string; size: number; lastModified: number }
 export interface ProyectoInfo {
   name: string; slug: string; createdAt: string; idioma: string; referencias: string[]; procesado?: string

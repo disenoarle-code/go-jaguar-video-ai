@@ -69,7 +69,7 @@ const tarjetas = (ps: ProyectoResumen[]) => ps.map(p => `
   <div class="card">
     <button class="trash cardtrash" data-delproj="${p.slug}" data-nombre="${esc(p.name)}" title="Borrar proyecto">${ico('trash')}</button>
     <div class="thumb">${cardThumb(p.preview)}</div>
-    <button class="cardlink" data-slug="${p.slug}">
+    <button class="cardlink" data-slug="${p.slug}" data-editor="${p.tieneEditor ? 1 : 0}">
       <div class="card-title">${esc(p.name)}</div>
       <div class="chips">
         ${p.procesado ? '<span class="chip ok">Editado</span>' : `<span class="chip">${p.material ? `${p.material} video${p.material > 1 ? 's' : ''}` : 'Sin material'}</span>`}
@@ -121,7 +121,7 @@ export async function renderHome() {
     try { const p = await api.crearProyecto(name); go(`#/p/${p.slug}`) } catch (err) { alert((err as Error).message) }
   })
   const bindCards = () => {
-    root().querySelectorAll<HTMLElement>('.cardlink').forEach(c => { c.onclick = () => go(`#/p/${c.dataset.slug}`) })
+    root().querySelectorAll<HTMLElement>('.cardlink').forEach(c => { c.onclick = () => go(c.dataset.editor === '1' ? `#/editor/${c.dataset.slug}` : `#/p/${c.dataset.slug}`) })     // con edición: directo al editor; la página de proyecto es solo para la primera edición
     root().querySelectorAll<HTMLElement>('[data-delproj]').forEach(b => {
       b.onclick = async () => {
         const ok = await confirmar('Borrar proyecto', `Se borra el proyecto <b>${esc(b.dataset.nombre ?? '')}</b>: su edición, textos, transcripción y copias livianas. <b>Tus videos originales enlazados no se borran.</b> Si subiste copias dentro del proyecto, también se borran.`, 'Borrar proyecto')

@@ -317,18 +317,63 @@ interface RefLink { id: string; name: string; stem: string; ruta: string; size: 
 
 async function listReferences() {
   await ensureLibrary()
-  type Ref = { id: string; nombre: string; size: number; agregada: string; modo: 'enlace' | 'copia'; existe: boolean; ruta: string; perfilDeEstilo: boolean; preview: Awaited<ReturnType<typeof previewInfo>> }
+  type Ref = { id: string; nombre: string; size: number; agregada: string; modo: 'enlace' | 'copia'; existe: boolean; ruta: string; perfilDeEstilo: boolean; preview: Awaited<ReturnType<typeof previewInfo>>; usos: number; ultimoUso: string | null; puntaje: number; nueva: boolean }
   const out: Ref[] = []
   const push = async (id: string, nombre: string, modo: 'enlace' | 'copia', ruta: string, size: number, agregada: string) => {
     const existe = await exists(ruta)
     out.push({ id, nombre, size: existe ? (await fsp.stat(ruta)).size : size, agregada, modo, existe, ruta,
-      perfilDeEstilo: await exists(path.join(REFS, `${nombre}.estilo.json`)), preview: await previewInfo(ruta, path.join(REFS, '.previews'), 'referencias/.previews', id) })
+      perfilDeEstilo: await exists(path.join(REFS, `${nombre}.estilo.json`)), preview: await previewInfo(ruta, path.join(REFS, '.previews'), 'referencias/.previews', id), usos: 0, ultimoUso: null, puntaje: 0, nueva: false })
   }
   for (const f of await listFiles(REFS)) {
     if (f.name.endsWith('.ref.json')) { const r = await readJson<RefLink | null>(path.join(REFS, f.name), null); if (r) await push(r.id, r.stem, 'enlace', r.ruta, r.size, r.agregada) }
     else if (!f.name.endsWith('.json') && isVideoName(f.name)) await push(f.name, stemOf(f.name), 'copia', path.join(REFS, f.name), f.size, f.mtime)
   }
-  return out.sort((a, b) => a.nombre.localeCompare(b.nombre))
+  // Orden MIXTO: lo nuevo y lo que más (y más recientemente) se usa va primero.
+  const uso = await leerUso(), dias = (iso: string) => Math.max(0, (Date.now() - new Date(iso).getTime()) / 864e5)
+  for (const r of out) { const u = uso[r.id]; r.usos = u ? u.proyectos.length + u.pedidos : 0; r.ultimoUso = u?.ultimoUso ?? null }
+  const maxUsos = Math.max(0, ...out.map(r => r.usos))
+  for (const r of out) {
+    const recencia = Math.exp(-dias(r.agregada) / 10)                                                    // nueva ≈ 1; a las 2–3 semanas casi 0
+    const frecuencia = r.usos && r.ultimoUso ? (Math.log2(1 + r.usos) / Math.log2(1 + maxUsos)) * Math.exp(-dias(r.ultimoUso) / 45) : 0   // muy usada y usada hace poco ≈ 1
+    r.puntaje = Math.round((0.45 * recencia + 0.55 * frecuencia) * 1000) / 1000
+    r.nueva = dias(r.agregada) < 3
+  }
+  return out.sort((a, b) => b.puntaje - a.puntaje || b.agregada.localeCompare(a.agregada))
+}
+
+// --- uso de las referencias: cuántos proyectos las eligieron y cuántos pedidos a Claude las incluyeron ---
+type Uso = Record<string, { proyectos: string[]; pedidos: number; ultimoUso?: string }>
+const leerUso = () => readJson<Uso>(path.join(REFS, 'uso.json'), {})
+async function registrarUso(slug: string, ids: string[], tipo: 'seleccion' | 'pedido') {
+  if (!ids.length) return
+  const uso = await leerUso(), ahora = new Date().toISOString()
+  for (const id of ids) {
+    const u = (uso[id] ??= { proyectos: [], pedidos: 0 })
+    if (tipo === 'seleccion' && !u.proyectos.includes(slug)) u.proyectos.push(slug)
+    if (tipo === 'pedido') u.pedidos++
+    u.ultimoUso = ahora
+  }
+  await writeJson(path.join(REFS, 'uso.json'), uso)
+}
+
+/**
+ * Contexto para Claude: qué referencias tiene seleccionadas el usuario en este proyecto, cuál subió última y qué cambió hace poco.
+ * Claude lee este archivo cuando el usuario mencione "la referencia", "la nueva referencia", etc.
+ */
+async function escribirContextoReferencias(slug: string, eventos: { tipo: 'subida' | 'seleccionada' | 'deseleccionada'; id: string; nombre: string }[] = []) {
+  const meta = await loadMeta(slug); if (!meta) return
+  const todas = await listReferences(), sel = new Set(meta.referencias ?? [])
+  const f = path.join(projDir(slug), 'referencias-activas.json')
+  const prev = await readJson<{ eventos?: unknown[] }>(f, {})
+  const ahora = new Date().toISOString()
+  const ultima = [...todas].sort((a, b) => b.agregada.localeCompare(a.agregada))[0]
+  await writeJson(f, {
+    actualizado: ahora,
+    leer_primero: 'Estas son las referencias que el usuario TIENE SELECCIONADAS en este proyecto. Si pide hacer algo "con la referencia" o "con la nueva referencia", se refiere a estas (la más reciente de `eventos` / `ultimaSubida`). Para analizarlas usa la ruta del video; si ya hay perfil de estilo (perfilDeEstilo) úsalo.',
+    seleccionadas: todas.filter(r => sel.has(r.id)).map(r => ({ id: r.id, nombre: r.nombre, ruta: r.ruta, existe: r.existe, agregada: r.agregada, usos: r.usos, perfilDeEstilo: r.perfilDeEstilo })),
+    ultimaSubida: ultima ? { id: ultima.id, nombre: ultima.nombre, agregada: ultima.agregada, seleccionada: sel.has(ultima.id) } : null,
+    eventos: [...eventos.map(e => ({ fecha: ahora, ...e })), ...((prev.eventos as unknown[]) ?? [])].slice(0, 20),
+  })
 }
 
 async function linkReferences(rutas: string[]) {
@@ -354,6 +399,9 @@ async function seleccionarEnProyecto(slug: string | null, ids: string[]) {
   const meta = await loadMeta(slug); if (!meta) return
   meta.referencias = [...new Set([...(meta.referencias ?? []), ...ids])]
   await writeJson(path.join(projDir(slug), 'proyecto.json'), meta)
+  await registrarUso(slug, ids, 'seleccion')
+  const nombres = new Map((await listReferences()).map(r => [r.id, r.nombre]))
+  await escribirContextoReferencias(slug, ids.flatMap(id => [{ tipo: 'subida' as const, id, nombre: nombres.get(id) ?? id }, { tipo: 'seleccionada' as const, id, nombre: nombres.get(id) ?? id }]))
 }
 
 // --- diálogo nativo para elegir archivos (devuelve rutas reales: así no hace falta copiar nada) ----------------
@@ -739,7 +787,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       if (tipo !== 'completa') return send(res, 400, { error: 'Tipo de pedido no válido' })
       if (!meta.procesado) return send(res, 400, { error: 'Primero usa "Recorta silencios y errores"' })
       if (!meta.referencias.length) return send(res, 400, { error: 'Marca al menos una referencia' })
-      return send(res, 200, await crearSolicitud(meta.slug, 'completa', meta.referencias, (recomendacion ?? '').trim().slice(0, 2000) || undefined))
+      const sol = await crearSolicitud(meta.slug, 'completa', meta.referencias, (recomendacion ?? '').trim().slice(0, 2000) || undefined)
+      if (Date.now() - new Date(sol.creado).getTime() < 3000) await registrarUso(meta.slug, meta.referencias, 'pedido')     // pedir una edición basada en referencias cuenta como uso
+      return send(res, 200, sol)
     }
 
     if ((g = /^\/solicitudes\/([^/]+)\/cancelar$/.exec(p)) && m === 'POST') {
@@ -853,8 +903,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
       if (!meta) return send(res, 404, { error: 'Proyecto no encontrado' })
       const { ids } = JSON.parse((await readBody(req)) || '{}') as { ids: string[] }
+      const antes = new Set(meta.referencias ?? [])
       meta.referencias = (ids ?? []).map(safeName)
       await writeJson(path.join(projDir(g[1]), 'proyecto.json'), meta)
+      const ahora = new Set(meta.referencias), nombres = new Map((await listReferences()).map(r => [r.id, r.nombre]))
+      const agregadas = [...ahora].filter(i => !antes.has(i)), quitadas = [...antes].filter(i => !ahora.has(i))
+      await registrarUso(g[1], agregadas, 'seleccion')
+      await escribirContextoReferencias(g[1], [...agregadas.map(id => ({ tipo: 'seleccionada' as const, id, nombre: nombres.get(id) ?? id })), ...quitadas.map(id => ({ tipo: 'deseleccionada' as const, id, nombre: nombres.get(id) ?? id }))])
       return send(res, 200, { referencias: meta.referencias })
     }
 

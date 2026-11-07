@@ -91,7 +91,8 @@ export async function bootEditor(slug: string) {
     clearTimeout(autosaveTimer)
     autosaveTimer = window.setTimeout(() => { void guardar() }, 1200)
   })
-  $('back').onclick = async () => { await guardar(); location.hash = `#/p/${slug}` }
+  // el logo lleva a la página principal (todos los proyectos), guardando antes
+  $('home').onclick = async e => { e.preventDefault(); await guardar(); location.hash = '#/' }
   window.addEventListener('beforeunload', e => { if (JSON.stringify(store.project) !== savedJson) e.preventDefault() })
 
   // --- exportar a MP4 (lo hace el servidor con ffmpeg; aquí solo se eligen las opciones) ---
@@ -443,8 +444,67 @@ export async function bootEditor(slug: string) {
   }
   const poolSignature = () => JSON.stringify([store.project.assets.map(a => a.id), [...used()].sort(), poolQuery, poolFilter])
   function updatePool() { const sig = poolSignature(); if (sig !== poolSig && insp.querySelector('.pool')) { poolSig = sig; poolList() } }
+  // --- pestañas del panel: Medios | Referencias ---
+  let panelTab: 'medios' | 'referencias' = 'medios', refSeq = 0
+  const tabsHtml = () => `<div class="pool-tabs"><button class="ptab ${panelTab === 'medios' ? 'on' : ''}" data-t="medios">Medios</button><button class="ptab ${panelTab === 'referencias' ? 'on' : ''}" data-t="referencias">Referencias</button></div>`
+  const wireTabs = () => insp.querySelectorAll<HTMLButtonElement>('.ptab').forEach(b => { b.onclick = () => { panelTab = b.dataset.t as typeof panelTab; buildPool() } })
+
+  /** Referencias: se importan, se seleccionan (quedan registradas para Claude) y se ordenan por lo nuevas y lo usadas que son. */
+  type Ref = { id: string; nombre: string; usos: number; nueva: boolean; preview: { poster: string | null; video: string | null; listo: boolean } }
+  async function buildRefs() {
+    const mine = ++refSeq
+    insp.innerHTML = `<div class="pool">${tabsHtml()}<div class="pool-top"><button id="r-import" class="pimp" title="Elige videos de tu computador: se enlazan, no se copian"><b>+</b> Importar referencia</button></div>
+      <p class="hint dimmer" style="margin:0 0 8px">Toca una para seleccionarla en este proyecto: Claude la verá. Primero van las nuevas y las que más usas.</p>
+      <div class="ref-list"></div><p class="pool-note dim" id="r-note"></p></div>`
+    wireTabs()
+    const note = insp.querySelector<HTMLElement>('#r-note')!
+    const abrirVideo = (r: Ref) => {
+      if (!r.preview.video) return
+      const m = document.createElement('div'); m.className = 'modal'; m.innerHTML = `<div class="modal-box"><h2>${r.nombre.replace(/[<&]/g, '')}</h2><video src="/${r.preview.video}" controls autoplay playsinline style="width:100%;max-height:60vh;border-radius:12px;background:#000"></video></div>`
+      m.onclick = e => { if (e.target === m) m.remove() }; document.body.append(m)
+    }
+    async function cargar() {
+      const [lista, info] = await Promise.all([fetch('/api/referencias').then(r => r.json()) as Promise<Ref[]>, fetch(`/api/proyectos/${slug}`).then(r => r.json())])
+      const list = insp.querySelector<HTMLElement>('.ref-list')
+      if (mine !== refSeq || !list) return                  // ya se cambió de panel
+      const sel = new Set<string>(info.referencias ?? [])
+      const frag = document.createDocumentFragment()      // se arma aparte y se cambia de una vez (sin parpadeo)
+      if (!lista.length) frag.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'Aún no hay referencias. Pulsa Importar referencia.' }))
+      for (const r of lista) {
+        const card = document.createElement('div'); card.className = 'rcard' + (sel.has(r.id) ? ' on' : '')
+        card.innerHTML = `<div class="rthumb">${r.preview.poster ? `<img src="/${r.preview.poster}" alt="">` : '<span class="ph-t">Preparando…</span>'}
+          <span class="rchk">${sel.has(r.id) ? ico('check') : ''}</span>${r.nueva ? '<span class="rbadge">Nueva</span>' : ''}${r.usos ? `<span class="rbadge u">Usada ${r.usos}×</span>` : ''}
+          ${r.preview.video ? '<button class="rplay" title="Ver la referencia">▶</button>' : ''}</div><div class="pname" title="${r.nombre.replace(/["<&]/g, '')}">${r.nombre.replace(/[<&]/g, '')}</div>`
+        card.querySelector<HTMLElement>('.rplay')?.addEventListener('click', e => { e.stopPropagation(); abrirVideo(r) })
+        card.onclick = async () => {
+          if (sel.has(r.id)) sel.delete(r.id); else sel.add(r.id)
+          card.classList.toggle('on', sel.has(r.id)); card.querySelector('.rchk')!.innerHTML = sel.has(r.id) ? ico('check') : ''
+          await fetch(`/api/proyectos/${slug}/referencias`, { method: 'PUT', body: JSON.stringify({ ids: [...sel] }), headers: { 'content-type': 'application/json' } })
+          note.textContent = sel.has(r.id) ? `✓ "${r.nombre}" seleccionada. Claude ya sabe que la elegiste.` : `"${r.nombre}" ya no está seleccionada.`
+        }
+        frag.append(card)
+      }
+      list.replaceChildren(frag)
+      if (lista.some(r => !r.preview.listo)) setTimeout(() => { if (mine === refSeq) void cargar() }, 2500)     // las miniaturas se generan en segundo plano
+    }
+    insp.querySelector<HTMLButtonElement>('#r-import')!.onclick = async ev => {
+      const btn = ev.currentTarget as HTMLButtonElement; btn.disabled = true; btn.innerHTML = 'Elige los archivos…'
+      try {
+        const r = await fetch(`/api/referencias/elegir?proyecto=${slug}`, { method: 'POST' }).then(r => r.json())
+        if (r.error) throw new Error(r.error)
+        note.textContent = r.agregados?.length ? `✓ Subida y seleccionada: ${r.agregados.join(', ')}. Claude ya sabe que la subiste.` : ''
+      } catch (e) { note.textContent = (e as Error).message }
+      btn.disabled = false; btn.innerHTML = '<b>+</b> Importar referencia'
+      await cargar()
+    }
+    await cargar()
+  }
+
   function buildPool() {
-    insp.innerHTML = `<div class="pool"><div class="pool-tabs"><span class="ptab on">Medios</span></div><div class="pool-top"><button id="p-import" class="pimp" title="Elige archivos de tu computador: se enlazan, no se copian"><b>+</b> Importar</button><input id="p-q" type="text" placeholder="Buscar" /></div><div class="pool-filter"><button data-f="todo">Todo</button><button data-f="video">Videos</button><button data-f="audio">Audio</button></div><div class="pool-list"></div><p class="pool-note dim" id="p-note"></p></div>`
+    refSeq++
+    if (panelTab === 'referencias') { void buildRefs(); return }
+    insp.innerHTML = `<div class="pool">${tabsHtml()}<div class="pool-top"><button id="p-import" class="pimp" title="Elige archivos de tu computador: se enlazan, no se copian"><b>+</b> Importar</button><input id="p-q" type="text" placeholder="Buscar" /></div><div class="pool-filter"><button data-f="todo">Todo</button><button data-f="video">Videos</button><button data-f="audio">Audio</button></div><div class="pool-list"></div><p class="pool-note dim" id="p-note"></p></div>`
+    wireTabs()
     const q = insp.querySelector<HTMLInputElement>('#p-q')!; q.value = poolQuery
     q.oninput = () => { poolQuery = q.value; poolSig = ''; updatePool() }
     const filters = [...insp.querySelectorAll<HTMLButtonElement>('.pool-filter button')]
