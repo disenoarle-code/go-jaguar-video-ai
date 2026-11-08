@@ -140,7 +140,15 @@ Referencia que le gusta al usuario (perfil en `biblioteca/referencias/adrian-sae
 - `preguntas` {items: JSON [[texto, segundos desde el inicio]], acento}: tarjetas de cristal con «?» que aparecen una por una.
 - `ficha` {texto, estado:'si'|'no', lado, y}: ficha con interruptor que cambia (verde = sí, rojo = no).
 - `fondo` {tono:'negro'|'crema', acento}: cubre todo el cuadro (corte a «pantalla de gráfico»); el video sigue sonando; va ANTES de los gráficos que lleva encima. Ejemplo de uso: `fondo` + `contador` o `fondo` + `preguntas`.
-Receta: pasar la transcripción alineada a tiempos de la línea de tiempo (palabras → clips) y poner el gráfico justo en la palabra. Faltan: imágenes en la línea de tiempo (polaroids), texto DETRÁS de la persona (necesita recorte: `experiments/estilo-3d/scripts/matte.swift`), plantillas de barras y layout dividido. Los videos de apoyo (B-roll) los consigue el usuario: pídeselos con la lista de momentos exactos.
+Receta: pasar la transcripción alineada a tiempos de la línea de tiempo (palabras → clips) y poner el gráfico justo en la palabra. Faltan: imágenes en la línea de tiempo (polaroids), plantillas de barras y layout dividido. Los videos de apoyo (B-roll) los consigue el usuario: pídeselos con la lista de momentos exactos.
+
+## Recorte de persona (texto DETRÁS de la persona), multiplataforma
+
+`scripts/recortar-persona.py` usa **Robust Video Matting** (modelo ONNX MobileNetV3 de ~15 MB con `onnxruntime`; nada de Mac, sirve igual en Windows y Linux). Licencia del modelo: **GPL-3.0** (se descarga aparte, no va dentro del repo; revisar antes de redistribuirlo empaquetado). Instalación única (pedir permiso): `python3 -m venv ~/.gojaguar-recorte && ~/.gojaguar-recorte/bin/pip install onnxruntime numpy pillow` (Windows: carpeta `Scripts` en vez de `bin`) y bajar `rvm_mobilenetv3_fp32.onnx` (release v1.0.0 de github.com/PeterL1n/RobustVideoMatting) a `~/.gojaguar-recorte/modelos/`.
+Uso: `~/.gojaguar-recorte/bin/python scripts/recortar-persona.py biblioteca/proyectos/<slug>/proxies/<video>.proxy.mp4 biblioteca/proyectos/<slug>/proxies/<video>.recorte.mp4 --fps 30` (~11 cuadros/s en CPU de un M1: 105 s de video tardan ~4,5 min; `--png carpeta` guarda cuadros para revisar la calidad). Sale un video en grises (blanco = persona) con TODOS los cuadros clave, que el editor necesita para buscar rápido.
+- El editor detecta solo `proxies/<video>.recorte.mp4` (`player.mattes`). Un gráfico con `props.detras = '1'` (casilla "Poner detrás de la persona" en su panel, o `update_layer`) se dibuja entre el video y la persona recortada; sin recorte se ve al frente.
+- Exportación (`exportar.ts`): los rótulos salen en dos secuencias (`capa` 'detras' y 'frente'); la máscara pasa por el MISMO encuadre, zoom y movimiento que el clip y `alphamerge` pone la persona encima.
+- Para que el efecto se note y se lea, la plantilla `clave` va con `pos` = altura 0–1 en número ≈ tope de la cabeza + 0,03 (la cabeza tapa solo la parte de abajo de las letras). El tope de la cabeza se mide en la máscara (primera fila con blanco).
 
 ## Atajos de la línea de tiempo (como CapCut)
 
