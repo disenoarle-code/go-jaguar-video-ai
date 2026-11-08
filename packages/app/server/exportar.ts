@@ -246,9 +246,16 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
       cur = `b${j + 1}`
     } else if (o.kind === 'video' && !ts('v' + o.track).hidden) {
       const R = `(min(W,H)*0.06)`
+      const pack = assets.get(o.assetId)?.alfa === 'pack'     // video con transparencia (color | alfa lado a lado): se separa y se funde con alphamerge
+      if (pack) {
+        vf.push(`[${k}:v]split[pks${j}][pkm${j}]`)
+        vf.push(`[pks${j}]crop=iw/2:ih:0:0[pkc${j}]`)
+        vf.push(`[pkm${j}]crop=iw/2:ih:iw/2:0,negate,format=gray[pkg${j}]`)
+        vf.push(`[pkc${j}][pkg${j}]alphamerge,unpremultiply=inplace=1[pku${j}]`)
+      }
       const round = `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(abs(X-W/2)-(W/2-${R}),0)*gt(abs(Y-H/2)-(H/2-${R}),0)*gt(hypot(abs(X-W/2)-(W/2-${R}),abs(Y-H/2)-(H/2-${R})),${R}),0,alpha(X,Y))'`
       const cr = o.crop ? `,crop=iw*${num(1 - o.crop.l - o.crop.r)}:ih*${num(1 - o.crop.t - o.crop.b)}:iw*${num(o.crop.l)}:ih*${num(o.crop.t)}` : ''
-      vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps}${cr},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${round},colorchannelmixer=aa=${num(o.transform.opacity)}${o.transicion ? `,fade=t=in:st=${num(o.start)}:d=0.35:alpha=1,fade=t=out:st=${num(Math.max(o.start, o.start + D - 0.3))}:d=0.3:alpha=1` : ''}${o.transform.rotation ? `,rotate=a=${num(o.transform.rotation * Math.PI / 180)}:ow='rotw(${num(o.transform.rotation * Math.PI / 180)})':oh='roth(${num(o.transform.rotation * Math.PI / 180)})':c=none` : ''}[ov${j}]`)
+      vf.push(`[${pack ? `pku${j}` : `${k}:v`}]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps}${cr},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${pack ? '' : round + ','}colorchannelmixer=aa=${num(o.transform.opacity)}${o.transicion ? `,fade=t=in:st=${num(o.start)}:d=0.35:alpha=1,fade=t=out:st=${num(Math.max(o.start, o.start + D - 0.3))}:d=0.3:alpha=1` : ''}${o.transform.rotation ? `,rotate=a=${num(o.transform.rotation * Math.PI / 180)}:ow='rotw(${num(o.transform.rotation * Math.PI / 180)})':oh='roth(${num(o.transform.rotation * Math.PI / 180)})':c=none` : ''}[ov${j}]`)
       vf.push(`[${cur}][ov${j}]overlay=x='${num(W * o.transform.x)}-w/2':y='${num(H * o.transform.y)}-h/2${o.transicion === 'subir' ? `+${num(H * 0.025)}*pow(max(0,1-(t-${num(o.start)})/0.35),2)` : ''}':eof_action=pass:enable='between(t,${num(o.start)},${num(o.start + D)})'[b${j + 1}]`)
       cur = `b${j + 1}`
     }

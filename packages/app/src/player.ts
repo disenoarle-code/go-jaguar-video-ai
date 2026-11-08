@@ -445,6 +445,8 @@ export class Player {
         if (!vf) { void asset.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}); continue }
         f = vf; fw = vf.displayWidth || vf.codedWidth; fh = vf.displayHeight || vf.codedHeight
       }
+      const pack = this.store.asset(o.assetId)?.alfa === 'pack'        // video con transparencia: color | alfa lado a lado
+      if (pack) fw = fw / 2
       const screen = o.blend === 'screen'      // luces: cubren todo el cuadro y suman su luz al video de abajo
       const cr = o.crop, sx0 = cr ? fw * cr.l : 0, sy0 = cr ? fh * cr.t : 0
       if (cr) { fw = fw * (1 - cr.l - cr.r); fh = fh * (1 - cr.t - cr.b) }      // recorte de bordes: lo que queda es lo que se encuadra
@@ -459,6 +461,14 @@ export class Player {
       if (dy) this.ctx.translate(0, dy)
       if (o.transform.rotation && !screen) { this.ctx.translate(o.transform.x * W, o.transform.y * H); this.ctx.rotate((o.transform.rotation * Math.PI) / 180); this.ctx.translate(-o.transform.x * W, -o.transform.y * H) }
       this.ctx.globalAlpha = o.transform.opacity * alfaT
+      if (pack) {
+        // 1) la mitad derecha (alfa invertido) con 'multiply' apaga el fondo donde hay objeto; 2) la izquierda (color premultiplicado) se SUMA con 'lighter'
+        try {
+          this.ctx.globalCompositeOperation = 'multiply'; this.ctx.drawImage(f, fw, sy0, fw, fh, x, y, w, h)
+          this.ctx.globalCompositeOperation = 'lighter'; this.ctx.drawImage(f, sx0, sy0, fw, fh, x, y, w, h)
+        } catch { /* frame cerrado por el LRU */ }
+        this.ctx.restore(); continue
+      }
       if (screen) this.ctx.globalCompositeOperation = 'screen'
       else { this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.06); this.ctx.clip() }
       try { this.ctx.drawImage(f, sx0, sy0, fw, fh, x, y, w, h) } catch { /* frame cerrado por el LRU */ }

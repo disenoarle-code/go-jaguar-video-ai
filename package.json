@@ -11,7 +11,10 @@
     "test": "vitest run",
     "check": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/app",
     "vigilar": "node scripts/vigilar-solicitudes.mjs",
-    "solicitud": "node scripts/solicitud.mjs"
+    "solicitud": "node scripts/solicitud.mjs",
+    "progreso": "node scripts/progreso.mjs",
+    "nota-estilo": "node scripts/nota-estilo.mjs",
+    "aprender": "python3 scripts/aprender.py"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

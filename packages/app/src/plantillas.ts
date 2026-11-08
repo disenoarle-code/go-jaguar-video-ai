@@ -17,7 +17,7 @@ const clamp01 = (x: number) => Math.min(Math.max(x, 0), 1)
 const easeOut3 = (x: number) => 1 - Math.pow(1 - clamp01(x), 3)
 const easeBack = (x: number) => { const c1 = 1.70158, c3 = c1 + 1, v = clamp01(x); return 1 + c3 * Math.pow(v - 1, 3) + c1 * Math.pow(v - 1, 2) }
 const FONT = (px: number, w = 800) => `${w} ${px}px Figtree, "Segoe UI", system-ui, sans-serif`
-export const PLANTILLAS_NUEVAS = ['fondo', 'clave', 'busqueda', 'contador', 'preguntas', 'ficha', 'foto']
+export const PLANTILLAS_NUEVAS = ['fondo', 'clave', 'busqueda', 'contador', 'preguntas', 'ficha', 'foto', 'barras', 'flujo', 'comparacion']
 const VERDE = '#2fd18b', ROJO = '#ff5a4d', ORO = '#ffc233'
 
 /** Panel de cristal oscuro con borde brillante. */
@@ -52,6 +52,7 @@ export function cajaPlantilla(c: Ctx, o: L & { template: string }): Rect | null 
     case 'contador': return { x: W * 0.12, y: H * 0.08, w: W * 0.76, h: H * 0.2 }
     case 'foto': { const lado = o.props?.lado ?? 'izq', w = W * Number(o.props?.w ?? 0.46), yy = Number(o.props?.y ?? 0.6); return { x: (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W - w / 2, y: H * yy - w * 0.6, w, h: w * 1.2 } }
     case 'preguntas': return { x: W * 0.07, y: H * 0.09, w: W * 0.86, h: H * 0.3 }
+    case 'barras': case 'flujo': case 'comparacion': return { x: W * 0.06, y: H * 0.1, w: W * 0.88, h: H * 0.46 }
     case 'ficha': { const lado = o.props?.lado ?? 'der', yy = Number(o.props?.y ?? 0.3), w = W * 0.52; return { x: (lado === 'izq' ? 0.05 : lado === 'der' ? 0.95 - 0.52 : 0.24) * W, y: H * yy - H * 0.03, w, h: H * 0.06 } }
   }
   return null
@@ -221,6 +222,69 @@ function dibujarFoto(c: Ctx, o: L, t: number) {
   c.restore()
 }
 
+// ---------------------------------------------------------------- animaciones 2D PARAMETRIZADAS (explicar algo complejo sin escribir código nuevo) ----
+// Una zona de la propuesta del tipo `animacion_2d` se crea con UNA capa `graphic` y sus props (≈200 tokens), no con código por video:
+//   barras       props: titulo, items = JSON [["etiqueta", valor], …], unidad ('%', '$'…), acento, resalta (índice de la barra que se destaca)
+//   flujo        props: titulo, items = JSON ["paso 1", "paso 2", …] (se encienden uno a uno con flechas), acento
+//   comparacion  props: titulo, izq = "Antes", der = "Después", itemsIzq = JSON ["…"], itemsDer = JSON ["…"], acento (lado derecho)
+// Siempre sobre un `fondo` plano (ver regla de fondo plano). Dependen solo del tiempo `t`: vista previa y exportación coinciden.
+const lista = (x?: string): unknown[] => { try { const v = JSON.parse(x ?? '[]'); return Array.isArray(v) ? v : [] } catch { return [] } }
+function titulo2d(c: Ctx, o: L, tt: number, acc: string) {
+  const tx = o.props?.titulo ?? o.text; if (!tx) return
+  c.save(); c.globalAlpha = clamp01(tt / 0.3); c.fillStyle = '#fff'; c.textBaseline = 'middle'
+  let fs = W * 0.06; c.font = FONT(fs, 900); while (c.measureText(tx).width > W * 0.84 && fs > W * 0.03) { fs *= 0.95; c.font = FONT(fs, 900) }
+  c.fillText(tx, W / 2 - c.measureText(tx).width / 2, H * 0.12); c.fillStyle = acc; c.fillRect(W / 2 - W * 0.06, H * 0.155, W * 0.12, 4); c.restore()
+}
+function dibujarBarras(c: Ctx, o: L, t: number) {
+  const it = lista(o.props?.items) as [string, number][], acc = o.props?.acento ?? ORO, uni = o.props?.unidad ?? '', res = o.props?.resalta === undefined ? -1 : Number(o.props.resalta)
+  if (!it.length) return
+  const tt = t - o.start, dur = o.end - o.start, ex = clamp01((tt - (dur - 0.35)) / 0.35), max = Math.max(...it.map(x => Number(x[1])), 1)
+  c.save(); c.globalAlpha = 1 - ex; titulo2d(c, o, tt, acc)
+  const x0 = W * 0.1, ancho = W * 0.8, bh = Math.min(H * 0.07, (H * 0.4) / it.length), gap = bh * 0.45, y0 = H * 0.22
+  it.forEach(([et, v], i) => {
+    const k = easeOut3((tt - 0.3 - i * 0.18) / 0.7), y = y0 + i * (bh + gap), len = ancho * 0.56 * (Number(v) / max) * k, col = res < 0 || i === res ? acc : '#5b5b63'
+    c.fillStyle = '#fff'; c.font = FONT(bh * 0.42, 700); c.textBaseline = 'middle'; c.globalAlpha = (1 - ex) * clamp01(k * 3); c.fillText(String(et), x0, y + bh / 2)
+    const bx = x0 + ancho * 0.26; c.fillStyle = 'rgba(255,255,255,.08)'; c.beginPath(); c.roundRect(bx, y, ancho * 0.56, bh, bh / 2); c.fill()
+    const g = c.createLinearGradient(bx, 0, bx + len, 0); g.addColorStop(0, col); g.addColorStop(1, `${col}cc`); c.fillStyle = g; c.beginPath(); c.roundRect(bx, y, Math.max(len, bh * 0.3), bh, bh / 2); c.fill()
+    c.fillStyle = '#fff'; c.font = FONT(bh * 0.44, 800); c.fillText(`${Math.round(Number(v) * k).toLocaleString('es-CO')}${uni}`, bx + len + bh * 0.3, y + bh / 2)
+  })
+  c.restore()
+}
+function dibujarFlujo(c: Ctx, o: L, t: number) {
+  const it = lista(o.props?.items).map(String), acc = o.props?.acento ?? ORO
+  if (!it.length) return
+  const tt = t - o.start, dur = o.end - o.start, ex = clamp01((tt - (dur - 0.35)) / 0.35), n = it.length
+  c.save(); c.globalAlpha = 1 - ex; titulo2d(c, o, tt, acc)
+  const w = W * 0.78, h = Math.min(H * 0.085, (H * 0.4) / n - H * 0.02), gap = Math.min(H * 0.045, (H * 0.4 - h * n) / Math.max(n - 1, 1)), x = W / 2 - w / 2, y0 = H * 0.22
+  it.forEach((tx, i) => {
+    const k = easeBack((tt - 0.3 - i * 0.45) / 0.45); if (k <= 0) return
+    const y = y0 + i * (h + gap)
+    c.save(); c.globalAlpha = (1 - ex) * clamp01(k * 2); c.translate(x + w / 2, y + h / 2); const s = 0.85 + 0.15 * Math.min(k, 1.1); c.scale(s, s); c.translate(-(x + w / 2), -(y + h / 2))
+    cristal(c, x, y, w, h, h * 0.3, acc)
+    const r = h * 0.3; c.fillStyle = acc; c.beginPath(); c.arc(x + h * 0.55, y + h / 2, r, 0, Math.PI * 2); c.fill()
+    c.fillStyle = '#000'; c.font = FONT(r * 1.3, 900); c.textBaseline = 'middle'; const nw = c.measureText(String(i + 1)).width; c.fillText(String(i + 1), x + h * 0.55 - nw / 2, y + h / 2 + 1)
+    let fs = h * 0.38; c.font = FONT(fs, 700); const disp = w - h * 1.5; while (c.measureText(tx).width > disp && fs > h * 0.15) { fs *= 0.95; c.font = FONT(fs, 700) }
+    c.fillStyle = '#fff'; c.fillText(tx, x + h * 1.15, y + h / 2 + 1); c.restore()
+    if (i < n - 1) { c.save(); c.globalAlpha = (1 - ex) * clamp01(k * 2); c.fillStyle = acc; const ax = W / 2, ay = y + h + gap / 2; c.beginPath(); c.moveTo(ax - gap * 0.35, ay - gap * 0.2); c.lineTo(ax + gap * 0.35, ay - gap * 0.2); c.lineTo(ax, ay + gap * 0.28); c.fill(); c.restore() }
+  })
+  c.restore()
+}
+function dibujarComparacion(c: Ctx, o: L, t: number) {
+  const acc = o.props?.acento ?? VERDE, tt = t - o.start, dur = o.end - o.start, ex = clamp01((tt - (dur - 0.35)) / 0.35)
+  const col = [{ n: o.props?.izq ?? 'Antes', it: lista(o.props?.itemsIzq).map(String), c: ROJO, x: W * 0.05, ti: 0.3 }, { n: o.props?.der ?? 'Después', it: lista(o.props?.itemsDer).map(String), c: acc, x: W * 0.52, ti: 0.9 }]
+  c.save(); c.globalAlpha = 1 - ex; titulo2d(c, o, tt, acc)
+  const w = W * 0.43, hh = H * 0.07, y0 = H * 0.22
+  for (const cl of col) {
+    const k = easeBack((tt - cl.ti) / 0.5); if (k <= 0) continue
+    c.save(); c.globalAlpha = (1 - ex) * clamp01(k * 2); c.translate(cl.x + w / 2, y0 + H * 0.2); const s = 0.9 + 0.1 * Math.min(k, 1.1); c.scale(s, s); c.translate(-(cl.x + w / 2), -(y0 + H * 0.2))
+    cristal(c, cl.x, y0, w, hh + (cl.it.length + 0.4) * hh * 0.95, hh * 0.3, cl.c)
+    c.fillStyle = cl.c; c.font = FONT(hh * 0.5, 900); c.textBaseline = 'middle'; c.fillText(String(cl.n).toUpperCase(), cl.x + hh * 0.4, y0 + hh * 0.6)
+    cl.it.forEach((tx, i) => { let fs = hh * 0.38; c.font = FONT(fs, 700); while (c.measureText(tx).width > w - hh * 0.8 && fs > hh * 0.18) { fs *= 0.95; c.font = FONT(fs, 700) } c.fillStyle = '#fff'; c.fillText(tx, cl.x + hh * 0.4, y0 + hh * 1.5 + i * hh * 0.95) })
+    c.restore()
+  }
+  c.restore()
+}
+
 /** Despacha las plantillas nuevas; devuelve true si dibujó alguna. */
 export function dibujarPlantillaNueva(c: Ctx, o: L & { template: string }, t: number): boolean {
   switch (o.template) {
@@ -231,6 +295,9 @@ export function dibujarPlantillaNueva(c: Ctx, o: L & { template: string }, t: nu
     case 'preguntas': dibujarPreguntas(c, o, t); return true
     case 'ficha': dibujarFicha(c, o, t); return true
     case 'foto': dibujarFoto(c, o, t); return true
+    case 'barras': dibujarBarras(c, o, t); return true
+    case 'flujo': dibujarFlujo(c, o, t); return true
+    case 'comparacion': dibujarComparacion(c, o, t); return true
   }
   return false
 }

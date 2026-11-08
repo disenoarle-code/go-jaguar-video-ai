@@ -1,18 +1,28 @@
 /** Cliente de la API local (server/api.ts). */
 export interface Herramientas { ffmpeg: boolean; ffprobe: boolean; whisper: boolean; whisperModel: boolean; hwaccel: string | null }
 export interface Miniatura { poster: string | null; video: string | null; audio: string | null; listo: boolean }
+export type Etapa = 'creacion' | 'editando' | 'editor'
+export interface PasoEdicion { id: string; label: string; estado: 'pendiente' | 'en_curso' | 'hecho' | 'omitido'; detalle?: string }
+export type Rol = 'principal' | 'apoyo' | 'camara'
 export type Tipo = 'video' | 'audio' | 'imagen'
 export interface Ritmo { bpm: number; bpmAlt: number | null; confianza: number; duracion: number }
-export interface ProyectoResumen { slug: string; name: string; createdAt: string; ultimaEdicion: string; procesado: boolean; tieneEditor: boolean; material: number; referencias: number; duracion: number; preview: (Miniatura & { tipo: 'edicion' | 'material' }) | null }
+export interface ProyectoResumen { slug: string; name: string; createdAt: string; ultimaEdicion: string; procesado: boolean; tieneEditor: boolean; guionPendiente?: boolean; material: number; referencias: number; duracion: number; preview: (Miniatura & { tipo: 'edicion' | 'material' }) | null }
 export type Modo = 'enlace' | 'copia'
 export interface Referencia { id: string; nombre: string; size: number; agregada: string; modo: Modo; existe: boolean; ruta: string; perfilDeEstilo: boolean; preview: Miniatura; usos: number; ultimoUso: string | null; puntaje: number; nueva: boolean }
 export interface ArchivoInfo { name: string; size: number; lastModified: number }
 export interface ProyectoInfo {
   name: string; slug: string; createdAt: string; idioma: string; referencias: string[]; procesado?: string
-  material: { id: string; tipo: Tipo; ritmo: Ritmo | null; name: string; modo: Modo; existe: boolean; ruta: string; size: number; preview: Miniatura }[]; tieneEditor: boolean
+  material: { id: string; rol: Rol; analizado?: boolean; tipo: Tipo; ritmo: Ritmo | null; name: string; modo: Modo; existe: boolean; ruta: string; size: number; preview: Miniatura }[]; tieneEditor: boolean; guionPendiente?: boolean; etapa?: Etapa; notas?: string
 }
+export interface Palabra { i: number; t0: number; t1: number; w: string; del?: boolean; mul?: boolean }
+export interface Parrafo { id: string; f: string; words: Palabra[] }
+export interface Guion { estado: 'revision'; parrafos: Parrafo[] }
+export interface Opcion { tipo: 'toma_apoyo' | 'imagen' | 'animacion_2d' | 'animacion_3d' | 'video_generado'; descripcion: string; apoyo?: { toma: string; t0?: number; t1?: number } | null; busqueda?: string | null }
+export interface Zona { id: string; f: string; t0: number; t1: number; texto: string; motivo: string; opciones: Opcion[]; elegida: number; prompt: string; aportes: string[]; decision: 'pendiente' | 'aceptada' | 'descartada' }
+export interface Propuesta { estado: string; zonas: Zona[] }
+export interface ApoyoInfo { stem: string; nombre: string; descripcion: string | null; hoja?: string | null; frames: { t: number; url: string }[] }
 export interface Paso { id: string; label: string; state: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string; pct?: number }
-export interface Solicitud { id: string; slug: string; tipo: 'errores' | 'completa'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error' | 'cancelado'; creado: string; nota?: string }
+export interface Solicitud { id: string; slug: string; tipo: 'propuesta' | 'edicion' | 'aprendizaje'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error' | 'cancelado'; creado: string; nota?: string }
 export interface Trabajo { id: string; status: 'running' | 'done' | 'error' | 'cancelado'; steps: Paso[]; error?: string }
 
 async function j<T>(r: Response): Promise<T> {
@@ -28,17 +38,28 @@ export const api = {
   crearProyecto: (name: string) => post('/api/proyectos', { name }).then(j<{ slug: string; name: string }>),
   proyecto: (slug: string) => fetch(`/api/proyectos/${slug}`).then(j<ProyectoInfo>),
   /** modo 'recorte' (opción 1: solo recorta) o 'completa' (opción 2: prepara el material y pide la edición completa en un solo paso). */
-  procesar: (slug: string, modo: 'recorte' | 'completa' = 'recorte', recomendacion = '') => post(`/api/proyectos/${slug}/procesar`, { modo, recomendacion }).then(j<{ jobId?: string; solicitud?: Solicitud }>),
+  procesar: (slug: string) => post(`/api/proyectos/${slug}/procesar`).then(j<{ jobId?: string; solicitud?: Solicitud }>),
+  guion: (slug: string) => fetch(`/api/proyectos/${slug}/guion`).then(j<Guion>),
+  guardarGuion: (slug: string, parrafos: Parrafo[]) => post(`/api/proyectos/${slug}/guion`, { parrafos }, 'PUT').then(j<{ ok: boolean }>),
+  propuesta: (slug: string) => fetch(`/api/proyectos/${slug}/propuesta`).then(j<{ propuesta: Propuesta | null; solicitud: Solicitud | null; apoyos: ApoyoInfo[]; notas: string }>),
+  pedirPropuesta: (slug: string) => post(`/api/proyectos/${slug}/propuesta`).then(j<Solicitud>),
+  guardarPropuesta: (slug: string, zonas: Zona[]) => post(`/api/proyectos/${slug}/propuesta`, { zonas }, 'PUT').then(j<{ ok: boolean }>),
+  guardarNotas: (slug: string, texto: string) => post(`/api/proyectos/${slug}/notas-edicion`, { texto }, 'PUT').then(j<{ ok: boolean }>),
+  verificacion: (slug: string, para: 'editar' | 'editor') => fetch(`/api/proyectos/${slug}/verificacion?para=${para}`).then(j<{ ok: boolean; problemas: { tipo: string; mensaje: string; id?: string; reparable?: boolean }[]; avisos: string[] }>),
+  reparar: (slug: string) => post(`/api/proyectos/${slug}/reparar`).then(j<{ regenerados: number }>),
+  fase: (slug: string) => fetch(`/api/proyectos/${slug}/fase`).then(j<{ etapa: Etapa; hayGuion: boolean; hayPropuesta: boolean }>),
+  editar: (slug: string) => post(`/api/proyectos/${slug}/editar`).then(j<Solicitud>),
+  estadoEdicion: (slug: string) => fetch(`/api/proyectos/${slug}/editar`).then(j<{ etapa: Etapa; solicitud: Solicitud | null; pasos: PasoEdicion[] }>),
+  cancelarEdicion: (slug: string) => post(`/api/proyectos/${slug}/editar/cancelar`).then(j<{ ok: boolean }>),
   trabajo: (id: string) => fetch(`/api/trabajos/${encodeURIComponent(id)}`).then(j<Trabajo>),
   cancelarTrabajo: (id: string) => post(`/api/trabajos/${encodeURIComponent(id)}/cancelar`).then(j<{ ok: boolean }>),
   cancelarSolicitud: (id: string) => post(`/api/solicitudes/${encodeURIComponent(id)}/cancelar`).then(j<{ ok: boolean }>),
   trabajoActivo: (slug: string) => fetch(`/api/proyectos/${slug}/trabajo`).then(j<Trabajo | null>),
-  pedirEdicionCompleta: (slug: string, recomendacion: string) => post(`/api/proyectos/${slug}/pedir`, { tipo: 'completa', recomendacion }).then(j<Solicitud>),
   solicitudes: (slug: string) => fetch(`/api/proyectos/${slug}/solicitudes`).then(j<Solicitud[]>),
   referencias: () => fetch('/api/referencias').then(j<Referencia[]>),
   setReferencias: (slug: string, ids: string[]) => post(`/api/proyectos/${slug}/referencias`, { ids }, 'PUT').then(j<{ referencias: string[] }>),
-  elegirMaterial: (slug: string) => post(`/api/proyectos/${slug}/material/elegir`).then(j<{ agregados: string[]; cancelado: boolean }>),
-  enlazarMaterial: (slug: string, archivos: ArchivoInfo[]) => post(`/api/proyectos/${slug}/material/enlazar`, { archivos }).then(j<{ enlazados: string[]; noEncontrados: string[] }>),
+  elegirMaterial: (slug: string, rol: Rol = 'principal') => post(`/api/proyectos/${slug}/material/elegir?rol=${rol}`).then(j<{ agregados: string[]; cancelado: boolean }>),
+  enlazarMaterial: (slug: string, archivos: ArchivoInfo[], rol: Rol = 'principal') => post(`/api/proyectos/${slug}/material/enlazar?rol=${rol}`, { archivos }).then(j<{ enlazados: string[]; noEncontrados: string[] }>),
   ubicarMaterial: (slug: string, id: string) => post(`/api/proyectos/${slug}/material/${encodeURIComponent(id)}/ubicar`).then(j<{ ok: boolean }>),
   elegirReferencias: (slug: string) => post(`/api/referencias/elegir?proyecto=${slug}`).then(j<{ agregados: string[]; cancelado: boolean }>),
   enlazarReferencias: (archivos: ArchivoInfo[], slug: string) => post(`/api/referencias/enlazar?proyecto=${slug}`, { archivos }).then(j<{ enlazados: string[]; noEncontrados: string[] }>),

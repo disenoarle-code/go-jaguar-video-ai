@@ -1,6 +1,6 @@
 import {
   CLIP_COLOR_DEFAULT, CLIP_TRANSFORM_DEFAULT, Store, describe, formatoDe, duration, exec, execBatch, layout, locate, parseProject, serialize, sincronizarPalabras,
-  TRANSITION_DEFAULTS, TRANSITION_KINDS, ZOOM_DEFAULTS, ZOOM_KINDS, type AssetInfo, type Cmd, type TransitionKind, type ZoomKind, type Project, type TextLayer,
+  TRANSITION_DEFAULTS, TRANSITION_KINDS, setAlComando, verificar, ZOOM_DEFAULTS, ZOOM_KINDS, type AssetInfo, type Cmd, type TransitionKind, type ZoomKind, type Project, type TextLayer,
 } from '@gojaguar/core'
 import { TRANSITION_INFO, ZOOM_INFO } from './fxinfo'
 import { H, W } from './constants'
@@ -15,6 +15,21 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`
 
 export async function bootEditor(slug: string) {
+  // verificación previa: si falta algún archivo NO se entra al editor (se quedaría cargando): se explica qué falta y se ofrece arreglarlo
+  let avisos: string[] = []
+  try {
+    const v = await fetch(`/api/proyectos/${slug}/verificacion?para=editor`).then(r => r.json()) as { ok: boolean; problemas: { mensaje: string; reparable?: boolean }[]; avisos: string[] }
+    avisos = v.avisos ?? []
+    if (!v.ok) {
+      const rep = v.problemas.some(p => p.reparable)
+      $('loading').innerHTML = `<div style="max-width:560px;margin:0 auto;text-align:left;display:flex;flex-direction:column;gap:12px"><b>No se puede abrir el editor todavía</b>
+        <ul style="margin:0;padding-left:20px;line-height:1.5">${v.problemas.map(p => `<li>${p.mensaje.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</li>`).join('')}</ul>
+        <div style="display:flex;gap:8px">${rep ? '<button id="reparar" class="primary">Reparar</button>' : ''}<a href="#/p/${slug}">${ico('arrow-left')} Volver al proyecto</a></div></div>`
+      const b = document.getElementById('reparar'); if (b) b.onclick = async () => { (b as HTMLButtonElement).disabled = true; b.textContent = 'Reparando…'; await fetch(`/api/proyectos/${slug}/reparar`, { method: 'POST' }); location.reload() }
+      return
+    }
+  } catch { /* sin verificación: se intenta abrir igual */ }
+  const lento = window.setTimeout(() => { const l = document.getElementById('loading'); if (l) l.innerHTML += `<div style="margin-top:12px;opacity:.8">Está tardando más de lo normal. Si no abre, vuelve al proyecto y revisa que los videos estén en su lugar.<br><a href="#/p/${slug}">${ico('arrow-left')} Volver al proyecto</a></div>` }, 25000)
   const res = await fetch(`/api/proyectos/${slug}/proyecto`)
   if (!res.ok) { $('loading').innerHTML = `${(await res.json().catch(() => ({ error: 'Error' }))).error}<br><a href="#/p/${slug}">${ico('arrow-left')} Volver al proyecto</a>`; return }
   const store = new Store(parseProject(await res.text()))
@@ -71,6 +86,7 @@ export async function bootEditor(slug: string) {
   }
   await loadMedia()
   setTimeout(() => void sincronizarVoz(), 300)      // (después de armar el aviso de la cabecera)
+  clearTimeout(lento)
   $('loading').remove()
   requestAnimationFrame(() => { tl.fit(); player.seek(0) })
 
@@ -939,12 +955,62 @@ export async function bootEditor(slug: string) {
   }
   requestAnimationFrame(frame)
 
+  // --- aprendizaje del estilo: se anota (sin gastar tokens) lo que el USUARIO hace a mano; las órdenes de Claude (window.editor.*) no cuentan ---
+  let porClaude = false
+  const cola: unknown[] = []
+  const resumen = (c: Cmd): Record<string, unknown> | null => {
+    const x = c as unknown as Record<string, any>
+    switch (c.op) {
+      case 'set_zoom': return { zoom: x.zoom ? { k: x.zoom.kind, a: x.zoom.amount } : null }
+      case 'set_transition': return { tr: x.transition ? { k: x.transition.kind, d: x.transition.duration } : null }
+      case 'set_clip_color': return { color: x.color ?? null }
+      case 'volume': case 'speed': case 'speed_all': return { v: x.value }
+      case 'add_text': case 'add_layer': return { tipo: x.type ?? x.layer?.type, tpl: x.template ?? x.layer?.template, size: x.size ?? x.layer?.size, color: x.color ?? x.layer?.color }
+      case 'update_layer': return { campos: Object.keys(x.patch ?? {}).join(',') }
+      case 'add_overlay': case 'clip_to_overlay': return { tr: x.transicion ?? null }
+      case 'update_overlay': return { campos: Object.keys(x.patch ?? {}).join(',') }
+      case 'delete_clip': case 'delete_layer': case 'delete_overlay': case 'split': case 'move_clip': case 'trim': case 'delete_range': case 'delete_ranges': case 'set_music': case 'clear_music': case 'set_format': case 'set_audio_fx': case 'set_clip_transform': return {}
+    }
+    return null
+  }
+  let envio = 0
+  setAlComando(c => {
+    if (porClaude) return
+    const r = resumen(c); if (!r) return
+    cola.push({ t: Date.now(), op: c.op, ...r })
+    clearTimeout(envio); envio = window.setTimeout(() => { const lote = cola.splice(0); void fetch(`/api/proyectos/${slug}/aprendizaje/eventos`, { method: 'POST', body: JSON.stringify(lote), keepalive: true }).catch(() => {}) }, 3000)
+  })
+
+  for (const a of avisos) notify(a)
+
   // API para que Claude (o los tests) controlen el editor con los mismos comandos que la UI
   ;(window as any).editor = {
     store, player, tl,
-    exec: (c: Cmd) => { const r = exec(store, c); void loadMedia(); return r },
-    batch: (cs: Cmd[]) => { const r = execBatch(store, cs); void loadMedia(); return r },   // carga también la música recién importada   // varios comandos = una sola entrada de deshacer
-    describe: () => describe(store),
+    exec: (c: Cmd) => { porClaude = true; try { const r = exec(store, c); void loadMedia(); return r } finally { porClaude = false } },
+    batch: (cs: Cmd[]) => { porClaude = true; try { const r = execBatch(store, cs); void loadMedia(); return r } finally { porClaude = false } },   // carga también la música recién importada   // varios comandos = una sola entrada de deshacer
+    /** `describe('corto')` = resumen sin el detalle de superpuestos y capas (mucho menos texto para leer). */
+    describe: (modo?: string) => describe(store, modo === 'corto'),
+    /** Verificación NUMÉRICA (regla de movimiento, avisos): texto corto, sin capturas. */
+    verificar: () => verificar(store.project).texto,
+    /** UNA sola imagen con N momentos de la vista previa (por defecto 12, incluyendo la entrada de cada toma/gráfico): se guarda en analisis/hoja-edicion.jpg para que Claude la mire de una vez. */
+    hoja: async (n = 12, momentos?: number[]) => {
+      const dur = duration(store.project), p = store.project
+      const clave = [...(p.overlays ?? []).filter(o => o.kind === 'video').map(o => o.start + 0.7), ...p.layers.filter(l => l.type === 'graphic').map(l => l.start + 0.8)]
+      const ts = (momentos ?? [...new Set([...clave, ...Array.from({ length: n }, (_, i) => (dur * (i + 0.5)) / n)].map(x => +Math.min(x, dur - 0.05).toFixed(2)))].sort((a, b) => a - b).slice(0, 16))
+      const cols = ts.length > 8 ? 4 : Math.min(3, ts.length), tw = 260, th = Math.round(tw * (H / W)), filas = Math.ceil(ts.length / cols)
+      const out = document.createElement('canvas'); out.width = cols * tw; out.height = filas * th
+      const g = out.getContext('2d')!; g.fillStyle = '#141414'; g.fillRect(0, 0, out.width, out.height); g.font = '700 16px sans-serif'
+      const was = player.time()
+      for (const [i, t] of ts.entries()) {
+        player.seek(t)
+        for (let k = 0; k < 40; k++) { await new Promise(r => setTimeout(r, 60)); player.tick(); if (!player.dirty && k >= 3) break }     // dibuja el cuadro aunque la pestaña esté en segundo plano (sin depender de requestAnimationFrame)
+        const x = (i % cols) * tw, y = Math.floor(i / cols) * th
+        g.drawImage(player.canvas, x, y, tw, th); g.fillStyle = '#000b'; g.fillRect(x, y, 70, 22); g.fillStyle = '#fff'; g.fillText(`${i + 1} ${tc(t)}`, x + 5, y + 16)
+      }
+      player.seek(was)
+      const r = await fetch(`/api/proyectos/${slug}/hoja-edicion`, { method: 'POST', body: out.toDataURL('image/jpeg', 0.75) })
+      return `${ts.length} momentos → ${(await r.json()).ruta}`
+    },
     serialize: () => serialize(store.project),
     snapshot: () => player.snapshotDataUrl(),
     bench: () => runBench(player, store),

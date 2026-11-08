@@ -1,4 +1,6 @@
 import { ico } from './icons'
+import { confirmar } from './ui'
+import { renderFases } from './fases'
 import { api, fmtDur, fmtSize, subir, type ArchivoInfo, type Miniatura, type Tipo, type ProyectoInfo, type ProyectoResumen, type Referencia, type Trabajo } from './api'
 
 const root = () => document.getElementById('shell')!
@@ -7,20 +9,6 @@ const VIDEO = /\.(mp4|mov|m4v|mkv|webm|avi)$/i
 const MATERIAL = /\.(mp4|mov|m4v|mkv|webm|avi|mp3|wav|m4a|aac|flac|ogg|aiff?|jpe?g|png|webp|heic|gif|bmp|tiff?)$/i
 const go = (hash: string) => { location.hash = hash }
 const BRAND = '<a class="brand" href="#/"><img src="/logo.svg" alt="Go Jaguar" /><span>Video AI</span></a>'
-
-/** Confirmación dentro de la página (el confirm() del navegador no aparece en algunos visores y cancela solo). */
-function confirmar(titulo: string, textoHtml: string, ok = 'Borrar', peligro = true): Promise<boolean> {
-  return new Promise(resolve => {
-    const m = document.createElement('div'); m.className = 'modal'
-    m.innerHTML = `<div class="modal-box"><h2>${esc(titulo)}</h2><p class="dim">${textoHtml}</p>
-      <div class="row"><button id="c-no">Cancelar</button><button class="${peligro ? 'danger' : 'primary'}" id="c-si">${esc(ok)}</button></div></div>`
-    document.body.appendChild(m)
-    const fin = (v: boolean) => { m.remove(); resolve(v) }
-    m.querySelector<HTMLElement>('#c-no')!.onclick = () => fin(false)
-    m.querySelector<HTMLElement>('#c-si')!.onclick = () => fin(true)
-    m.onclick = e => { if (e.target === m) fin(false) }
-  })
-}
 
 // --- tarjetas con miniatura reproducible -------------------------------------------------------------
 const thumb = (pv: Miniatura, tipo: Tipo = 'video') => tipo === 'audio'
@@ -40,13 +28,13 @@ const tipoIco = (t: Tipo) => t === 'audio' ? '♪' : t === 'imagen' ? '▣' : ''
 const modoChip = (_modo: 'enlace' | 'copia', existe: boolean) => !existe
   ? `<span class="miss" title="Moviste o borraste el original">${ico('warning')} no encontrado</span>` : ''
 
-const tilesMat = (m: ProyectoInfo['material']) => m.length ? m.map(f => `
+const tilesMat = (m: ProyectoInfo['material'], vacio = 'Aún no agregas material.') => m.length ? m.map(f => `
   <div class="tile ${f.existe ? '' : 'missing'}"><div class="thumb">${thumb(f.preview, f.tipo)}</div>
     <div class="cap"><span class="nm" title="${esc(f.name)}">${tipoIco(f.tipo)} ${esc(f.name)}</span>
-      <span class="dim small">${fmtSize(f.size)}</span>${fmtRitmo(f)}${modoChip(f.modo, f.existe)}
+      <span class="dim small">${fmtSize(f.size)}</span>${f.rol === 'camara' ? '<span class="chip dim">cámara · sin sincronizar</span>' : ''}${f.rol === 'apoyo' ? (f.analizado ? `<span class="chip ok" title="Fotogramas listos para que Claude vea qué muestra">${ico('check')} analizada</span>` : '<span class="chip dim">sacando fotogramas…</span>') : ''}${fmtRitmo(f)}${modoChip(f.modo, f.existe)}
       ${!f.existe && f.modo === 'enlace' ? `<button class="mini" data-ubicar="${esc(f.id)}">Ubicar</button>` : ''}
       <button class="trash" data-del="${esc(f.id)}" data-nombre="${esc(f.name)}" data-modo="${f.modo}" title="${f.modo === 'enlace' ? 'Quitar del proyecto (tu archivo no se borra)' : 'Borrar la copia del proyecto'}">${ico('trash')}</button></div>
-  </div>`).join('') : '<p class="dim">Aún no agregas material.</p>'
+  </div>`).join('') : `<p class="dim">${vacio}</p>`
 
 const tilesRef = (refs: Referencia[], linked: Set<string>) => refs.length ? refs.map(r => `
   <div class="tile ${linked.has(r.id) ? 'sel' : ''} ${r.existe ? '' : 'missing'}"><div class="thumb">${thumb(r.preview)}</div>
@@ -56,13 +44,8 @@ const tilesRef = (refs: Referencia[], linked: Set<string>) => refs.length ? refs
       <button class="trash" data-delref="${esc(r.id)}" data-nombre="${esc(r.nombre)}" data-modo="${r.modo}" title="${r.modo === 'enlace' ? 'Quitar de la biblioteca (tu archivo no se borra)' : 'Borrar la copia de la biblioteca'}">${ico('trash')}</button></div>
   </div>`).join('') : '<p class="dim">Aún no hay referencias. Agrega una abajo.</p>'
 
-/** Texto de ayuda de la opción 2 (edición completa): independiente de la opción 1, no hace falta recortar antes. */
-const infoCompleta = (info: ProyectoInfo, nRefs: number) => !info.material.some(f => f.tipo === 'video') ? 'Agrega videos al material.'
-  : !nRefs ? 'Marca al menos una referencia.'
-  : 'Opción 2 · Todo en un paso: prepara el material, quita silencios y Claude arma la edición copiando el estilo de tus referencias.'
-
 const signature = (info: ProyectoInfo, refs: Referencia[]) =>
-  JSON.stringify([info.material.map(f => [f.id, f.preview.listo, f.existe, f.modo, !!f.ritmo]), refs.map(r => [r.id, r.preview.listo, r.existe, r.modo])])
+  JSON.stringify([info.material.map(f => [f.id, f.rol, f.analizado, f.preview.listo, f.existe, f.modo, !!f.ritmo]), refs.map(r => [r.id, r.preview.listo, r.existe, r.modo])])
 
 const cardThumb = (pv: ProyectoResumen['preview']) => !pv
   ? '<div class="ph"><span>Sin video aún</span></div>'
@@ -74,7 +57,7 @@ const tarjetas = (ps: ProyectoResumen[]) => ps.map(p => `
   <div class="card">
     <button class="trash cardtrash" data-delproj="${p.slug}" data-nombre="${esc(p.name)}" title="Borrar proyecto">${ico('trash')}</button>
     <div class="thumb">${cardThumb(p.preview)}</div>
-    <button class="cardlink" data-slug="${p.slug}" data-editor="${p.tieneEditor ? 1 : 0}">
+    <button class="cardlink" data-slug="${p.slug}" data-editor="${p.tieneEditor ? 1 : 0}" data-guion="${p.guionPendiente ? 1 : 0}">
       <div class="card-title">${esc(p.name)}</div>
       <div class="chips">
         ${p.procesado ? '<span class="chip ok">Editado</span>' : `<span class="chip">${p.material ? `${p.material} video${p.material > 1 ? 's' : ''}` : 'Sin material'}</span>`}
@@ -126,7 +109,7 @@ export async function renderHome() {
     try { const p = await api.crearProyecto(name); go(`#/p/${p.slug}`) } catch (err) { alert((err as Error).message) }
   })
   const bindCards = () => {
-    root().querySelectorAll<HTMLElement>('.cardlink').forEach(c => { c.onclick = () => go(c.dataset.editor === '1' ? `#/editor/${c.dataset.slug}` : `#/p/${c.dataset.slug}`) })     // con edición: directo al editor; la página de proyecto es solo para la primera edición
+    root().querySelectorAll<HTMLElement>('.cardlink').forEach(c => { c.onclick = () => go(c.dataset.editor === '1' ? `#/editor/${c.dataset.slug}` : c.dataset.guion === '1' ? `#/p/${c.dataset.slug}/guion` : `#/p/${c.dataset.slug}`) })     // con edición: directo al editor; la página de proyecto es solo para la primera edición
     root().querySelectorAll<HTMLElement>('[data-delproj]').forEach(b => {
       b.onclick = async () => {
         const ok = await confirmar('Borrar proyecto', `Se borra el proyecto <b>${esc(b.dataset.nombre ?? '')}</b>: su edición, textos, transcripción y copias livianas. <b>Tus videos originales enlazados no se borran.</b> Si subiste copias dentro del proyecto, también se borran.`, 'Borrar proyecto')
@@ -180,29 +163,44 @@ export async function renderProject(slug: string) {
     <div class="proj-top">
       <button id="back">${ico('arrow-left')} Proyectos</button>
       <h1>${esc(info.name)}</h1>
-      <span class="grow"></span>
-      ${info.tieneEditor ? '<button class="primary" id="abrir">Abrir editor</button>' : ''}
     </div>
+    <div id="fases"></div>
 
     <section>
-      <h2>Material <small class="dim">videos, música e imágenes para tu edición</small></h2>
-      <div class="drop" id="dropMat"><p>Arrastra aquí videos, música o imágenes</p><p class="dim small">o</p><button class="primary" id="pickMat">Elegir archivos</button></div>
-      <div class="tiles" id="matList">${tilesMat(info.material)}</div>
+      <h2>1 · Contenido principal <small class="dim">del que sale el guion</small></h2>
+      <div class="drop" id="dropMat"><p>Arrastra aquí tus videos principales</p><p class="dim small">o</p><button class="primary" id="pickMat">Añadir videos</button></div>
+      <div class="tiles" id="matList">${tilesMat(info.material.filter(f => f.rol === 'principal'))}</div>
       <div id="upl"></div>
-      <button class="primary big wide" id="recortar" ${info.material.some(f => f.tipo === 'video') ? '' : 'disabled'}>Recorta silencios y errores</button>
-      <p class="dim small">Opción 1 · Solo recorta: convierte el audio en texto, quita los silencios y Claude quita lo repetido y ordena el guion para que se entienda. Si quieres la edición completa, usa la opción 2 en Referencias: no hace falta recortar antes.</p>
-      <div id="job"></div>
+      <h3 class="sub">Cámaras adicionales <small class="dim">otro ángulo del mismo video o grabación de pantalla · se sincronizan con el audio del principal (próximamente)</small></h3>
+      <div class="tiles" id="camList">${tilesMat(info.material.filter(f => f.rol === 'camara'), 'Sin cámaras adicionales.')}</div>
+      <button id="pickCam">+ Añadir cámara</button><div id="uplCam"></div>
     </section>
 
     <section>
-      <h2>Referencias <small class="dim">estilos que quieres copiar · se guardan para todos tus proyectos</small></h2>
+      <h2>2 · Tomas de apoyo <small class="dim">material grabado para ilustrar el video · se usan sin audio</small></h2>
+      <div class="drop small" id="dropApoyo"><span>Arrastra tomas de apoyo (videos o imágenes) o </span><button class="primary" id="pickApoyo">añadir tomas</button></div>
+      <div class="tiles" id="apoyoList">${tilesMat(info.material.filter(f => f.rol === 'apoyo'), 'Aún no agregas tomas de apoyo.')}</div>
+      <div id="uplApoyo"></div>
+      <p class="dim small">De cada toma se sacan fotogramas para que Claude sepa qué muestra y dónde puede usarse.</p>
+    </section>
+
+    <section>
+      <h2>3 · Referencias <small class="dim">estilos que quieres copiar · se guardan para todos tus proyectos</small></h2>
       <div class="tiles" id="refList">${tilesRef(refs, linked)}</div>
       <div class="drop small" id="dropRef"><span>Arrastra referencias aquí o </span><button class="primary" id="pickRef">elegir archivos</button></div>
       <div id="uplRef"></div>
-      <label class="reco"><span>¿Alguna recomendación para el video? <span class="dim">(opcional)</span></span>
-        <textarea id="recomendacion" rows="3" placeholder="Ej: que sea corto, que empiece fuerte, tono más serio…"></textarea></label>
-      <button class="primary big wide" id="completa" ${linked.size && info.material.some(f => f.tipo === 'video') ? '' : 'disabled'}>Edición completa basada en referencias</button>
-      <p class="dim small" id="completaInfo">${infoCompleta(info, linked.size)}</p>
+    </section>
+
+    <section>
+      <h2>4 · Recomendaciones <small class="dim">(opcional) · estilo, tono, qué resaltar o evitar; las leo al proponer y editar</small></h2>
+      <textarea id="notas" class="notas-grande" rows="4" placeholder="Ej: que se sienta dinámico y moderno, tono cercano, no mostrar precios al inicio…">${esc(info.notas ?? '')}</textarea>
+    </section>
+
+    <section>
+      <button class="primary big wide" id="recortar" ${info.material.some(f => f.tipo === 'video' && f.rol === 'principal') ? '' : 'disabled'}>Recortar silencios y revisar guion</button>
+      <p class="dim small">Convierte el audio en texto y quita los silencios. Luego revisas el guion por secciones: reordenas, borras palabras y sigues al siguiente paso.</p>
+      ${info.guionPendiente ? `<button class="big wide" id="irGuion">Continuar la revisión del guion</button>` : ''}
+      <div id="job"></div>
     </section>
 
 
@@ -210,7 +208,8 @@ export async function renderProject(slug: string) {
 
   const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
   $('back').onclick = () => go('#/')
-  if (info.tieneEditor) $('abrir').onclick = () => { location.hash = `#/editor/${slug}` }
+  { let t = 0; const nt = $('notas') as HTMLTextAreaElement; nt.oninput = () => { clearTimeout(t); t = window.setTimeout(() => { void fetch(`/api/proyectos/${slug}/notas-edicion`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ texto: nt.value }) }) }, 600) } }
+  void renderFases($('fases'), slug, 1, () => go(`#/p/${slug}/guion`), !!info.guionPendiente)
 
   // --- agregar archivos: ENLAZAR (no copiar). Copiar solo si no se puede encontrar el original --------------------
   type Enlazar = (a: ArchivoInfo[]) => Promise<{ enlazados: string[]; noEncontrados: string[] }>
@@ -246,6 +245,8 @@ export async function renderProject(slug: string) {
     zone.ondrop = e => { e.preventDefault(); zone.classList.remove('over'); if (e.dataTransfer?.files.length) void agregarArrastrados(e.dataTransfer.files, box, enlazar, urlCopia, soloVideo) }
   }
   wireDrop($('dropMat'), $('pickMat'), () => api.elegirMaterial(slug), a => api.enlazarMaterial(slug, a), `/api/proyectos/${slug}/material`, $('upl'), false)
+  $('pickCam').onclick = () => { void elegir(() => api.elegirMaterial(slug, 'camara'), $('pickCam'), $('uplCam')) }
+  wireDrop($('dropApoyo'), $('pickApoyo'), () => api.elegirMaterial(slug, 'apoyo'), a => api.enlazarMaterial(slug, a, 'apoyo'), `/api/proyectos/${slug}/material?rol=apoyo`, $('uplApoyo'), false)
   wireDrop($('dropRef'), $('pickRef'), () => api.elegirReferencias(slug), a => api.enlazarReferencias(a, slug), `/api/referencias?proyecto=${slug}`, $('uplRef'), true)
 
   // --- tarjetas: borrar, elegir referencias y refrescar miniaturas ---------------------------------------
@@ -279,19 +280,17 @@ export async function renderProject(slug: string) {
         const ids = [...root().querySelectorAll<HTMLInputElement>('[data-ref]:checked')].map(x => x.dataset.ref!)
         await api.setReferencias(slug, ids)
         c.closest('.tile')?.classList.toggle('sel', c.checked)
-        ;($('completa') as HTMLButtonElement).disabled = !(ids.length && cur.info.material.some(f => f.tipo === 'video')) || estadoCompleta === 'activa' || trabajando
-        if (estadoCompleta === 'libre' && !trabajando) $('completaInfo').textContent = infoCompleta(cur.info, ids.length)
       }
     })
   }
-  const pendientes = (i: ProyectoInfo, r: Referencia[]) => i.material.some(f => !f.preview.listo || (f.tipo === 'audio' && !f.ritmo && f.existe)) || r.some(x => !x.preview.listo)
+  const pendientes = (i: ProyectoInfo, r: Referencia[]) => i.material.some(f => !f.preview.listo || (f.rol === 'apoyo' && !f.analizado && f.tipo !== 'audio') || (f.tipo === 'audio' && !f.ritmo && f.existe)) || r.some(x => !x.preview.listo)
   async function poll() {
     if (!document.getElementById('matList') || location.hash !== `#/p/${slug}`) return
     try {
       const [i2, r2] = await Promise.all([api.proyecto(slug), api.referencias()])
       if (signature(i2, r2) !== signature(cur.info, cur.refs)) {   // solo redibuja si cambió algo (no corta un video en reproducción)
         const linked2 = new Set(i2.referencias)
-        $('matList').innerHTML = tilesMat(i2.material); $('refList').innerHTML = tilesRef(r2, linked2); bindTiles()
+        $('matList').innerHTML = tilesMat(i2.material.filter(f => f.rol === 'principal')); $('camList').innerHTML = tilesMat(i2.material.filter(f => f.rol === 'camara'), 'Sin cámaras adicionales.'); $('apoyoList').innerHTML = tilesMat(i2.material.filter(f => f.rol === 'apoyo'), 'Aún no agregas tomas de apoyo.'); $('refList').innerHTML = tilesRef(r2, linked2); bindTiles()
       }
       cur = { info: i2, refs: r2 }
       if (pendientes(i2, r2)) pollTimer = window.setTimeout(poll, 2500)
@@ -304,16 +303,16 @@ export async function renderProject(slug: string) {
   // --- botón 1: recortar silencios y errores ---------------------------------------------------------------
   const jobBox = $('job')
   let trabajando = false
-  const hayVideo = () => cur.info.material.some(f => f.tipo === 'video')
+  const hayVideo = () => cur.info.material.some(f => f.tipo === 'video' && f.rol === 'principal')
   /** Mientras corre un trabajo, las dos opciones se bloquean; al terminar con error o cancelar se liberan. */
-  const bloquear = (v: boolean) => { trabajando = v; ;($('recortar') as HTMLButtonElement).disabled = v || !hayVideo(); ;($('completa') as HTMLButtonElement).disabled = v || !(cur.info.referencias.length && hayVideo()) || estadoCompleta === 'activa' }
+  const bloquear = (v: boolean) => { trabajando = v; ;($('recortar') as HTMLButtonElement).disabled = v || !hayVideo() }
   async function seguir(jobId: string) {
     bloquear(true)
     for (;;) {
       const j = await api.trabajo(jobId)
       jobBox.innerHTML = jobHtml(j)
       if (j.status !== 'running') {
-        if (j.status === 'done') await renderProject(slug)
+        if (j.status === 'done') go(`#/p/${slug}/guion`)
         else bloquear(false)
         return
       }
@@ -325,40 +324,10 @@ export async function renderProject(slug: string) {
     b.disabled = true; b.textContent = 'Cancelando…'
     try { await api.cancelarTrabajo(b.dataset.cancelar!) } catch { b.disabled = false; b.textContent = 'Cancelar' }
   }
+  if (info.guionPendiente) $('irGuion').onclick = () => go(`#/p/${slug}/guion`)
   $('recortar').onclick = async () => {
-    try { const { jobId } = await api.procesar(slug, 'recorte'); if (jobId) void seguir(jobId) } catch (e) { jobBox.innerHTML = `<div class="warn">${esc((e as Error).message)}</div>` }
+    try { const { jobId } = await api.procesar(slug); if (jobId) void seguir(jobId) } catch (e) { jobBox.innerHTML = `<div class="warn">${esc((e as Error).message)}</div>` }
   }
-
-  // --- botón 2: edición completa (pedido a Claude + estado en vivo) -----------------------------------------------
-  let estadoCompleta: 'libre' | 'activa' = 'libre'
-  const infoEl = $('completaInfo')
-  async function refrescarCompleta() {
-    if (!document.getElementById('completa') || location.hash !== `#/p/${slug}`) return
-    const sols = (await api.solicitudes(slug)).filter(x => x.tipo === 'completa')
-    const x = sols[0]
-    const btn = $('completa') as HTMLButtonElement
-    if (x && (x.estado === 'pendiente' || x.estado === 'en_curso')) {
-      estadoCompleta = 'activa'; btn.disabled = true
-      const espera = Date.now() - new Date(x.creado).getTime()
-      const txt = x.estado === 'en_curso' ? 'Claude está editando…' : espera > 20000 ? 'Claude no ha respondido todavía. ¿Está abierta la sesión de Claude Code en esta carpeta?' : 'Enviado a Claude, esperando que empiece…'
-      infoEl.innerHTML = `${esc(txt)} <button class="mini" id="cancelarCompleta">Cancelar</button>`
-      $('cancelarCompleta').onclick = async () => { await api.cancelarSolicitud(x.id); void refrescarCompleta() }
-      setTimeout(refrescarCompleta, 1500)
-    } else {
-      estadoCompleta = 'libre'
-      btn.disabled = trabajando || !(cur.info.referencias.length && hayVideo())
-      if (x?.estado === 'hecho') infoEl.innerHTML = `${ico('check')} Listo. Pulsa <b>Abrir editor</b> para ver y corregir el resultado.`
-      if (x?.estado === 'cancelado') infoEl.textContent = 'Cancelado. Puedes volver a pedirlo.'
-      if (x?.estado === 'error') infoEl.textContent = 'Claude no pudo terminar: ' + (x.nota ?? 'error')
-    }
-  }
-  $('completa').onclick = async () => {
-    try {
-      const r = await api.procesar(slug, 'completa', ($('recomendacion') as HTMLTextAreaElement).value.trim())     // si el material no está preparado, lo prepara en el mismo paso
-      if (r.jobId) void seguir(r.jobId); else void refrescarCompleta()
-    } catch (e) { infoEl.textContent = (e as Error).message }
-  }
-  void refrescarCompleta()
 
   // si había un trabajo en marcha (saliste y volviste), retoma el progreso
   void api.trabajoActivo(slug).then(j => { if (j) void seguir(j.id) })

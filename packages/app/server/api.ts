@@ -15,9 +15,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { analizarRitmo, type Ritmo } from './ritmo'
+import { PADDING, armarParrafos, guionTexto, tramosDelGuion, type Guion } from './guion'
 import { activeExport, asegurarVoz, cancelExport, getExport, startExport, type ExportOpts, type Exportado } from './exportar'
 import { fileURLToPath } from 'node:url'
-import { Store, createProject, exec, execBatch, formatoDe, serialize, type AssetInfo, type Cmd } from '@gojaguar/core'
+import { Store, createProject, exec, execBatch, formatoDe, parseProject, serialize, type AssetInfo, type Cmd } from '@gojaguar/core'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const ROOT = path.resolve(process.env.GOJAGUAR_BIBLIOTECA ?? path.join(HERE, '../../../biblioteca'))
@@ -214,7 +215,7 @@ async function ritmoDe(slug: string, f: Fuente) {
 async function ensureLibrary() { await fsp.mkdir(PROJ, { recursive: true }); await fsp.mkdir(REFS, { recursive: true }); await fsp.mkdir(SOL, { recursive: true }) }
 
 // --- pedidos a Claude: el botón deja un archivo; Claude (vigilando en el chat) lo recibe y lo ejecuta ----------
-export interface Solicitud { id: string; slug: string; tipo: 'errores' | 'completa'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error' | 'cancelado'; creado: string; referencias: string[]; recomendacion?: string; nota?: string }
+export interface Solicitud { id: string; slug: string; tipo: 'propuesta' | 'edicion' | 'aprendizaje'; estado: 'pendiente' | 'en_curso' | 'hecho' | 'error' | 'cancelado'; creado: string; referencias: string[]; recomendacion?: string; nota?: string }
 async function crearSolicitud(slug: string, tipo: Solicitud['tipo'], referencias: string[], recomendacion?: string): Promise<Solicitud> {
   const activa = (await solicitudesDe(slug)).find(x => x.tipo === tipo && (x.estado === 'pendiente' || x.estado === 'en_curso'))
   if (activa) return activa
@@ -234,12 +235,14 @@ interface ProjectMeta {
   referencias: string[]
   procesado?: string        // fecha ISO
   assets?: AssetInfo[]
+  camaras?: string[]        // ids del material que son CÁMARAS ADICIONALES (otro ángulo / grabación de pantalla; pendiente sincronizarlas con el audio del principal)
+  apoyo?: string[]          // ids del material que son TOMAS DE APOYO (se usan sin audio; el resto es contenido principal)
   material?: MaterialRef[]  // videos ENLAZADOS (no se copian); los copiados viven en material/
 }
 
 /** Video enlazado: solo guardamos dónde está. El original nunca se copia ni se borra desde la app. */
 interface MaterialRef { id: string; name: string; stem: string; ruta: string; size: number }
-interface Fuente { id: string; tipo: Tipo; name: string; stem: string; modo: 'enlace' | 'copia'; ruta: string; size: number; existe: boolean }
+interface Fuente { id: string; rol: 'principal' | 'apoyo' | 'camara'; tipo: Tipo; name: string; stem: string; modo: 'enlace' | 'copia'; ruta: string; size: number; existe: boolean }
 const stemOf = (n: string) => path.basename(n, path.extname(n))
 const isVideoName = (n: string) => VIDEO_EXT.has(path.extname(n).toLowerCase())
 const isMaterialName = (n: string) => tipoDe(n) !== null
@@ -259,16 +262,18 @@ async function listFiles(dir: string) {
 
 async function listMaterial(slug: string): Promise<Fuente[]> {
   const meta = await loadMeta(slug), d = projDir(slug), out: Fuente[] = []
+  const apoyo = new Set(meta?.apoyo ?? []), camaras = new Set(meta?.camaras ?? [])
+  const rolDe = (id: string): Fuente['rol'] => apoyo.has(id) ? 'apoyo' : camaras.has(id) ? 'camara' : 'principal'
   for (const r of meta?.material ?? []) {
     const ok = await exists(r.ruta)
-    out.push({ id: r.id, tipo: tipoDe(r.name) ?? 'video', name: r.name, stem: r.stem, modo: 'enlace', ruta: r.ruta, size: ok ? (await fsp.stat(r.ruta)).size : r.size, existe: ok })
+    out.push({ id: r.id, rol: rolDe(r.id), tipo: tipoDe(r.name) ?? 'video', name: r.name, stem: r.stem, modo: 'enlace', ruta: r.ruta, size: ok ? (await fsp.stat(r.ruta)).size : r.size, existe: ok })
   }
-  for (const f of await listFiles(path.join(d, 'material'))) if (isMaterialName(f.name)) out.push({ id: f.name, tipo: tipoDe(f.name)!, name: f.name, stem: stemOf(f.name), modo: 'copia', ruta: path.join(d, 'material', f.name), size: f.size, existe: true })
+  for (const f of await listFiles(path.join(d, 'material'))) if (isMaterialName(f.name)) out.push({ id: f.name, rol: rolDe(f.name), tipo: tipoDe(f.name)!, name: f.name, stem: stemOf(f.name), modo: 'copia', ruta: path.join(d, 'material', f.name), size: f.size, existe: true })
   return out
 }
 
 /** Enlaza videos por su ruta (sin copiar). Devuelve los nombres agregados. */
-async function linkMaterial(slug: string, rutas: string[]) {
+async function linkMaterial(slug: string, rutas: string[], rol: 'principal' | 'apoyo' | 'camara' = 'principal') {
   const meta = (await loadMeta(slug))!
   meta.material ??= []
   const usados = new Set((await listMaterial(slug)).map(f => f.stem))
@@ -280,21 +285,31 @@ async function linkMaterial(slug: string, rutas: string[]) {
     let stem = stemOf(ruta), i = 2; const base = stem
     while (usados.has(stem)) stem = `${base}-${i++}`
     usados.add(stem)
-    meta.material.push({ id: `e-${crypto.randomBytes(4).toString('hex')}`, name: path.basename(ruta), stem, ruta, size: st.size })
+    const id = `e-${crypto.randomBytes(4).toString('hex')}`
+    meta.material.push({ id, name: path.basename(ruta), stem, ruta, size: st.size })
+    if (rol === 'apoyo') (meta.apoyo ??= []).push(id)
+    if (rol === 'camara') (meta.camaras ??= []).push(id)
     agregados.push(path.basename(ruta))
   }
   await writeJson(path.join(projDir(slug), 'proyecto.json'), meta)
+  if (rol === 'apoyo') void analizarApoyoPendiente(slug)
   Object.assign(agregados, { ignorados })
   return agregados
 }
 
 async function projectInfo(slug: string) {
   const meta = await loadMeta(slug); if (!meta) return null
+  if (meta.apoyo?.length) void analizarApoyoPendiente(slug)     // por si quedó alguna toma sin analizar
   const d = projDir(slug)
+  const etapa = await etapaDe(slug)
+  const hayGuion = await exists(guionPath(slug))
+  const guionPendiente = etapa !== 'editor' && hayGuion
   return {
     ...meta,
-    material: await Promise.all((await listMaterial(slug)).map(async f => ({ id: f.id, tipo: f.tipo, ritmo: await ritmoDe(slug, f), name: f.name, modo: f.modo, existe: f.existe, ruta: f.ruta, size: f.size, preview: await previewInfo(f.ruta, path.join(d, '.previews'), `proyectos/${slug}/.previews`, f.id) }))),
-    tieneEditor: await exists(path.join(d, 'proyecto.gojaguar')),
+    material: await Promise.all((await listMaterial(slug)).map(async f => ({ id: f.id, rol: f.rol, analizado: f.rol === 'apoyo' ? await exists(apoyoJson(slug, f.stem)) : undefined, tipo: f.tipo, ritmo: await ritmoDe(slug, f), name: f.name, modo: f.modo, existe: f.existe, ruta: f.ruta, size: f.size, preview: await previewInfo(f.ruta, path.join(d, '.previews'), `proyectos/${slug}/.previews`, f.id) }))),
+    guionPendiente, etapa,
+    notas: (await readJson<{ texto?: string }>(path.join(d, 'analisis', 'notas-edicion.json'), {})).texto ?? '',
+    tieneEditor: etapa === 'editor' && await exists(path.join(d, 'proyecto.gojaguar')),
     vistaFinal: await finalPreviewInfo(slug),
   }
 }
@@ -305,11 +320,11 @@ async function listProjects() {
   for (const slug of await fsp.readdir(PROJ)) {
     if (!isSlug(slug)) continue
     const info = await projectInfo(slug); if (!info) continue
-    const { material, assets, name, createdAt, procesado, tieneEditor, referencias, vistaFinal } = info
+    const { material, assets, name, createdAt, procesado, tieneEditor, referencias, vistaFinal, guionPendiente, etapa } = info
     const preview = vistaFinal ? { ...vistaFinal, tipo: 'edicion' as const } : (material.find(m => m.tipo === 'video') ?? material[0]) ? { ...(material.find(m => m.tipo === 'video') ?? material[0]).preview, tipo: 'material' as const } : null
     const edit = path.join(projDir(slug), 'proyecto.gojaguar')
     const ultimaEdicion = (await exists(edit)) ? (await fsp.stat(edit)).mtime.toISOString() : createdAt
-    out.push({ slug, name, createdAt, ultimaEdicion, procesado: !!procesado, tieneEditor, material: material.length, preview, referencias: referencias.length, duracion: (assets ?? []).reduce((s, a) => s + a.duration, 0) })
+    out.push({ slug, name, createdAt, ultimaEdicion, procesado: !!procesado, tieneEditor, guionPendiente, etapa, material: material.length, preview, referencias: referencias.length, duracion: (assets ?? []).reduce((s, a) => s + a.duration, 0) })
   }
   return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
@@ -391,7 +406,22 @@ async function linkReferences(rutas: string[]) {
     await writeJson(path.join(REFS, `${id}.ref.json`), { id, name: path.basename(ruta), stem, ruta, size: st.size, agregada: new Date().toISOString() } satisfies RefLink)
     agregados.push(path.basename(ruta)); ids.push(id)
   }
+  void analizarReferencias()
   return { agregados, ids }
+}
+
+/** Referencias nuevas: una hoja de contacto por escenas (1 imagen) para que Claude resuma su estilo sin gastar tokens en fotogramas sueltos. */
+let refBusy = false
+async function analizarReferencias() {
+  if (refBusy) return
+  refBusy = true
+  try {
+    for (const r of await listReferences()) {
+      const dir = path.join(REFS, `${r.id}.analisis`)
+      if (!r.existe || (await exists(path.join(dir, 'escenas.json')))) continue
+      await run(process.platform === 'win32' ? 'python' : 'python3', [path.join(HERE, '../../../scripts/escenas-contacto.py'), r.ruta, dir, '24'])
+    }
+  } finally { refBusy = false }
 }
 
 /** Marca referencias como elegidas en un proyecto (para que una referencia nueva quede seleccionada sola). */
@@ -457,19 +487,18 @@ async function locateFile(name: string, size: number, lastModified: number): Pro
 
 // --- trabajos (procesamiento en segundo plano) ---------------------------------------------------
 interface Step { id: string; label: string; state: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string; pct?: number }
-interface Job { id: string; slug: string; status: 'running' | 'done' | 'error' | 'cancelado'; steps: Step[]; error?: string; cancelada?: boolean; solicitud?: string; modo?: 'recorte' | 'completa'; recomendacion?: string }
+interface Job { id: string; slug: string; status: 'running' | 'done' | 'error' | 'cancelado'; steps: Step[]; error?: string; cancelada?: boolean; solicitud?: string }
 const jobs = new Map<string, Job>()
 
-function newJob(slug: string, modo: 'recorte' | 'completa' = 'recorte', recomendacion?: string): Job {
+function newJob(slug: string): Job {
   const job: Job = {
-    id: `${slug}-${Date.now()}`, slug, status: 'running', modo, recomendacion,
+    id: `${slug}-${Date.now()}`, slug, status: 'running',
     steps: [
       { id: 'proxy', label: 'Preparando los videos para editar', state: 'pending' },
       { id: 'voz', label: 'Limpiando el ruido y nivelando el volumen de la voz', state: 'pending' },
       { id: 'texto', label: 'Convirtiendo el audio en texto', state: 'pending' },
       { id: 'silencios', label: 'Detectando silencios', state: 'pending' },
       { id: 'base', label: 'Armando la edición base (sin silencios)', state: 'pending' },
-      { id: 'claude', label: modo === 'completa' ? 'Claude: edición completa copiando el estilo de tus referencias' : 'Claude: quitar lo repetido y ordenar el guion', state: 'pending' },
     ],
   }
   jobs.set(job.id, job)
@@ -546,7 +575,7 @@ async function detectSilences(proxy: string, duration: number) {
   if (st !== null) sil.push([st, duration])
   const ranges: [number, number][] = []
   for (const [a, b] of sil) {
-    const from = a < 0.05 ? 0 : a + 0.09, to = b >= duration - 0.05 ? duration : b - 0.09
+    const from = a < 0.05 ? 0 : a + PADDING, to = b >= duration - 0.05 ? duration : b - PADDING     // 30 ms de colchón en todos los cortes
     if (to - from >= 0.25) ranges.push([+from.toFixed(3), +to.toFixed(3)])
   }
   return ranges
@@ -570,14 +599,149 @@ async function cancelarTrabajo(job: Job) {
   }
 }
 
+
+// --- tomas de apoyo: fotogramas para saber qué muestra cada una (Claude los mira y escribe la descripción) -------------
+const apoyoJson = (slug: string, stem: string) => path.join(projDir(slug), 'analisis', 'apoyo', `${stem}.json`)
+const apoyoBusy = new Set<string>()
+/** Saca ~12 fotogramas repartidos de cada toma de apoyo sin analizar (solo imagen: el audio de las tomas de apoyo no se usa). */
+async function analizarApoyoPendiente(slug: string) {
+  if (apoyoBusy.has(slug)) return
+  apoyoBusy.add(slug)
+  try {
+    for (const f of (await listMaterial(slug)).filter(x => x.rol === 'apoyo' && x.existe && x.tipo !== 'audio')) {
+      if (await exists(apoyoJson(slug, f.stem))) continue
+      const dir = path.join(projDir(slug), 'analisis', 'apoyo', f.stem); await fsp.mkdir(dir, { recursive: true })
+      const dur = f.tipo === 'video' ? ((await probe(f.ruta))?.duration ?? 0) : 0
+      // preferido: UNA hoja de contacto con un fotograma por escena (PySceneDetect) = una sola imagen para mirar (ahorra tokens)
+      const py = process.platform === 'win32' ? 'python' : 'python3'
+      const hr = await run(py, [path.join(HERE, '../../../scripts/escenas-contacto.py'), f.ruta, dir, '20'])
+      if (hr.code === 0 && (await exists(path.join(dir, 'escenas.json')))) {
+        const esc = await readJson<{ escenas: { n: number; t0: number; t1: number; t: number }[] }>(path.join(dir, 'escenas.json'), { escenas: [] })
+        await writeJson(apoyoJson(slug, f.stem), { nombre: f.name, ruta: f.ruta, tipo: f.tipo, duracion: +dur.toFixed(2), hoja: path.relative(ROOT, path.join(dir, 'hoja.jpg')), escenas: esc.escenas, frames: [], descripcion: null, usos: [] })
+        continue
+      }
+      const n = f.tipo === 'imagen' ? 1 : Math.max(1, Math.min(12, Math.round(dur / 2)))
+      const frames: { t: number; archivo: string }[] = []
+      for (let k = 0; k < n; k++) {
+        const t = f.tipo === 'imagen' ? 0 : +((dur * (k + 0.5)) / n).toFixed(2), out = path.join(dir, `f${String(k + 1).padStart(2, '0')}.jpg`)
+        const r = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...(t ? ['-ss', String(t)] : []), '-i', f.ruta, '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '4', out])
+        if (r.code === 0) frames.push({ t, archivo: path.relative(ROOT, out) })
+      }
+      await writeJson(apoyoJson(slug, f.stem), { nombre: f.name, ruta: f.ruta, tipo: f.tipo, duracion: +dur.toFixed(2), frames, descripcion: null, usos: [] })
+    }
+  } finally { apoyoBusy.delete(slug) }
+}
+
+/** Guion inicial: párrafos de cada video (en el orden del material) con las muletillas ya marcadas. */
+async function construirGuion(slug: string, stems: string[]): Promise<Guion> {
+  const parrafos = []
+  for (const stem of stems) {
+    const ws = await readJson<{ i: number; t0: number; t1: number; w: string }[]>(path.join(projDir(slug), 'transcripciones', `${stem}.words.json`), [])
+    parrafos.push(...armarParrafos(stem, ws))
+  }
+  return { estado: 'revision', parrafos }
+}
+const guionPath = (slug: string) => path.join(projDir(slug), 'analisis', 'guion.json')
+// --- etapas del proyecto: creacion (material → guion → propuesta) → editando (Claude edita) → editor (ya no se vuelve atrás) ---
+type Etapa = 'creacion' | 'editando' | 'editor'
+const fasePath = (slug: string) => path.join(projDir(slug), 'analisis', 'fase.json')
+const progresoPath = (slug: string) => path.join(projDir(slug), 'analisis', 'progreso-edicion.json')
+async function etapaDe(slug: string): Promise<Etapa> {
+  const f = await readJson<{ etapa?: Etapa } | null>(fasePath(slug), null)
+  if (f?.etapa) return f.etapa
+  return (await exists(path.join(projDir(slug), 'proyecto.gojaguar'))) && !(await exists(guionPath(slug))) ? 'editor' : 'creacion'     // proyectos anteriores a este flujo: ya están en el editor
+}
+const ponerEtapa = async (slug: string, etapa: Etapa) => { await fsp.mkdir(path.dirname(fasePath(slug)), { recursive: true }); await writeJson(fasePath(slug), { etapa, actualizado: new Date().toISOString() }) }
+const MSG_BLOQUEO = 'El video ya está en el editor: los cambios grandes se hacen por el chat con Claude o a mano en el editor.'
+interface PasoEdicion { id: string; label: string; estado: 'pendiente' | 'en_curso' | 'hecho' | 'omitido'; detalle?: string }
+const PASOS_EDICION: PasoEdicion[] = [
+  { id: 'guion', label: 'Armando el video con tu guion (cortes con colchón de 30 ms)', estado: 'pendiente' },
+  { id: 'voz', label: 'Voz limpia y pareja', estado: 'pendiente' },
+  { id: 'zonas', label: 'Poniendo las tomas, imágenes y animaciones que aceptaste', estado: 'pendiente' },
+  { id: 'movimiento', label: 'Zooms y cambios de plano para que el video no se vea quieto', estado: 'pendiente' },
+  { id: 'color', label: 'Luces y color', estado: 'pendiente' },
+  { id: 'textos', label: 'Subtítulos y textos según el estilo', estado: 'pendiente' },
+  { id: 'revision', label: 'Revisando el resultado', estado: 'pendiente' },
+]
+
+
+/** Aplica el guion revisado a la edición: reconstruye la pista principal con sus tramos (colchón de 30 ms). */
+async function aplicarGuion(slug: string, g: Guion) {
+  const meta = (await loadMeta(slug))!
+  const assets = meta.assets ?? []
+  if (!assets.length) throw new Error('Primero procesa el material')
+  const dur = (f: string) => assets.find(a => a.name === f)?.duration ?? 1e9
+  const tramos = tramosDelGuion(g, dur)
+  if (!tramos.length) throw new Error('El guion quedó vacío: no se puede armar el video')
+  const first = assets[0]
+  let mejora = true
+  try { mejora = parseProject(await fsp.readFile(path.join(projDir(slug), 'proyecto.gojaguar'), 'utf8')).mejoras?.audio ?? true } catch { /* sin edición previa */ }
+  const store = new Store(createProject(meta.name, formatoDe(first.width, first.height, first.fps)))
+  exec(store, { op: 'set_audio_fx', on: mejora })
+  for (const a of assets) exec(store, { op: 'import_asset', asset: a })
+  execBatch(store, tramos.map(t => ({ op: 'add_clip', asset: assets.find(a => a.name === t.f)!.id, src_in: t.src_in, src_out: t.src_out }) as Cmd))
+  await fsp.writeFile(path.join(projDir(slug), 'proyecto.gojaguar'), serialize(store.project))
+  return Math.round(store.project.clips.reduce((s, c) => s + (c.srcOut - c.srcIn), 0))
+}
+
+
+// --- verificación previa: nada entra a "Editar" ni al editor con archivos faltantes; siempre un mensaje claro de qué falta y cómo arreglarlo ---
+interface Problema { tipo: 'archivo' | 'original' | 'herramienta' | 'guion' | 'proyecto'; mensaje: string; id?: string; reparable?: boolean }
+const origPath = (o: string | undefined) => !o ? null : path.isAbsolute(o) ? o : path.join(ROOT, o)     // originales copiados se guardan relativos a la biblioteca
+const fromApi = (u: string) => path.join(ROOT, decodeURIComponent(u.replace(/^api\/files\//, '')))
+async function verificarProyecto(slug: string, para: 'editar' | 'editor'): Promise<{ ok: boolean; problemas: Problema[]; avisos: string[] }> {
+  const problemas: Problema[] = [], avisos: string[] = []
+  const meta = await loadMeta(slug)
+  if (!meta) return { ok: false, problemas: [{ tipo: 'proyecto', mensaje: 'El proyecto no existe.' }], avisos }
+  const t = await toolsStatus()
+  if (!t.ffmpeg || !t.ffprobe) problemas.push({ tipo: 'herramienta', mensaje: 'Falta ffmpeg (Mac: brew install ffmpeg · Windows: winget install Gyan.FFmpeg). Sin él no se puede preparar ni exportar el video.' })
+  if (para === 'editar') {
+    const g = await readJson<Guion | null>(guionPath(slug), null)
+    if (!g) problemas.push({ tipo: 'guion', mensaje: 'Aún no hay guion: primero usa "Recortar silencios y revisar guion".' })
+    else if (!g.parrafos.some(p => p.words.some(w => !w.del))) problemas.push({ tipo: 'guion', mensaje: 'Quitaste todas las palabras del guion: no quedaría video. Restaura al menos una sección.' })
+    if (!(meta.assets ?? []).length) problemas.push({ tipo: 'proyecto', mensaje: 'No hay videos procesados en el contenido principal.' })
+  }
+  // los videos del proyecto: la copia liviana es indispensable para editar; el original solo para exportar
+  const vistos = new Set<string>()
+  const revisa = async (nombre: string, proxy: string | undefined, original: string | undefined, id: string, kind?: string) => {
+    if (vistos.has(id)) return; vistos.add(id)
+    const px = proxy ? fromApi(proxy) : null
+    if (!px || !(await exists(px))) {
+      const op = origPath(original), origOk = op && (await exists(op)) && kind !== 'image' && kind !== 'audio'
+      problemas.push({ tipo: 'archivo', id, reparable: !!origOk, mensaje: `Falta la copia liviana de "${nombre}".` + (origOk ? ' Se puede regenerar desde el original (botón "Reparar").' : ' Además no encuentro el original: ubícalo de nuevo en el Material.') })
+    } else if (origPath(original) && !(await exists(origPath(original)!))) avisos.push(`No encuentro el original de "${nombre}": puedes seguir con la copia liviana, pero para exportar hará falta ubicarlo.`)
+  }
+  for (const a of meta.assets ?? []) await revisa(a.name, a.proxy, a.original, a.id, a.kind)
+  const gf = path.join(projDir(slug), 'proyecto.gojaguar')
+  if (await exists(gf)) {
+    try {
+      const pr = parseProject(await fsp.readFile(gf, 'utf8'))
+      for (const a of pr.assets) await revisa(a.name, a.proxy, a.original, a.id, a.kind)
+    } catch (e) { problemas.push({ tipo: 'proyecto', mensaje: 'El archivo de la edición está dañado: ' + (e as Error).message.slice(0, 160) }) }
+  } else if (para === 'editor') problemas.push({ tipo: 'proyecto', mensaje: 'Este proyecto todavía no tiene edición.' })
+  return { ok: !problemas.length, problemas, avisos }
+}
+
+/** Regenera las copias livianas que faltan (si el original existe). */
+async function repararProxies(slug: string) {
+  const meta = await loadMeta(slug); let hechos = 0
+  for (const a of meta?.assets ?? []) {
+    const px = a.proxy ? fromApi(a.proxy) : null
+    const op = origPath(a.original)
+    if (!px || (await exists(px)) || a.kind === 'image' || a.kind === 'audio' || !op || !(await exists(op))) continue
+    await fsp.mkdir(path.dirname(px), { recursive: true }); await makeProxy(op, px, a.duration, () => {}); hechos++
+  }
+  return hechos
+}
+
 const processProject = (job: Job) => jobCtx.run(job, () => processProjectInner(job))
 async function processProjectInner(job: Job) {
   const slug = job.slug, d = projDir(slug)
   const meta = (await loadMeta(slug))!
   const set = (id: string, p: Partial<Step>) => { if (job.cancelada) throw new Error('Cancelado'); return Object.assign(step(job, id), p) }
   try {
-    const files = (await listMaterial(slug)).filter(f => f.tipo === 'video')
-    if (!files.length) throw new Error('No hay videos en el material')
+    const files = (await listMaterial(slug)).filter(f => f.tipo === 'video' && f.rol === 'principal')
+    if (!files.length) throw new Error('No hay videos en el contenido principal')
     for (const sub of ['proxies', 'transcripciones', 'analisis', 'salidas']) await fsp.mkdir(path.join(d, sub), { recursive: true })
     const tools = await toolsStatus()
     if (!tools.ffmpeg || !tools.ffprobe) throw new Error('Falta ffmpeg. Instálalo (Mac: brew install ffmpeg) y vuelve a intentar.')
@@ -651,22 +815,11 @@ async function processProjectInner(job: Job) {
 
     await writeJson(path.join(d, 'proyecto.json'), { ...meta, procesado: new Date().toISOString(), assets })
 
-    // 5) Claude: quita lo repetido y ordena el guion (le llega el pedido en el chat) ---------------------------
-    set('claude', { state: 'running', detail: 'enviado, esperando a Claude…' })
-    // Opción 1 (recorte): Claude solo limpia lo repetido y ordena el guion. Opción 2 (completa): en el mismo paso hace la edición basada en las referencias.
-    const refs = (await loadMeta(slug))?.referencias ?? []
-    const sol = job.modo === 'completa' ? await crearSolicitud(slug, 'completa', refs, job.recomendacion) : await crearSolicitud(slug, 'errores', [])
-    if (job.modo === 'completa') await registrarUso(slug, refs, 'pedido')
-    job.solicitud = sol.id
-    const t0 = Date.now()
-    for (;;) {
-      const x = await leerSolicitud(sol.id)
-      if (x?.estado === 'hecho') break
-      if (x?.estado === 'error') throw new Error(x.nota ?? 'Claude no pudo terminar')
-      set('claude', { detail: x?.estado === 'en_curso' ? 'Claude está editando…' : Date.now() - t0 > 20000 ? 'esperando a Claude (¿está abierto Claude Code en esta carpeta?)' : 'enviado, esperando a Claude…' })
-      await new Promise(r => setTimeout(r, 1500))
-    }
-    set('claude', { state: 'done', detail: undefined })
+    // el guion se revisa en la app (pantalla de revisión): aquí termina el procesamiento
+    const g0 = await construirGuion(slug, assets.map(x => x.name))
+    await writeJson(path.join(d, 'analisis', 'guion.json'), g0)
+    await fsp.writeFile(path.join(d, 'analisis', 'guion-texto.txt'), guionTexto(g0))
+    await ponerEtapa(slug, 'creacion')
     job.status = 'done'
   } catch (e) {
     const cur = job.steps.find(s => s.state === 'running')
@@ -747,14 +900,17 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       const dir = path.join(projDir(g[1]), 'material'); await fsp.mkdir(dir, { recursive: true })
       const name = await uniqueName(dir, safeName(url.searchParams.get('filename') ?? 'video.mp4'))
       const size = await saveStream(req, path.join(dir, name))
+      const rolSub = url.searchParams.get('rol')
+      if (rolSub === 'apoyo' || rolSub === 'camara') { const meta = (await loadMeta(g[1]))!; (rolSub === 'apoyo' ? (meta.apoyo ??= []) : (meta.camaras ??= [])).push(name); await writeJson(path.join(projDir(g[1]), 'proyecto.json'), meta); if (rolSub === 'apoyo') void analizarApoyoPendiente(g[1]) }
       return send(res, 200, { name, size, modo: 'copia' })
     }
 
     // Elegir con el diálogo nativo: se ENLAZA (no se copia)
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/material\/elegir$/.exec(p)) && m === 'POST') {
       if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
-      const rutas = await pickFiles(true, 'Elige videos, música o imágenes del proyecto', true)
-      const ag = await linkMaterial(g[1], rutas)
+      const rq = url.searchParams.get('rol'), rol = rq === 'apoyo' || rq === 'camara' ? rq : 'principal'
+      const rutas = await pickFiles(true, rol === 'apoyo' ? 'Elige tomas de apoyo (videos o imágenes)' : rol === 'camara' ? 'Elige los videos de la cámara adicional' : 'Elige el contenido principal del proyecto', true)
+      const ag = await linkMaterial(g[1], rutas, rol)
       return send(res, 200, { agregados: [...ag], ignorados: (ag as unknown as { ignorados: string[] }).ignorados, cancelado: rutas.length === 0 })
     }
     // Arrastrar y soltar: el navegador no da la ruta; se busca el original por nombre+tamaño+fecha y se enlaza
@@ -763,7 +919,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       const { archivos } = JSON.parse((await readBody(req)) || '{}') as { archivos: { name: string; size: number; lastModified: number }[] }
       const rutas: string[] = [], faltan: string[] = []
       for (const a of archivos ?? []) { const r = await locateFile(a.name, a.size, a.lastModified); r ? rutas.push(r) : faltan.push(a.name) }
-      return send(res, 200, { enlazados: await linkMaterial(g[1], rutas), noEncontrados: faltan })
+      return send(res, 200, { enlazados: await linkMaterial(g[1], rutas, (['apoyo', 'camara'].includes(url.searchParams.get('rol') ?? '') ? url.searchParams.get('rol') : 'principal') as 'principal' | 'apoyo' | 'camara'), noEncontrados: faltan })
     }
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/material\/([^/]+)\/ubicar$/.exec(p)) && m === 'POST') {
       const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
@@ -783,41 +939,153 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       return send(res, 200, { ok: true })
     }
 
+    // Recomendaciones generales del usuario para toda la edición (Claude las lee antes de proponer y de editar)
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/notas-edicion$/.exec(p)) && m === 'PUT') {
+      if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
+      if ((await etapaDe(g[1])) === 'editor') return send(res, 409, { error: MSG_BLOQUEO })
+      const { texto } = JSON.parse((await readBody(req)) || '{}') as { texto?: string }
+      await writeJson(path.join(projDir(g[1]), 'analisis', 'notas-edicion.json'), { texto: String(texto ?? '').slice(0, 8000), actualizado: new Date().toISOString() })
+      return send(res, 200, { ok: true })
+    }
+
+    // --- Fase 2: propuesta de edición por zonas relevantes (la escribe Claude; el usuario la revisa) ---
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/propuesta$/.exec(p)) && ['GET', 'PUT', 'POST'].includes(m)) {
+      const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
+      if (!meta) return send(res, 404, { error: 'Proyecto no encontrado' })
+      const pf = path.join(projDir(g[1]), 'analisis', 'propuesta.json')
+      if (m !== 'GET' && (await etapaDe(g[1])) !== 'creacion') return send(res, 409, { error: MSG_BLOQUEO })
+      if (m === 'POST') {          // pedirle a Claude una propuesta nueva
+        await fsp.rm(pf, { force: true })
+        return send(res, 200, await crearSolicitud(g[1], 'propuesta', []))
+      }
+      if (m === 'PUT') {           // el usuario edita decisiones, prompts y tomas aportadas
+        const body = JSON.parse((await readBody(req)) || '{}') as { zonas?: unknown[] }
+        const cur = await readJson<{ zonas: unknown[] } | null>(pf, null)
+        if (!cur || !Array.isArray(body.zonas)) return send(res, 400, { error: 'No hay propuesta que guardar' })
+        await writeJson(pf, { ...cur, zonas: body.zonas })
+        return send(res, 200, { ok: true })
+      }
+      const apoyos = []
+      for (const f of (await listMaterial(g[1])).filter(x => x.rol === 'apoyo')) {
+        const a = await readJson<{ frames: { t: number; archivo: string }[]; hoja?: string; descripcion: string | null } | null>(apoyoJson(g[1], f.stem), null)
+        apoyos.push({ stem: f.stem, nombre: f.name, descripcion: a?.descripcion ?? null, hoja: a?.hoja ? `api/files/${a.hoja}` : null, frames: (a?.frames ?? []).map(x => ({ t: x.t, url: `api/files/${x.archivo}` })) })
+      }
+      const sols = (await solicitudesDe(g[1])).filter(x => x.tipo === 'propuesta')
+      return send(res, 200, { propuesta: await readJson(pf, null), solicitud: sols[0] ?? null, apoyos, notas: (await readJson<{ texto?: string }>(path.join(projDir(g[1]), 'analisis', 'notas-edicion.json'), {})).texto ?? '' })
+    }
+
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/guion$/.exec(p)) && (m === 'GET' || m === 'PUT')) {
+      const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
+      if (!meta) return send(res, 404, { error: 'Proyecto no encontrado' })
+      if (m === 'PUT') {
+        if ((await etapaDe(g[1])) !== 'creacion') return send(res, 409, { error: MSG_BLOQUEO })
+        const body = JSON.parse((await readBody(req)) || '{}') as Guion
+        if (!Array.isArray(body.parrafos)) return send(res, 400, { error: 'Guion no válido' })
+        const prev = await readJson<Guion | null>(guionPath(g[1]), null)
+        await writeJson(guionPath(g[1]), { estado: prev?.estado ?? 'revision', parrafos: body.parrafos })
+        await fsp.writeFile(path.join(projDir(g[1]), 'analisis', 'guion-texto.txt'), guionTexto({ estado: 'revision', parrafos: body.parrafos }))
+        return send(res, 200, { ok: true })
+      }
+      let gu = await readJson<Guion | null>(guionPath(g[1]), null)
+      if (!gu && meta.assets?.length) gu = await construirGuion(g[1], meta.assets.map(a => a.name))     // sin guardar: se guarda al primer cambio
+      return send(res, 200, gu ?? { estado: 'revision', parrafos: [] })
+    }
+
+    // Aprendizaje del estilo: el editor manda en lotes lo que el USUARIO hace a mano; aquí solo se anota y, cada ~20 eventos, un script (sin Claude) actualiza el perfil
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/aprendizaje\/eventos$/.exec(p)) && m === 'POST') {
+      if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
+      const ev = JSON.parse((await readBody(req)) || '[]') as Record<string, unknown>[]
+      if (!Array.isArray(ev) || !ev.length) return send(res, 200, { ok: true })
+      const dir = path.join(projDir(g[1]), 'analisis'); await fsp.mkdir(dir, { recursive: true })
+      await fsp.appendFile(path.join(dir, 'ediciones-usuario.jsonl'), ev.slice(0, 200).map(e => JSON.stringify(e)).join('\n') + '\n')
+      const total = (await fsp.readFile(path.join(dir, 'ediciones-usuario.jsonl'), 'utf8')).split('\n').filter(Boolean).length
+      const leidas = (await readJson<{ leidas?: number }>(path.join(dir, 'aprendizaje-estado.json'), {})).leidas ?? 0
+      if (total - leidas >= 20) void run(process.platform === 'win32' ? 'python' : 'python3', [path.join(HERE, '../../../scripts/aprender.py'), g[1]])
+      return send(res, 200, { ok: true })
+    }
+
+    // Hoja de contacto de la vista previa del editor (una sola imagen para revisar la edición): la sube la propia página del editor
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/hoja-edicion$/.exec(p)) && m === 'POST') {
+      if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
+      const du = await readBody(req), mm = /^data:image\/jpeg;base64,(.+)$/s.exec(du)
+      if (!mm) return send(res, 400, { error: 'Imagen no válida' })
+      await fsp.mkdir(path.join(projDir(g[1]), 'analisis'), { recursive: true })
+      await fsp.writeFile(path.join(projDir(g[1]), 'analisis', 'hoja-edicion.jpg'), Buffer.from(mm[1], 'base64'))
+      return send(res, 200, { ruta: `biblioteca/proyectos/${g[1]}/analisis/hoja-edicion.jpg` })
+    }
+
+    // Verificación previa (antes de Editar y al abrir el editor) y reparación de copias livianas
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/verificacion$/.exec(p)) && m === 'GET') {
+      if (!isSlug(g[1])) return send(res, 404, { error: 'Proyecto no encontrado' })
+      return send(res, 200, await verificarProyecto(g[1], url.searchParams.get('para') === 'editor' ? 'editor' : 'editar'))
+    }
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/reparar$/.exec(p)) && m === 'POST') {
+      if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
+      return send(res, 200, { regenerados: await repararProxies(g[1]) })
+    }
+
+    // Etapa del proyecto y qué pantallas están disponibles (para la barra de fases)
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/fase$/.exec(p)) && m === 'GET') {
+      if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
+      const sols = await solicitudesDe(g[1])
+      return send(res, 200, { etapa: await etapaDe(g[1]), hayGuion: await exists(guionPath(g[1])), hayPropuesta: (await exists(path.join(projDir(g[1]), 'analisis', 'propuesta.json'))) || sols.some(x => x.tipo === 'propuesta' && ['pendiente', 'en_curso'].includes(x.estado)) })
+    }
+
+    // BOTÓN "EDITAR": arma el video con el guion, deja el pedido a Claude y la app muestra el progreso. Después ya no se vuelve a las fases anteriores.
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/editar$/.exec(p)) && ['GET', 'POST'].includes(m)) {
+      if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
+      const slug = g[1]
+      if (m === 'POST') {
+        const etapa = await etapaDe(slug)
+        if (etapa === 'editor') return send(res, 409, { error: MSG_BLOQUEO })
+        const gu = await readJson<Guion | null>(guionPath(slug), null)
+        const v = await verificarProyecto(slug, 'editar')
+        if (!v.ok || !gu) return send(res, 409, { error: 'No se puede empezar a editar todavía:\n• ' + v.problemas.map(x => x.mensaje).join('\n• '), problemas: v.problemas })
+        const sols = (await solicitudesDe(slug)).filter(x => x.tipo === 'edicion' && ['pendiente', 'en_curso'].includes(x.estado))
+        if (etapa === 'editando' && sols.length) return send(res, 200, sols[0])
+        const segundos = await aplicarGuion(slug, gu)
+        await ponerEtapa(slug, 'editando')
+        await writeJson(progresoPath(slug), { pasos: PASOS_EDICION.map(x => x.id === 'guion' ? { ...x, estado: 'hecho', detalle: `${segundos} s de video` } : x) })
+        return send(res, 200, await crearSolicitud(slug, 'edicion', []))
+      }
+      let etapa = await etapaDe(slug)
+      const sol = (await solicitudesDe(slug)).find(x => x.tipo === 'edicion') ?? null
+      if (etapa === 'editando' && sol?.estado === 'hecho') { await ponerEtapa(slug, 'editor'); etapa = 'editor'; void run(process.platform === 'win32' ? 'python' : 'python3', [path.join(HERE, '../../../scripts/aprender.py'), slug, '--cierre']) }     // cierre: suma lo que aceptó/descartó y sus recomendaciones al perfil     // desde aquí no se vuelve a la creación
+      const pr = await readJson<{ pasos: PasoEdicion[] }>(progresoPath(slug), { pasos: PASOS_EDICION })
+      return send(res, 200, { etapa, solicitud: sol, pasos: pr.pasos })
+    }
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/editar\/cancelar$/.exec(p)) && m === 'POST') {   // vuelve a la creación (el video aún no está en el editor)
+      if (!isSlug(g[1]) || (await etapaDe(g[1])) !== 'editando') return send(res, 409, { error: 'No hay una edición en curso que cancelar' })
+      for (const x of (await solicitudesDe(g[1])).filter(x => x.tipo === 'edicion' && ['pendiente', 'en_curso'].includes(x.estado))) await writeJson(path.join(SOL, x.id + '.json'), { ...x, estado: 'cancelado', nota: 'Cancelado por el usuario' })
+      await ponerEtapa(g[1], 'creacion')
+      return send(res, 200, { ok: true })
+    }
+
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/miniatura$/.exec(p)) && m === 'GET') {
+      const f = url.searchParams.get('f') ?? '', t = Math.max(0, Number(url.searchParams.get('t')) || 0)
+      const src = path.join(projDir(g[1]), 'proxies', `${safeName(f)}.proxy.mp4`)
+      const out = path.join(projDir(g[1]), 'proxies', '.guion', `${safeName(f)}-${Math.round(t * 10)}.jpg`)
+      if (!isSlug(g[1]) || !(await exists(src))) return send(res, 404, { error: 'Sin video' })
+      if (!(await exists(out))) {
+        await fsp.mkdir(path.dirname(out), { recursive: true })
+        await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(t), '-i', src, '-frames:v', '1', '-vf', 'scale=-2:240', '-q:v', '4', out])
+      }
+      if (!(await exists(out))) return send(res, 404, { error: 'Sin miniatura' })
+      return serveAbs(req, res, out)
+    }
+
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/procesar$/.exec(p)) && m === 'POST') {
       if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
+      if ((await etapaDe(g[1])) !== 'creacion') return send(res, 409, { error: MSG_BLOQUEO })
       const running = [...jobs.values()].find(j => j.slug === g![1] && j.status === 'running')
       if (running) return send(res, 200, { jobId: running.id })
-      const body = JSON.parse((await readBody(req)) || '{}') as { modo?: string; recomendacion?: string }
-      const modo = body.modo === 'completa' ? 'completa' : 'recorte'
-      const reco = (body.recomendacion ?? '').trim().slice(0, 2000) || undefined
-      if (modo === 'completa') {
-        const meta = (await loadMeta(g[1]))!
-        if (!meta.referencias?.length) return send(res, 400, { error: 'Marca al menos una referencia' })
-        if (meta.procesado) {      // el material ya está preparado: solo se le pide a Claude la edición completa
-          const sol = await crearSolicitud(meta.slug, 'completa', meta.referencias, reco)
-          if (Date.now() - new Date(sol.creado).getTime() < 3000) await registrarUso(meta.slug, meta.referencias, 'pedido')
-          return send(res, 200, { solicitud: sol })
-        }
-      }
-      const job = newJob(g[1], modo, reco); void processProject(job)
+      const job = newJob(g[1]); void processProject(job)
       return send(res, 200, { jobId: job.id })
     }
 
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/trabajo$/.exec(p)) && m === 'GET') {
       const j = [...jobs.values()].filter(x => x.slug === g![1] && x.status === 'running').pop()
       return send(res, 200, j ?? null)
-    }
-
-    if ((g = /^\/proyectos\/([a-z0-9-]+)\/pedir$/.exec(p)) && m === 'POST') {
-      const meta = isSlug(g[1]) ? await loadMeta(g[1]) : null
-      if (!meta) return send(res, 404, { error: 'Proyecto no encontrado' })
-      const { tipo, recomendacion } = JSON.parse((await readBody(req)) || '{}') as { tipo?: string; recomendacion?: string }
-      if (tipo !== 'completa') return send(res, 400, { error: 'Tipo de pedido no válido' })
-      if (!meta.procesado) return send(res, 400, { error: 'Primero usa "Recorta silencios y errores"' })
-      if (!meta.referencias.length) return send(res, 400, { error: 'Marca al menos una referencia' })
-      const sol = await crearSolicitud(meta.slug, 'completa', meta.referencias, (recomendacion ?? '').trim().slice(0, 2000) || undefined)
-      if (Date.now() - new Date(sol.creado).getTime() < 3000) await registrarUso(meta.slug, meta.referencias, 'pedido')     // pedir una edición basada en referencias cuenta como uso
-      return send(res, 200, sol)
     }
 
     if ((g = /^\/solicitudes\/([^/]+)\/cancelar$/.exec(p)) && m === 'POST') {

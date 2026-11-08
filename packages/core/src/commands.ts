@@ -50,9 +50,14 @@ const f2 = (n: number) => n.toFixed(2)
 const clamp = (v: number, a: number, b: number) => Math.min(Math.max(v, a), b)
 
 /** Ejecuta un comando como UNA entrada de historial. Devuelve un resumen de una línea. */
+/** Gancho opcional: se llama con cada comando ya aplicado (lo usa el editor para APRENDER del estilo del usuario; sin él no pasa nada). */
+let alComando: ((cmd: Cmd) => void) | null = null
+export const setAlComando = (fn: ((cmd: Cmd) => void) | null) => { alComando = fn }
+
 export function exec(store: Store, cmd: Cmd): string {
   let msg = 'sin cambios'
   store.mutate(p => { msg = apply(store, p, cmd) })
+  alComando?.(cmd)
   return msg
 }
 
@@ -60,6 +65,7 @@ export function exec(store: Store, cmd: Cmd): string {
 export function execBatch(store: Store, cmds: Cmd[]): string[] {
   const out: string[] = []
   store.mutate(p => { for (const c of cmds) out.push(apply(store, p, c)) })
+  if (alComando) for (const c of cmds) alComando(c)
   return out
 }
 
@@ -373,7 +379,7 @@ const tc = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(
  * Resumen compacto del proyecto (lo que lee Claude). Los clips consecutivos del mismo
  * archivo con la misma velocidad se agrupan para que el tamaño no crezca con cada corte.
  */
-export function describe(store: Store): string {
+export function describe(store: Store, corto = false): string {
   const p = store.project
   const placed = layout(p)
   const lines = [`"${p.name}" ${p.format.width}x${p.format.height}@${p.format.fps} · ${tc(duration(p))} · ${p.clips.length} clips · ${p.layers.length} capas${p.overlays?.length ? ` · ${p.overlays.length} superpuestos` : ''}${p.music ? ` · música ${store.asset(p.music.assetId)?.name ?? p.music.assetId} desde ${f2(p.music.srcIn)}s` : ''}`]
@@ -392,6 +398,14 @@ export function describe(store: Store): string {
       ? `${first.clip.id} [${tc(first.start)}–${tc(first.end)}] ${a?.name ?? first.clip.assetId} src ${f2(first.clip.srcIn)}–${f2(first.clip.srcOut)} x${first.clip.speed} vol${first.clip.volume}${first.clip.zoom ? ` zoom:${first.clip.zoom.kind}(${first.clip.zoom.amount})` : ''}${first.clip.transition ? ` entra:${first.clip.transition.kind}(${first.clip.transition.duration}s)` : ''}`
       : `${first.clip.id}…${last.clip.id} [${tc(first.start)}–${tc(last.end)}] ${n} clips ${a?.name ?? first.clip.assetId} x${first.clip.speed} vol${first.clip.volume}`)
     i = j + 1
+  }
+  if (corto) {     // resumen: solo cuántas capas y superpuestos hay, sin una línea por cada uno
+    const porTipo = new Map<string, number>()
+    for (const l of p.layers) { const k = l.type === 'graphic' || l.type === 'subtitle' ? `${l.type}:${l.template ?? 'texto'}` : l.type; porTipo.set(k, (porTipo.get(k) ?? 0) + 1) }
+    if (porTipo.size) lines.push('capas: ' + [...porTipo].map(([k, n]) => `${k}×${n}`).join(' · '))
+    const ov = p.overlays ?? []
+    if (ov.length) lines.push(`superpuestos: ${ov.map(o => `${o.id}[${tc(o.start)}–${tc(o.start + overlayDur(o))}]`).join(' ')}`)
+    return lines.join('\n')
   }
   for (const o of [...(p.overlays ?? [])].sort((a, b) => a.kind.localeCompare(b.kind) || a.track - b.track || a.start - b.start))
     lines.push(`${o.id} ${o.kind === 'video' ? 'video' : 'audio'} pista ${o.track} [${tc(o.start)}–${tc(o.start + overlayDur(o))}] ${store.asset(o.assetId)?.name ?? o.assetId} src ${f2(o.srcIn)}–${f2(o.srcOut)} vol${o.volume}${o.kind === 'video' ? ` @(${f2(o.transform.x)},${f2(o.transform.y)}) ×${f2(o.transform.scale)}` : ''}`)

@@ -11,8 +11,13 @@ export interface AssetInfo {
   original: string    // archivo original
   duration: number    // segundos
   fps: number
-  width: number
+  width: number       // con `alfa: 'pack'` es el tamaño REAL del objeto (la mitad del ancho del archivo)
   height: number
+  /**
+   * Video con TRANSPARENCIA (p. ej. una escena de Remotion/three.js): el MP4 trae dos mitades lado a lado, a la izquierda el color PREMULTIPLICADO sobre negro y a la derecha
+   * el alfa INVERTIDO en gris. Así lo decodifica cualquier navegador/ffmpeg sin códecs con alfa. Vista previa: `multiply` (apaga el fondo) + `lighter` (suma el color); exportación: alphamerge.
+   */
+  alfa?: 'pack'
 }
 
 /** Zoom: un EFECTO del clip. `push` se acerca, `pull` se aleja (durante todo el clip), `punch` entra con un golpe de zoom y se asienta. */

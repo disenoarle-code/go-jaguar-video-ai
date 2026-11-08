@@ -34,6 +34,7 @@ const P = {
   circle: S('<circle cx="12" cy="12" r="8"/>'),
   loader: S('<path d="M12 3a9 9 0 1 0 9 9"/>'),
   'arrow-left': S('<path d="M19 12H5M11 6l-6 6 6 6"/>'),
+  'arrow-right': S('<path d="M5 12h14M13 6l6 6-6 6"/>'),
 } as const
 export type IconName = keyof typeof P
 

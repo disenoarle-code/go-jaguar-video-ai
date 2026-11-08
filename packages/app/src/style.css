@@ -368,3 +368,52 @@ header .grow { flex:1 1 0; min-width:0; }
 .pool-item.sq .pname { margin:3px 2px 2px; font-size:10.5px; }
 .pcard.sq .pdur { top:auto; bottom:5px; right:auto; left:6px; font-size:9.5px; }
 .pcard.sq .pbadge { font-size:9px; padding:0 5px; }
+
+/* --- revisión de guion --- */
+.guion { padding-bottom:90px; }
+.gp { display:flex; gap:12px; align-items:flex-start; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px; margin:10px 0; }
+.gp.sobre { outline:2px solid var(--accent, #e5b84a); }
+.gp.arrastrando { opacity:.45; }
+.gp.muerto { opacity:.5; }
+.gp-mango { cursor:grab; color:var(--dim); font-size:20px; padding:4px 2px; user-select:none; align-self:center; }
+.gp-thumb { position:relative; flex:none; width:128px; aspect-ratio:16/9; border-radius:8px; overflow:hidden; background:#151513; }
+.gp-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+.gp-thumb span { position:absolute; left:4px; bottom:4px; background:#000a; color:#fff; font-size:11px; padding:1px 5px; border-radius:5px; }
+.gp-txt { flex:1; line-height:1.9; font-size:15px; }
+.gw { cursor:pointer; border-radius:4px; padding:1px 2px; }
+.gw:hover { background:#ffffff18; }
+.gw.del { text-decoration:line-through; color:var(--dim); opacity:.7; }
+.gw.mul { border-bottom:1px dashed #e5b84a; }
+.gbar { position:fixed; left:0; right:0; bottom:0; display:flex; align-items:center; gap:12px; padding:12px 24px; background:var(--panel); border-top:1px solid var(--line); }
+@media (max-width:600px) { .gp { flex-wrap:wrap; } .gp-thumb { width:100px; } }
+
+.gw { user-select:none; } .gw.sel { background:#e5b84a55; }
+.sub { font-size:14px; margin:16px 0 6px; }
+
+/* --- propuesta por zonas --- */
+.zn { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin:12px 0; display:flex; flex-direction:column; gap:10px; }
+.zn.aceptada { border-color:#e5b84a; } .zn.descartada { opacity:.5; }
+.zn-top { display:flex; gap:12px; } .zn-q { margin:0 0 4px; font-size:15px; line-height:1.5; }
+.zn-sug { background:#ffffff0a; border-radius:8px; padding:10px; font-size:14px; }
+.zn-fr { display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap; } .zn-fr img { height:56px; border-radius:6px; }
+.zn-aportes { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.zn textarea { background:#151513; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; font-size:13px; resize:vertical; }
+.zn .row { display:flex; gap:8px; justify-content:flex-end; }
+
+.zn-sug { border-left:4px solid var(--line); } .zn-sug.tu { border-left-color:#e5b84a; } .zn-sug.yo { border-left-color:#6ab0ff; } .zn-sug.ya { border-left-color:#5fd18a; }
+.zn-que { margin:0 0 4px; } .zn-sug p { margin:4px 0; } .zn-pide { color:#e5b84a; }
+.reco { display:flex; flex-direction:column; gap:6px; margin:12px 0; font-size:13px; } .reco textarea { background:#151513; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; resize:vertical; }
+.zn-fr img.zn-hoja { height:auto; max-height:180px; max-width:100%; }
+
+/* --- barra de fases --- */
+.fases { display:flex; align-items:center; gap:10px; margin:8px 0 14px; flex-wrap:wrap; }
+.fases ol { display:flex; gap:6px; list-style:none; margin:0; padding:0; flex:1; justify-content:center; flex-wrap:wrap; }
+.fase { background:transparent; border:1px solid var(--line); color:var(--dim); border-radius:999px; padding:6px 12px; font-size:13px; }
+.fase b { display:inline-block; width:20px; height:20px; line-height:20px; text-align:center; border-radius:50%; background:#ffffff14; margin-right:4px; font-size:12px; }
+.fase.ok { color:var(--txt); cursor:pointer; } .fase.act { border-color:#e5b84a; color:#e5b84a; } .fase.act b { background:#e5b84a; color:#000; }
+.fase:disabled { cursor:default; }
+.fase-flecha { font-size:13px; padding:7px 12px; } .fase-flecha.prim { background:#e5b84a; color:#000; border-color:#e5b84a; } .fase-flecha:disabled { opacity:.4; }
+
+section { margin-top:34px; } .notas-grande { width:100%; box-sizing:border-box; background:#151513; color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:12px 14px; font:inherit; font-size:14px; resize:vertical; }
+
+.problemas { margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px; font-size:14px; line-height:1.4; }
