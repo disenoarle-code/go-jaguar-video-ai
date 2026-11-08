@@ -131,6 +131,17 @@ Bajo el video, 5 botones: ⏮ volver al inicio (Inicio) · ⏪ clip anterior (J;
 
 Tres formas, todas en la línea de tiempo: **cuadro** (arrastrar desde un hueco: se seleccionan los elementos que toca el cuadro; un clic simple en un hueco solo mueve el cabezal y quita la selección), **Mayús + clic** (todo lo que hay entre el elemento ancla —el último que elegiste solo— y el que tocas, como bloque tiempo × pistas) y **⌘/Ctrl + clic** (suma o quita ese elemento, esté donde esté, sin tocar los de en medio). Estado en `Store.multi` / `Store.anchor` / `selectMany` / `isSelected` (core); con ≥ 2 elementos `selection` es null. El panel derecho muestra solo lo que tienen en común: volumen (barra y ±1/±3 dB), velocidad (clips y superpuestos; los clips de la pista principal acortan o alargan el video), luces y color (si todos son clips) y borrar; todo en UNA entrada de deshacer. Esc o "Quitar la selección" la suelta. En grupo no hay asas de recorte ni arrastre de la onda.
 
+## Plantillas de gráficos "explicativos" (estilo Adrián Sáenz)
+
+Referencia que le gusta al usuario (perfil en `biblioteca/referencias/adrian-saenz-modelo-de-negocio.estilo.json`): **un gráfico por cada idea que dice la persona**, que explica y se integra con el entorno. Plantillas nuevas (capas `graphic`, `packages/app/src/plantillas.ts`, mismo código en editor y exportación; todo depende solo del tiempo):
+- `clave` {texto, sub?, pos:'arriba'|'centro'|'abajo'}: palabra o cifra grande en cromo (una a la vez, ~1,5–2,5 s, al decir esa palabra).
+- `busqueda` {texto, resultado, acento}: barra de cristal que escribe sola y un resultado debajo (ej. «¿Cuándo reabre?» → «Sin fecha»).
+- `contador` {desde, hasta, sufijo, etiqueta, color}: número que sube contando, en dorado.
+- `preguntas` {items: JSON [[texto, segundos desde el inicio]], acento}: tarjetas de cristal con «?» que aparecen una por una.
+- `ficha` {texto, estado:'si'|'no', lado, y}: ficha con interruptor que cambia (verde = sí, rojo = no).
+- `fondo` {tono:'negro'|'crema', acento}: cubre todo el cuadro (corte a «pantalla de gráfico»); el video sigue sonando; va ANTES de los gráficos que lleva encima. Ejemplo de uso: `fondo` + `contador` o `fondo` + `preguntas`.
+Receta: pasar la transcripción alineada a tiempos de la línea de tiempo (palabras → clips) y poner el gráfico justo en la palabra. Faltan: imágenes en la línea de tiempo (polaroids), texto DETRÁS de la persona (necesita recorte: `experiments/estilo-3d/scripts/matte.swift`), plantillas de barras y layout dividido. Los videos de apoyo (B-roll) los consigue el usuario: pídeselos con la lista de momentos exactos.
+
 ## Atajos de la línea de tiempo (como CapCut)
 
 ⌘B (o S) corta el clip en el cabezal; **Q** borra lo anterior del clip bajo el cabezal; **W** borra lo posterior; los botones `][` de la barra hacen lo mismo y muestran la tecla al pasar el mouse. Borrar y recortar bordes (`delete_range`, `trim`) **corren juntos** las capas, los tiempos de las palabras del karaoke (`props.palabras`) y los superpuestos/sonidos que vienen después (`rippleTodo` en `commands.ts`): no hace falta moverlos a mano.
