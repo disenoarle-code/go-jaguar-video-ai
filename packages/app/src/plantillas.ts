@@ -115,8 +115,10 @@ function dibujarContador(c: Ctx, o: L, t: number) {
   const v = de + (a - de) * easeOut3((tt - 0.1) / 0.8), num = Math.round(v).toLocaleString('es-CO')
   c.save(); c.globalAlpha = ent * (1 - ex); const cy = H * 0.2 + (1 - ent) * 16
   // degradado oscuro SOLO detrás del texto (la foto de abajo no se oscurece)
-  const rg = c.createRadialGradient(W / 2, cy, 0, W / 2, cy, W * 0.62); rg.addColorStop(0, 'rgba(0,0,0,.5)'); rg.addColorStop(1, 'rgba(0,0,0,0)')
-  c.fillStyle = rg; c.fillRect(0, cy - H * 0.16, W, H * 0.32)
+  // (un recuadro más chico que el radio del degradado dejaba un borde horizontal marcado: se rellena TODO el cuadro y el degradado se apaga solo)
+  c.save(); c.translate(W / 2, cy); c.scale(1, 0.55)
+  const rg = c.createRadialGradient(0, 0, 0, 0, 0, W * 0.6); rg.addColorStop(0, 'rgba(0,0,0,.4)'); rg.addColorStop(0.6, 'rgba(0,0,0,.18)'); rg.addColorStop(1, 'rgba(0,0,0,0)')
+  c.fillStyle = rg; c.fillRect(-W, -H * 2, W * 2, H * 4); c.restore()
   c.textBaseline = 'middle'
   // número grande en sans moderna (blanco) + palabra en dorado
   let fs = W * 0.28; c.font = FONT(fs, 900); const w1 = () => c.measureText(num).width, sw = () => c.measureText(suf ? ' ' + suf : '').width
