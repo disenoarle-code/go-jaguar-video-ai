@@ -842,8 +842,15 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       const d = projDir(g[1])
       for (const f of await listMaterial(g[1])) {
         if (!f.existe || known.has(f.ruta)) continue
-        if (f.tipo === 'imagen') { omitidos.push(f.name); continue }
         n++
+        if (f.tipo === 'imagen') {         // imagen: copia liviana (máx. 2160 px de lado largo) que el editor y la exportación usan; la original no se toca
+          const alfa = /\.(png|webp|gif|avif)$/i.test(f.ruta), dst = path.join(d, 'proxies', `${f.stem}.img.${alfa ? 'png' : 'jpg'}`)
+          await fsp.mkdir(path.dirname(dst), { recursive: true })
+          if (!(await exists(dst))) await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', f.ruta, '-frames:v', '1', '-vf', "scale='if(gt(iw,ih),min(2160,iw),-2)':'if(gt(iw,ih),-2,min(2160,ih))'", ...(alfa ? [] : ['-q:v', '3']), dst])
+          const pr = await probe(dst); if (!pr || !(await exists(dst))) { omitidos.push(f.name); continue }
+          nuevos.push({ id: `i${n}`, name: f.stem, kind: 'image', proxy: `api/files/proyectos/${g[1]}/proxies/${encodeURIComponent(f.stem)}.img.${alfa ? 'png' : 'jpg'}`, original: f.ruta, duration: 3600, fps: 0, width: pr.width, height: pr.height })
+          continue
+        }
         if (f.tipo === 'video') {
           const pr = await probe(f.ruta); if (!pr) { omitidos.push(f.name); continue }
           const dst = path.join(d, 'proxies', `${f.stem}.proxy.mp4`)

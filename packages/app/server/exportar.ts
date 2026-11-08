@@ -131,7 +131,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   const assets = new Map(project.assets.map(a => [a.id, a]))
   const srcOf = async (id: string) => {
     const a = assets.get(id)!
-    for (const f of [a.original, path.join(root, decodeURIComponent((a.proxy ?? '').replace(/^api\/files\//, '')))]) { if (f && path.isAbsolute(f) && await fsp.stat(f).then(s => s.isFile()).catch(() => false)) return f }
+    for (const f of [...(a.kind === 'image' ? [path.join(root, decodeURIComponent((a.proxy ?? '').replace(/^api\/files\//, '')))] : []), a.original, path.join(root, decodeURIComponent((a.proxy ?? '').replace(/^api\/files\//, '')))]) { if (f && path.isAbsolute(f) && await fsp.stat(f).then(s => s.isFile()).catch(() => false)) return f }
     throw new Error(`No encuentro el archivo "${a.name}". Ubícalo de nuevo en el Material.`)
   }
   const voces = new Map<string, string>()      // asset → audio ya limpio y nivelado (si la mejora de voz está activa y el archivo existe)
@@ -142,7 +142,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   const inputs: string[][] = []
   const audioCache = new Map<string, boolean>()
   const hasAudio = async (f: string) => { if (!audioCache.has(f)) audioCache.set(f, await probeAudio(f)); return audioCache.get(f)! }
-  const addInput = (ss: number, len: number, file: string) => { inputs.push(['-ss', num(ss), '-t', num(len), '-i', file]); return inputs.length - 1 }
+  const addInput = (ss: number, len: number, file: string) => { inputs.push(/\.(jpe?g|png|webp)$/i.test(file) ? ['-loop', '1', '-framerate', String(fps), '-t', num(len), '-i', file] : ['-ss', num(ss), '-t', num(len), '-i', file]); return inputs.length - 1 }      // una imagen se repite como video fijo
 
   const ts = (k: string) => project.tracks?.[k] ?? {}
   const vf: string[] = [], audio: string[] = []
@@ -215,7 +215,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
       cur = `b${j + 1}`
     } else if (o.kind === 'video' && !ts('v' + o.track).hidden) {
       const R = `(min(W,H)*0.06)`
-      const round = `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(abs(X-W/2)-(W/2-${R}),0)*gt(abs(Y-H/2)-(H/2-${R}),0)*gt(hypot(abs(X-W/2)-(W/2-${R}),abs(Y-H/2)-(H/2-${R})),${R}),0,255)'`
+      const round = `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(abs(X-W/2)-(W/2-${R}),0)*gt(abs(Y-H/2)-(H/2-${R}),0)*gt(hypot(abs(X-W/2)-(W/2-${R}),abs(Y-H/2)-(H/2-${R})),${R}),0,alpha(X,Y))'`
       vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${round},colorchannelmixer=aa=${num(o.transform.opacity)}${o.transform.rotation ? `,rotate=a=${num(o.transform.rotation * Math.PI / 180)}:ow='rotw(${num(o.transform.rotation * Math.PI / 180)})':oh='roth(${num(o.transform.rotation * Math.PI / 180)})':c=none` : ''}[ov${j}]`)
       vf.push(`[${cur}][ov${j}]overlay=x='${num(W * o.transform.x)}-w/2':y='${num(H * o.transform.y)}-h/2':eof_action=pass:enable='between(t,${num(o.start)},${num(o.start + D)})'[b${j + 1}]`)
       cur = `b${j + 1}`

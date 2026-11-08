@@ -15,6 +15,8 @@ export class Player {
   assets = new Map<string, LoadedAsset>()
   /** Recorte (máscara) de la persona de cada video, si existe `proxies/<video>.recorte.mp4`: permite poner texto DETRÁS de la persona. */
   mattes = new Map<string, LoadedAsset>()
+  /** Imágenes del proyecto (assets de tipo imagen), ya decodificadas. */
+  images = new Map<string, ImageBitmap>()
   private lastFrame: VideoFrame | null = null
   private pCv: OffscreenCanvas | null = null
   private mCv: OffscreenCanvas | null = null
@@ -369,12 +371,18 @@ export class Player {
   private drawOverlayVideos(t: number) {
     const ovs = (this.store.project.overlays ?? []).filter(o => o.kind === 'video' && !this.store.project.tracks?.['v' + o.track]?.hidden && t >= o.start && t < overlayEnd(o)).sort((a, b) => a.track - b.track)
     for (const o of ovs) {
-      const asset = this.assets.get(o.assetId); if (!asset) continue
-      const idx = asset.source.idxAt(o.srcIn + (t - o.start) * o.speed)
-      if (this.playing) asset.source.prefetch(idx, 6)
-      const f = asset.source.peek(idx)
-      if (!f) { void asset.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}); continue }
-      const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight
+      const img = this.images.get(o.assetId)
+      let f: CanvasImageSource
+      let fw: number, fh: number
+      if (img) { f = img; fw = img.width; fh = img.height }        // imagen fija
+      else {
+        const asset = this.assets.get(o.assetId); if (!asset) continue
+        const idx = asset.source.idxAt(o.srcIn + (t - o.start) * o.speed)
+        if (this.playing) asset.source.prefetch(idx, 6)
+        const vf = asset.source.peek(idx)
+        if (!vf) { void asset.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}); continue }
+        f = vf; fw = vf.displayWidth || vf.codedWidth; fh = vf.displayHeight || vf.codedHeight
+      }
       const screen = o.blend === 'screen'      // luces: cubren todo el cuadro y suman su luz al video de abajo
       const k = (screen ? Math.max(W / fw, H / fh) : Math.min(W / fw, H / fh)) * o.transform.scale, w = fw * k, h = fh * k
       this.ovDims.set(o.id, { fw, fh })

@@ -131,7 +131,7 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       if (!a) return 'asset no encontrado'
       const kind: 'audio' | 'video' = a.kind === 'audio' ? 'audio' : 'video'
       const srcIn = clamp(cmd.src_in ?? 0, 0, a.duration)
-      const srcOut = clamp(cmd.src_out ?? a.duration, srcIn, a.duration)
+      const srcOut = clamp(cmd.src_out ?? (a.kind === 'image' ? srcIn + 4 : a.duration), srcIn, a.duration)      // una imagen dura 4 s por defecto (se estira en la línea de tiempo)
       if (srcOut - srcIn < MIN_DUR) return 'tramo demasiado corto'
       const start = Math.max(cmd.start, 0)
       const track = freeTrack(p, kind, start, start + (srcOut - srcIn), cmd.track ?? 1)

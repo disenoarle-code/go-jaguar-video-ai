@@ -165,3 +165,9 @@ export async function loadAsset(info: AssetInfo, actx: AudioContext, onThumb: ()
 
   return asset
 }
+
+/** Imagen del proyecto (copia liviana) lista para dibujar en el lienzo y en la línea de tiempo. */
+export async function loadImage(url: string): Promise<ImageBitmap> {
+  const r = await fetch(url); if (!r.ok) throw new Error('no se pudo leer la imagen')
+  return createImageBitmap(await r.blob())
+}

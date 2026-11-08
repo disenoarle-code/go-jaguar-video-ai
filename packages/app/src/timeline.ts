@@ -890,7 +890,11 @@ export class Timeline {
       if (o.kind === 'video') {
         const HEAD = 14, TH = R.h - HEAD
         c.fillStyle = '#0d4f53'; c.fillRect(x0, R.y, w, R.h)
-        if (a) {
+        const im = this.player.images.get(o.assetId)
+        if (im) {      // imagen fija: la misma foto repetida a lo largo del clip (recortada al centro)
+          const th2 = TH, tw2 = th2 * 1.5, k = Math.max(tw2 / im.width, th2 / im.height), sw = tw2 / k, sh = th2 / k
+          for (let tx = x0; tx < x1; tx += tw2) { if (tx + tw2 < LEFT || tx > this.w) continue; c.drawImage(im, (im.width - sw) / 2, (im.height - sh) / 2, sw, sh, tx, R.y + HEAD, tw2, th2) }
+        } else if (a) {
           const tw = THUMB_W * (TH / THUMB_H)
           for (let tx = x0; tx < x1; tx += tw) {
             if (tx + tw < LEFT || tx > this.w) continue

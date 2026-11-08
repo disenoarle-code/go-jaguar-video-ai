@@ -6,7 +6,7 @@ import { TRANSITION_INFO, ZOOM_INFO } from './fxinfo'
 import { H, W } from './constants'
 import { ico } from './icons'
 import { runBench } from './bench'
-import { loadAsset, loadAudioFrom } from './media'
+import { loadAsset, loadAudioFrom, loadImage } from './media'
 import { aLocal, geomOf, guias, hitAsa, hitOverlay, transformEfectivo, visibleOverlays } from './overlays'
 import { Player } from './player'
 import { Timeline } from './timeline'
@@ -28,6 +28,11 @@ export async function bootEditor(slug: string) {
     for (const info of store.project.assets) {
       if (player.assets.has(info.id) || player.music.has(info.id) || loadingIds.has(info.id)) continue
       loadingIds.add(info.id)
+      if (info.kind === 'image') {
+        try { player.images.set(info.id, await loadImage(`/${info.proxy}`)); tl.dirty = true; player.dirty = true }
+        catch (e) { notify(`No se pudo cargar la imagen "${info.name}": ${(e as Error).message}`) }
+        continue
+      }
       if (info.kind === 'audio') {
         try { player.addMusic(info.id, await player.actx.decodeAudioData(await (await fetch(`/${info.proxy}`)).arrayBuffer())); tl.dirty = true }
         catch (e) { notify(`No se pudo cargar la música "${info.name}": ${(e as Error).message}`) }
@@ -769,7 +774,7 @@ export async function bootEditor(slug: string) {
   }
 
   // --- biblioteca de medios (como CapCut): lo que se ve cuando no hay nada seleccionado -------------------
-  let poolSig = '', poolQuery = '', poolFilter: 'todo' | 'video' | 'audio' = 'todo'
+  let poolSig = '', poolQuery = '', poolFilter: 'todo' | 'video' | 'audio' | 'imagen' = 'todo'
   const used = () => new Set<string>([...store.project.clips.map(c => c.assetId), ...(store.project.overlays ?? []).map(o => o.assetId), ...(store.project.music ? [store.project.music.assetId] : [])])
   function drawCard(cv: HTMLCanvasElement, a: AssetInfo, tries = 0) {
     const g = cv.getContext('2d')!, W2 = cv.width, H2 = cv.height
@@ -780,6 +785,14 @@ export async function bootEditor(slug: string) {
       if (!pk) { if (tries < 20) setTimeout(() => drawCard(cv, a, tries + 1), 500); return }
       g.fillStyle = '#2f86e0'
       for (let x = 0; x < W2; x += 3) { const i0 = Math.floor((x / W2) * pk.length), i1 = Math.max(i0 + 1, Math.floor(((x + 3) / W2) * pk.length)); let mx = 0; for (let i = i0; i < i1; i++) if (pk[i] > mx) mx = pk[i]; const h = Math.max(2, mx * (H2 - 14)); g.fillRect(x, (H2 - h) / 2 + 3, 2, h) }
+      return
+    }
+    if (a.kind === 'image') {        // foto: recortada al centro para llenar la tarjeta, sin estirar
+      g.fillStyle = '#26261f'; g.fillRect(0, 0, W2, H2)
+      const im = player.images.get(a.id)
+      if (!im) { if (tries < 20) setTimeout(() => drawCard(cv, a, tries + 1), 500); return }
+      const k = Math.max(W2 / im.width, H2 / im.height), sw = W2 / k, sh = H2 / k
+      g.drawImage(im, (im.width - sw) / 2, (im.height - sh) / 2, sw, sh, 0, 0, W2, H2)
       return
     }
     g.fillStyle = '#26261f'; g.fillRect(0, 0, W2, H2)
@@ -798,13 +811,13 @@ export async function bootEditor(slug: string) {
     const list = insp.querySelector<HTMLElement>('.pool-list'); if (!list) return
     list.innerHTML = ''
     const q = poolQuery.trim().toLowerCase(), u = used()
-    const items = store.project.assets.filter(a => (!q || a.name.toLowerCase().includes(q)) && (poolFilter === 'todo' || (poolFilter === 'audio') === (a.kind === 'audio')))
+    const items = store.project.assets.filter(a => (!q || a.name.toLowerCase().includes(q)) && (poolFilter === 'todo' || (poolFilter === 'audio' ? a.kind === 'audio' : poolFilter === 'imagen' ? a.kind === 'image' : a.kind !== 'audio' && a.kind !== 'image')))
     if (!items.length) list.innerHTML = `<p class="hint">${store.project.assets.length ? 'Sin resultados.' : 'Aún no hay archivos. Pulsa Importar.'}</p>`
     for (const a of items) {
       const box = document.createElement('div'); box.className = 'pool-item'
       const card = document.createElement('div'); card.className = 'pcard'; card.draggable = true
       const cv = document.createElement('canvas'); cv.width = 640; cv.height = 112; card.append(cv)
-      card.insertAdjacentHTML('beforeend', `${u.has(a.id) ? '<span class="pbadge">Agregado</span>' : ''}<span class="pdur">${mmss(a.duration)}</span><button class="padd" title="Agregar en el cabezal">+</button>`)
+      card.insertAdjacentHTML('beforeend', `${u.has(a.id) ? '<span class="pbadge">Agregado</span>' : ''}<span class="pdur">${a.kind === 'image' ? 'Foto' : mmss(a.duration)}</span><button class="padd" title="Agregar en el cabezal">+</button>`)
       card.querySelector<HTMLElement>('.padd')!.onclick = e => { e.stopPropagation(); addAt(a) }
       card.ondragstart = ev => { ev.dataTransfer!.setData('text/gojaguar-asset', a.id); ev.dataTransfer!.effectAllowed = 'copy'; tl.showDropLane(a.kind === 'audio' ? 'audio' : 'video') }
       card.ondragend = () => tl.showDropLane(null)
@@ -873,7 +886,7 @@ export async function bootEditor(slug: string) {
   function buildPool() {
     refSeq++
     if (panelTab === 'referencias') { void buildRefs(); return }
-    insp.innerHTML = `<div class="pool">${tabsHtml()}<div class="pool-top"><button id="p-import" class="pimp" title="Elige archivos de tu computador: se enlazan, no se copian"><b>+</b> Importar</button><input id="p-q" type="text" placeholder="Buscar" /></div><div class="pool-filter"><button data-f="todo">Todo</button><button data-f="video">Videos</button><button data-f="audio">Audio</button></div><div class="pool-list"></div><p class="pool-note dim" id="p-note"></p></div>`
+    insp.innerHTML = `<div class="pool">${tabsHtml()}<div class="pool-top"><button id="p-import" class="pimp" title="Elige archivos de tu computador: se enlazan, no se copian"><b>+</b> Importar</button><input id="p-q" type="text" placeholder="Buscar" /></div><div class="pool-filter"><button data-f="todo">Todo</button><button data-f="video">Videos</button><button data-f="imagen">Imágenes</button><button data-f="audio">Audio</button></div><div class="pool-list"></div><p class="pool-note dim" id="p-note"></p></div>`
     wireTabs()
     const q = insp.querySelector<HTMLInputElement>('#p-q')!; q.value = poolQuery
     q.oninput = () => { poolQuery = q.value; poolSig = ''; updatePool() }
@@ -890,7 +903,7 @@ export async function bootEditor(slug: string) {
         const r = await fetch(`/api/proyectos/${slug}/preparar`, { method: 'POST' }).then(r => r.json())
         if (r.error) throw new Error(r.error)
         if (r.assets.length) { execBatch(store, r.assets.map((a: AssetInfo) => ({ op: 'import_asset', asset: a }) as Cmd)); await loadMedia() }
-        note.textContent = r.omitidos.length ? `Todavía no se pueden usar en el editor: ${r.omitidos.join(', ')} (imágenes u otros formatos).` : ''
+        note.textContent = r.omitidos.length ? `No se pudieron preparar: ${r.omitidos.join(', ')} (formato no compatible).` : ''
       } catch (e) { note.textContent = (e as Error).message }
       btn.disabled = false; btn.innerHTML = '<b>+</b> Importar'
       poolSig = ''; updatePool()
