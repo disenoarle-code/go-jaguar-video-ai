@@ -8,7 +8,8 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { renderRotulos } from './rotulos'
-import { CLIP_COLOR_DEFAULT, VOZ_FILTRO, layout, mainDuration, overlayDur, duration, parseProject, type AssetInfo, type Clip, type ClipColor, type Project, type Transition } from '@gojaguar/core'
+import { nivelarVoz } from './voz'
+import { CLIP_COLOR_DEFAULT, layout, mainDuration, overlayDur, duration, parseProject, type AssetInfo, type Clip, type ClipColor, type Project, type Transition } from '@gojaguar/core'
 
 export interface ExportOpts { resolucion: 'original' | '720' | '480'; calidad: 'rapida' | 'buena' | 'maxima'; nombre?: string }
 export interface ExportJob {
@@ -39,11 +40,11 @@ function probeAudio(file: string): Promise<boolean> {
 
 const fileOk = (f: string) => fsp.stat(f).then(s => s.isFile(), () => false)
 const toPath = (root: string, url: string) => path.join(root, decodeURIComponent(url.replace(/^api\/files\//, '')))
-/** Dónde queda el audio ya procesado ("voz limpia y pareja") de un video: junto a su copia liviana, `<video>.voz.m4a`. */
-export const vozPath = (root: string, a: AssetInfo) => toPath(root, a.proxy).replace(/\.proxy\.mp4$/, '.voz.m4a')
+/** Dónde queda el audio ya procesado ("voz limpia y pareja") de un video: junto a su copia liviana, `<video>.voz2.m4a`. */
+export const vozPath = (root: string, a: AssetInfo) => toPath(root, a.proxy).replace(/\.proxy\.mp4$/, '.voz2.m4a')
 
 /**
- * Crea (si falta o quedó viejo) el audio procesado de cada video: quita ruido, cierra el silencio y nivela el volumen (VOZ_FILTRO).
+ * Crea (si falta o quedó viejo) el audio procesado de cada video: quita el ruido y nivela la voz (ver voz.ts).
  * Se hace sobre el archivo ORIGINAL completo (no sobre un tramo) para que el filtro adaptativo se comporte igual en la vista previa y en la exportación:
  * las dos usan este mismo archivo.
  */
@@ -58,14 +59,10 @@ export async function asegurarVoz(assets: AssetInfo[], root: string, onPct: (p: 
     const fresh = await fileOk(dst) && (await fsp.stat(dst)).mtimeMs > (await fsp.stat(src)).mtimeMs
     if (!fresh) {
       const tmp = dst + '.part.m4a'
-      await new Promise<void>((resolve, reject) => {
-        const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vn', '-ac', '2', '-ar', '48000', '-af', VOZ_FILTRO, '-c:a', 'aac', '-b:a', '192k', '-f', 'mp4', tmp])
-        let err = ''; p.stderr.on('data', d => { err += d }); p.on('error', reject)
-        p.on('close', c => c === 0 ? resolve() : reject(new Error('No pude limpiar el audio de "' + a.name + '": ' + err.slice(-300))))
-      })
+      try { await nivelarVoz(src, tmp) } catch (err) { await fsp.rm(tmp, { force: true }); throw new Error('No pude limpiar el audio de "' + a.name + '": ' + (err as Error).message) }
       await fsp.rename(tmp, dst)
     }
-    out[a.id] = a.proxy.replace(/\.proxy\.mp4$/, '.voz.m4a')
+    out[a.id] = a.proxy.replace(/\.proxy\.mp4$/, '.voz2.m4a')
     onPct((i + 1) / vids.length)
   }
   return out

@@ -39,7 +39,7 @@ export async function bootEditor(slug: string) {
     player.ensureStretched()
   }
   // Voz limpia y pareja (procedimiento estándar): si el proyecto la tiene activa, el audio de los videos es el ya procesado
-  // (`<video>.voz.m4a`, el MISMO que usa la exportación); si se desactiva, vuelve el audio original.
+  // (`<video>.voz2.m4a`, el MISMO que usa la exportación); si se desactiva, vuelve el audio original.
   const vozDe = new Map<string, boolean>()      // asset → ¿tiene cargada la voz procesada?
   let vozOcupada = false
   async function sincronizarVoz() {
