@@ -216,7 +216,8 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     } else if (o.kind === 'video' && !ts('v' + o.track).hidden) {
       const R = `(min(W,H)*0.06)`
       const round = `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(abs(X-W/2)-(W/2-${R}),0)*gt(abs(Y-H/2)-(H/2-${R}),0)*gt(hypot(abs(X-W/2)-(W/2-${R}),abs(Y-H/2)-(H/2-${R})),${R}),0,alpha(X,Y))'`
-      vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${round},colorchannelmixer=aa=${num(o.transform.opacity)}${o.transform.rotation ? `,rotate=a=${num(o.transform.rotation * Math.PI / 180)}:ow='rotw(${num(o.transform.rotation * Math.PI / 180)})':oh='roth(${num(o.transform.rotation * Math.PI / 180)})':c=none` : ''}[ov${j}]`)
+      const cr = o.crop ? `,crop=iw*${num(1 - o.crop.l - o.crop.r)}:ih*${num(1 - o.crop.t - o.crop.b)}:iw*${num(o.crop.l)}:ih*${num(o.crop.t)}` : ''
+      vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps}${cr},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${round},colorchannelmixer=aa=${num(o.transform.opacity)}${o.transform.rotation ? `,rotate=a=${num(o.transform.rotation * Math.PI / 180)}:ow='rotw(${num(o.transform.rotation * Math.PI / 180)})':oh='roth(${num(o.transform.rotation * Math.PI / 180)})':c=none` : ''}[ov${j}]`)
       vf.push(`[${cur}][ov${j}]overlay=x='${num(W * o.transform.x)}-w/2':y='${num(H * o.transform.y)}-h/2':eof_action=pass:enable='between(t,${num(o.start)},${num(o.start + D)})'[b${j + 1}]`)
       cur = `b${j + 1}`
     }

@@ -164,9 +164,9 @@ function dibujarFicha(c: Ctx, o: L, t: number) {
 }
 
 // ---------------------------------------------------------------- fondo (corte a pantalla de gráfico) ----
-/** Cubre todo el cuadro con un fondo liso (negro con resplandor, o crema): el video sigue sonando; los gráficos de encima se leen como en un corte a "pantalla de gráfico". */
+/** Cubre todo el cuadro con un fondo liso (negro con resplandor, o crema; `alpha` < 1 lo vuelve un velo que oscurece el video de abajo para que se lean los gráficos): el video sigue sonando; los gráficos de encima se leen como en un corte a "pantalla de gráfico". */
 function dibujarFondo(c: Ctx, o: L, t: number) {
-  const tt = t - o.start, dur = o.end - o.start, a = clamp01(tt / 0.3) * (1 - clamp01((tt - (dur - 0.3)) / 0.3)), acc = o.props?.acento ?? ORO, crema = (o.props?.tono ?? 'negro') === 'crema'
+  const tt = t - o.start, dur = o.end - o.start, a = clamp01(tt / 0.3) * (1 - clamp01((tt - (dur - 0.3)) / 0.3)) * clamp01(Number(o.props?.alpha ?? 1)), acc = o.props?.acento ?? ORO, crema = (o.props?.tono ?? 'negro') === 'crema'
   c.save(); c.globalAlpha = a
   const g = c.createLinearGradient(0, 0, 0, H)
   if (crema) { g.addColorStop(0, '#f8f2e8'); g.addColorStop(1, '#e8dfd0') } else { g.addColorStop(0, '#0a0a0c'); g.addColorStop(1, '#17171b') }

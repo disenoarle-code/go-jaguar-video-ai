@@ -384,6 +384,8 @@ export class Player {
         f = vf; fw = vf.displayWidth || vf.codedWidth; fh = vf.displayHeight || vf.codedHeight
       }
       const screen = o.blend === 'screen'      // luces: cubren todo el cuadro y suman su luz al video de abajo
+      const cr = o.crop, sx0 = cr ? fw * cr.l : 0, sy0 = cr ? fh * cr.t : 0
+      if (cr) { fw = fw * (1 - cr.l - cr.r); fh = fh * (1 - cr.t - cr.b) }      // recorte de bordes: lo que queda es lo que se encuadra
       const k = (screen ? Math.max(W / fw, H / fh) : Math.min(W / fw, H / fh)) * o.transform.scale, w = fw * k, h = fh * k
       this.ovDims.set(o.id, { fw, fh })
       const x = o.transform.x * W - w / 2, y = o.transform.y * H - h / 2
@@ -392,7 +394,7 @@ export class Player {
       this.ctx.globalAlpha = o.transform.opacity
       if (screen) this.ctx.globalCompositeOperation = 'screen'
       else { this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.06); this.ctx.clip() }
-      try { this.ctx.drawImage(f, x, y, w, h) } catch { /* frame cerrado por el LRU */ }
+      try { this.ctx.drawImage(f, sx0, sy0, fw, fh, x, y, w, h) } catch { /* frame cerrado por el LRU */ }
       this.ctx.restore()
     }
   }

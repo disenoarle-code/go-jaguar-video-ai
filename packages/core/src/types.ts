@@ -107,6 +107,8 @@ export interface OverlayClip {
   srcIn: number; srcOut: number   // segundos del archivo fuente
   speed: number; volume: number
   transform: Transform            // posición/tamaño/opacidad (solo video)
+  /** Recorte de bordes del propio video/imagen (fracciones 0–0.5 de cada lado): quita barras negras, subtítulos quemados, etc. Nunca deforma. */
+  crop?: { l: number; t: number; r: number; b: number }
   blend?: 'screen'                // 'screen' suma la luz del clip al video de abajo (luces, destellos, humo): lo negro no se ve
 }
 
