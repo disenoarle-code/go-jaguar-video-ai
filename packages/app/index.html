@@ -25,12 +25,13 @@
       <section id="stage">
         <div class="canvaswrap"><canvas id="preview"></canvas><div id="loading">Cargando…</div></div>
         <div class="player">
-          <button id="tostart" class="pbtn" data-ico="skip-start" title="Volver al inicio (Inicio)"></button>
-          <button id="back5" class="pbtn" data-ico="rewind" title="Ir hacia atrás 5 segundos (J)"></button>
+          <button id="tostart" class="pbtn" data-ico="to-start" title="Volver al inicio (Inicio)"></button>
+          <button id="prevclip" class="pbtn" data-ico="skip-start" title="Ir al clip anterior (J)"></button>
           <button id="play" data-ico="play" title="Reproducir / pausar (Espacio)"></button>
-          <button id="fast" class="pbtn" data-ico="forward" title="Reproducir más rápido: 1× · 1,5× · 2× (L)"><span id="fastlab">1×</span></button>
-          <button id="toend" class="pbtn" data-ico="skip-end" title="Ir al siguiente clip (en el último, al final)"></button>
+          <button id="nextclip" class="pbtn" data-ico="skip-end" title="Ir al clip siguiente"></button>
+          <button id="toend" class="pbtn" data-ico="to-end" title="Ir hasta el final (Fin)"></button>
           <span id="time" class="mono">0:00.00</span>
+          <button id="fast" class="pill" title="Velocidad de la vista previa: 1× · 1,5× · 2× (L)"><span id="fastlab">1×</span></button>
           <button id="aspect" title="Relación de aspecto del video (vertical, horizontal, cuadrado…)">9:16</button>
         </div>
       </section>

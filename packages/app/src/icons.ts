@@ -5,6 +5,8 @@ const P = {
   play: '<path d="M7 4.5l12 7.5-12 7.5z" fill="currentColor" stroke="none"/>',
   pause: '<rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor" stroke="none"/>',
   'skip-start': '<path d="M6 5v14" stroke-width="2"/><path d="M19 5.5L9 12l10 6.5z" fill="currentColor" stroke="none"/>',
+  'to-start': '<path d="M5 5v14" stroke-width="2"/><path d="M13 6L5.5 12l7.5 6z" fill="currentColor" stroke="none" transform="translate(2 0)"/><path d="M21 6l-7.5 6 7.5 6z" fill="currentColor" stroke="none" transform="translate(0 0)"/>',
+  'to-end': '<path d="M19 5v14" stroke-width="2"/><path d="M11 6l7.5 6-7.5 6z" fill="currentColor" stroke="none" transform="translate(-2 0)"/><path d="M3 6l7.5 6L3 18z" fill="currentColor" stroke="none"/>',
   'skip-end': '<path d="M18 5v14" stroke-width="2"/><path d="M5 5.5L15 12 5 18.5z" fill="currentColor" stroke="none"/>',
   'rewind': '<path d="M12 6L3 12l9 6z" fill="currentColor" stroke="none"/><path d="M21 6l-9 6 9 6z" fill="currentColor" stroke="none"/>',
   'forward': '<path d="M12 6l9 6-9 6z" fill="currentColor" stroke="none"/><path d="M3 6l9 6-9 6z" fill="currentColor" stroke="none"/>',

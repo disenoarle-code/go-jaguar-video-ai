@@ -107,7 +107,7 @@ Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.jso
 
 ## Controles del reproductor
 
-Bajo el video: ⏮ inicio (Inicio) · ⏪ atrás 5 s (J) · ▶ play (Espacio) · ⏩ velocidad 1× → 1,5× → 2× (L; un toque también pone a reproducir) · ⏭ siguiente clip (en el último, al final; la tecla Fin va al final) · botón de relación de aspecto. La velocidad es solo de la vista previa (`Player.rate`; el tono de la voz se conserva: el audio se estira con SoundTouch, `ensureStretched`, y mientras se prepara a esa velocidad, ~1 s la primera vez, queda en silencio, nunca agudo); no cambia la edición ni la exportación.
+Bajo el video, 5 botones: ⏮ volver al inicio (Inicio) · ⏪ clip anterior (J; si ya pasó 0,5 s del clip, vuelve a SU inicio) · ▶ play (Espacio) · ⏩ clip siguiente · ⏭ ir hasta el final (Fin). Junto al tiempo: píldora de velocidad 1× → 1,5× → 2× (L; un toque también pone a reproducir) y el botón de relación de aspecto. La velocidad es solo de la vista previa (`Player.rate`; el tono de la voz se conserva: el audio se estira con SoundTouch, `ensureStretched`, y mientras se prepara a esa velocidad, ~1 s la primera vez, queda en silencio, nunca agudo); no cambia la edición ni la exportación.
 
 ## Atajos de la línea de tiempo (como CapCut)
 

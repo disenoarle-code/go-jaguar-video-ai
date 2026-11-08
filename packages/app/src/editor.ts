@@ -174,12 +174,16 @@ export async function bootEditor(slug: string) {
   const fmtRate = (r: number) => `${String(r).replace('.', ',')}×`
   const irA = (t: number) => { player.seek(t) }
   $('tostart').onclick = () => irA(0)
-  $('toend').onclick = () => {      // siguiente clip; si ya está en el último, va al final
+  $('nextclip').onclick = () => {      // siguiente clip; si ya está en el último, va al final
     const sig = layout(store.project).find(x => x.start > player.time() + 0.03)
     if (sig) irA(sig.start)
     else { const d = duration(store.project); if (player.playing) player.pause(); irA(Math.max(0, d - 0.04)) }
   }
-  $('back5').onclick = () => irA(player.time() - 5)
+  $('prevclip').onclick = () => {      // como en CapCut: si ya pasó medio segundo del clip, vuelve a SU inicio; si no, va al clip anterior
+    const ant = [...layout(store.project)].reverse().find(x => x.start < player.time() - 0.5)
+    irA(ant ? ant.start : 0)
+  }
+  $('toend').onclick = () => { const d = duration(store.project); if (player.playing) player.pause(); irA(Math.max(0, d - 0.04)) }
   $('fast').onclick = () => {
     const r = RATES[(RATES.indexOf(player.rate) + 1) % RATES.length]
     player.setRate(r); $('fastlab').textContent = fmtRate(r); $('fast').classList.toggle('on', r !== 1)
@@ -227,10 +231,10 @@ export async function bootEditor(slug: string) {
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); trimHere('despues') }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected() }
     else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? store.redo() : store.undo() }
-    else if (!mod && !e.altKey && e.key.toLowerCase() === 'j') $('back5').click()
+    else if (!mod && !e.altKey && e.key.toLowerCase() === 'j') $('prevclip').click()
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'l') $('fast').click()
     else if (e.key === 'Home') { e.preventDefault(); $('tostart').click() }
-    else if (e.key === 'End') { e.preventDefault(); const d = duration(store.project); if (player.playing) player.pause(); player.seek(Math.max(0, d - 0.04)) }
+    else if (e.key === 'End') { e.preventDefault(); $('toend').click() }
     else if (e.key === 'ArrowLeft') player.seek(player.playhead - 1 / 30)
     else if (e.key === 'ArrowRight') player.seek(player.playhead + 1 / 30)
   })
