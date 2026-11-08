@@ -65,14 +65,29 @@ export async function renderRotulos(opts: { origin: string; slug: string; w: num
     let ready = false
     for (let i = 0; i < 200 && !ready; i++) { ready = await evaluate('window.__ready === true').catch(() => false); if (!ready) await new Promise(r => setTimeout(r, 150)) }
     if (!ready) throw new Error('La página de rótulos no cargó')
-    const n = Math.max(1, Math.ceil((opts.t1 - opts.t0) * opts.fps) + 1)
+    // Rápido: a lo sumo 30 cuadros por segundo (los rótulos no necesitan más), y un cuadro vacío o IGUAL al anterior no se vuelve a guardar:
+    // se alarga su duración en una lista (`lista.txt`, formato concat de ffmpeg). Antes se dibujaban y guardaban miles de PNG casi todos repetidos.
+    const fpsR = Math.min(opts.fps, 30), paso = 1 / fpsR
+    const n = Math.max(1, Math.ceil((opts.t1 - opts.t0) * fpsR) + 1)
+    const vacio = await evaluate('window.__vacio()') as string
+    await fsp.writeFile(path.join(opts.outDir, 'vacio.png'), Buffer.from(vacio.split(',')[1], 'base64'))
+    const lista: { file: string; dur: number }[] = []
+    let prev = '', escritos = 0
     for (let i = 0; i < n; i++) {
       if (opts.cancelled?.()) throw new Error('Cancelado')
-      const url = await evaluate(`window.__draw(${(opts.t0 + i / opts.fps).toFixed(4)})`) as string
-      await fsp.writeFile(path.join(opts.outDir, `${String(i).padStart(5, '0')}.png`), Buffer.from(url.split(',')[1], 'base64'))
+      const url = await evaluate(`window.__draw(${(opts.t0 + i * paso).toFixed(4)})`) as string
+      const clave = url === 'igual' ? prev : (url || 'vacio')
+      if (lista.length && clave === prev) lista[lista.length - 1].dur += paso
+      else {
+        let file = 'vacio.png'
+        if (url) { file = `${String(escritos++).padStart(5, '0')}.png`; await fsp.writeFile(path.join(opts.outDir, file), Buffer.from(url.split(',')[1], 'base64')) }
+        lista.push({ file, dur: paso }); prev = clave
+      }
       opts.onProgress?.((i + 1) / n)
     }
-    return { frames: n }
+    const txt = lista.map(x => `file '${x.file}'\nduration ${x.dur.toFixed(5)}\n`).join('') + `file '${lista[lista.length - 1].file}'\n`
+    await fsp.writeFile(path.join(opts.outDir, 'lista.txt'), txt)
+    return { frames: n, guardados: escritos }
   } finally {
     try { ws?.close() } catch { /* ya cerrado */ }
     proc.kill('SIGKILL')

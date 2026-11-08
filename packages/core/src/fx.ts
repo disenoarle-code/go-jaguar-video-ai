@@ -66,3 +66,16 @@ export function fxAt(clip: Clip | undefined, next: Clip | undefined, t: number, 
   s.flash = Math.max(-1, Math.min(1, s.flash))
   return s
 }
+
+/**
+ * Giro (radianes, eje vertical) de una CARD que entra y sale en 3D: entra en 0,6 s desde ±75° con un pequeño rebote y sale en 0,45 s girando al otro lado.
+ * `dir` = 1 o -1 (de qué lado entra). La exportación usa la MISMA fórmula en el filtro `perspective` de ffmpeg.
+ */
+export const CARD3D = { entra: 0.6, sale: 0.45, max: 1.309, fundido: 0.2, dist: 2.6 }
+export function anguloCard(u: number, dur: number, dir: number) {
+  const x = Math.min(Math.max(u / CARD3D.entra, 0), 1), eb = 1 + 2.70158 * Math.pow(x - 1, 3) + 1.70158 * Math.pow(x - 1, 2)
+  const v = Math.min(Math.max((u - (dur - CARD3D.sale)) / CARD3D.sale, 0), 1)
+  return dir * (1 - eb) * CARD3D.max - dir * v * v * CARD3D.max
+}
+/** De qué lado entra una card: se alterna según su id para que no entren todas igual. */
+export const ladoCard = (id: string) => (Number(id.replace(/\D/g, '')) % 2 ? 1 : -1)

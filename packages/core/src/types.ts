@@ -109,8 +109,13 @@ export interface OverlayClip {
   transform: Transform            // posición/tamaño/opacidad (solo video)
   /** Recorte de bordes del propio video/imagen (fracciones 0–0.5 de cada lado): quita barras negras, subtítulos quemados, etc. Nunca deforma. */
   crop?: { l: number; t: number; r: number; b: number }
-  /** Entrada/salida suave: 'fundido' (aparece y se desvanece, 0,35 s) o 'subir' (además flota un poco hacia arriba al entrar). */
-  transicion?: 'fundido' | 'subir'
+  /** Entrada/salida: 'fundido' (aparece y se desvanece, 0,35 s), 'subir' (además flota un poco hacia arriba) o '3d' (la card entra y sale girando en 3D). */
+  transicion?: 'fundido' | 'subir' | '3d'
+  /**
+   * Máscara tipo CARD (p. ej. 4:5 con esquinas redondeadas): el video/imagen COMPLETO sigue ahí (se puede mover y agrandar con su `transform`),
+   * pero solo se ve lo que cae dentro de esta ventana. x,y = centro (0–1 del cuadro), w = ancho (0–1 del cuadro), aspect = ancho/alto (4:5 = 0.8), r = radio de esquina (0–0.5 del ancho).
+   */
+  mascara?: { x: number; y: number; w: number; aspect: number; r: number }
   blend?: 'screen'                // 'screen' suma la luz del clip al video de abajo (luces, destellos, humo): lo negro no se ve
 }
 

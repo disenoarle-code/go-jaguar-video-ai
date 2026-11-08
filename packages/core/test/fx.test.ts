@@ -87,3 +87,15 @@ describe('temblor de cámara', () => {
     expect(Math.abs(a.shift)).toBeLessThanOrEqual(0.86)
   })
 })
+
+import { CARD3D, anguloCard, ladoCard } from '../src'
+describe('card 3D', () => {
+  it('entra girada, queda de frente y sale girando al otro lado', () => {
+    expect(anguloCard(0, 3, 1)).toBeCloseTo(CARD3D.max)
+    expect(anguloCard(CARD3D.entra, 3, 1)).toBeCloseTo(0)
+    expect(anguloCard(1.5, 3, 1)).toBeCloseTo(0)
+    expect(anguloCard(3, 3, 1)).toBeCloseTo(-CARD3D.max)
+    expect(anguloCard(0, 3, -1)).toBeCloseTo(-CARD3D.max)
+    expect(ladoCard('o59')).toBe(1); expect(ladoCard('o58')).toBe(-1)
+  })
+})

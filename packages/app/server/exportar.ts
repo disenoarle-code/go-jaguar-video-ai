@@ -9,12 +9,14 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { renderRotulos } from './rotulos'
 import { nivelarVoz } from './voz'
-import { CLIP_COLOR_DEFAULT, layout, mainDuration, overlayDur, duration, parseProject, type AssetInfo, type Clip, type ClipColor, type Project, type Transition } from '@gojaguar/core'
+import { CARD3D, CLIP_COLOR_DEFAULT, ladoCard, layout, mainDuration, overlayDur, duration, parseProject, type AssetInfo, type Clip, type ClipColor, type Project, type Transition } from '@gojaguar/core'
 
 export interface ExportOpts { resolucion: 'original' | '720' | '480'; calidad: 'rapida' | 'buena' | 'maxima'; nombre?: string }
 export interface ExportJob {
   id: string; slug: string; status: 'running' | 'done' | 'error' | 'cancelado'; pct: number
   detail?: string; error?: string; file?: string; url?: string; size?: number; opts: ExportOpts; cancelada?: boolean
+  /** Segundos que tomó cada etapa (para ver qué hace lenta una exportación). */
+  tiempos?: Record<string, number>
 }
 
 const jobs = new Map<string, ExportJob>()
@@ -155,26 +157,29 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     const c = pl.clip, D = pl.end - pl.start, file = await srcOf(c.assetId)
     const k = addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, file)
     const fx = fxExpr(c, placed[i + 1]?.clip, D, fps), tf = c.transform
+    // encuadre: con zoom/deslizamiento se usa zoompan (a doble resolución para que el zoom no pixele); sin ellos se escala directo (mucho más rápido)
+    const conZoom = fx.z !== '1' || fx.x !== 'iw/2-(iw/zoom/2)' || fx.y !== 'ih/2-(ih/zoom/2)'
+    const encuadre = conZoom
+      ? `scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps}`
+      : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black`
     const voz = vozFile(c.assetId), ka = voz ? addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, voz) : k      // la voz sale del audio ya limpio y nivelado
     if (!ts('main').hidden) {
     const eq = fx.flash ? `,eq=brightness='${fx.flash}':eval=frame` : ''
     const gpx = fx.glitch ? Math.max(2, Math.round(fx.glitch.amt * 0.04 * W)) : 0       // separación de color en px de salida (igual que la vista previa: 4 % del ancho × intensidad)
     const gl = fx.glitch ? `,format=gbrp,rgbashift=rh=-${gpx}:bh=${gpx}:enable='lt(t,${num(fx.glitch.dur)})',format=yuv420p` : ''
-    vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps}${colorChain(c.color)},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
-      + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps}${eq}${gl},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p${tf ? `,scale=w='trunc(iw*${num(tf.scale)}/2)*2':h='trunc(ih*${num(tf.scale)}/2)*2',rotate=a=${num(tf.rotation * Math.PI / 180)}:ow=${W}:oh=${H}:c=black,setsar=1` : ''}[${tf ? 'vt' : 'v'}${i}]`)
+    vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps}${colorChain(c.color)},${encuadre}${eq}${gl},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p${tf ? `,scale=w='trunc(iw*${num(tf.scale)}/2)*2':h='trunc(ih*${num(tf.scale)}/2)*2',rotate=a=${num(tf.rotation * Math.PI / 180)}:ow='rotw(${num(tf.rotation * Math.PI / 180)})':oh='roth(${num(tf.rotation * Math.PI / 180)})':c=black,setsar=1` : ''}[${tf ? 'vt' : 'v'}${i}]`)
     if (tf) {     // el video movido/agrandado/girado se pone sobre negro en su posición (igual que la vista previa: el cuadro entero se transforma alrededor de su centro)
       vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(D)}[kb${i}]`)
-      vf.push(`[kb${i}][vt${i}]overlay=x=${num((tf.x - 0.5) * W)}:y=${num((tf.y - 0.5) * H)}:eof_action=pass,format=yuv420p,setsar=1[v${i}]`)
+      vf.push(`[kb${i}][vt${i}]overlay=x=${num(tf.x * W)}-w/2:y=${num(tf.y * H)}-h/2:eof_action=pass,format=yuv420p,setsar=1[v${i}]`)
     }
     if (rotDetras) {       // la persona recortada de ESTE clip (mismo encuadre, zoom y movimiento que el video) para ponerla por encima del texto que va detrás
       const mf = recortes.get(c.assetId)
       if (mf) {
         const km = addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, mf)
-        vf.push(`[${km}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
-          + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=gray${tf ? `,scale=w='trunc(iw*${num(tf.scale)}/2)*2':h='trunc(ih*${num(tf.scale)}/2)*2',rotate=a=${num(tf.rotation * Math.PI / 180)}:ow=${W}:oh=${H}:c=black,setsar=1` : ''}[${tf ? 'mt' : 'm'}${i}]`)
+        vf.push(`[${km}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},${encuadre},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=gray${tf ? `,scale=w='trunc(iw*${num(tf.scale)}/2)*2':h='trunc(ih*${num(tf.scale)}/2)*2',rotate=a=${num(tf.rotation * Math.PI / 180)}:ow='rotw(${num(tf.rotation * Math.PI / 180)})':oh='roth(${num(tf.rotation * Math.PI / 180)})':c=black,setsar=1` : ''}[${tf ? 'mt' : 'm'}${i}]`)
         if (tf) {
           vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(D)},format=gray[kbm${i}]`)
-          vf.push(`[kbm${i}][mt${i}]overlay=x=${num((tf.x - 0.5) * W)}:y=${num((tf.y - 0.5) * H)}:eof_action=pass,format=gray[m${i}]`)
+          vf.push(`[kbm${i}][mt${i}]overlay=x=${num(tf.x * W)}-w/2:y=${num(tf.y * H)}-h/2:eof_action=pass,format=gray[m${i}]`)
         }
         vf.push(`[v${i}]split=2[v${i}a][v${i}b]`)
         vf.push(`[v${i}b]format=yuva420p[v${i}c]`, `[v${i}c][m${i}]alphamerge[p${i}]`)
@@ -191,7 +196,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   let cur = 'base'
   if (vlabels.length) { vf.push(`${vlabels.join('')}concat=n=${vlabels.length}:v=1:a=0[main]`); vf.push(`[base][main]overlay=0:0:eof_action=pass[b0]`); cur = 'b0' }
   if (rotDetras && plabels.length && cur === 'b0') {       // texto detrás de la persona: video → texto → persona recortada por encima
-    inputs.push(['-framerate', String(fps), '-i', path.join(rotDetras.dir, '%05d.png')]); const kd = inputs.length - 1
+    inputs.push(['-f', 'concat', '-safe', '0', '-i', path.join(rotDetras.dir, 'lista.txt')]); const kd = inputs.length - 1
     vf.push(`[${kd}:v]setpts=PTS-STARTPTS+${num(rotDetras.t0)}/TB,format=rgba[txd]`)
     vf.push(`[b0][txd]overlay=0:0:eof_action=pass:enable='between(t,${num(rotDetras.t0)},${num(rotDetras.t1)})'[bd]`)
     vf.push(`${plabels.join('')}concat=n=${plabels.length}:v=1:a=0[persona]`)
@@ -212,6 +217,32 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
       vf.push(`[${kb}][sc${j}]overlay=0:0:eof_action=pass:enable='between(t,${st},${en})'[kl${j}]`)
       vf.push(`[${cur}]format=gbrp[cf${j}]`)
       vf.push(`[cf${j}][kl${j}]blend=all_mode=screen:all_opacity=${num(o.transform.opacity)}[b${j + 1}]`)
+      cur = `b${j + 1}`
+    } else if (o.kind === 'video' && o.mascara && !ts('v' + o.track).hidden) {
+      // CARD con máscara (p. ej. 4:5 redondeada): el video completo se encuadra detrás de la ventana; con '3d' entra y sale girando en perspectiva.
+      // Lienzo con márgenes transparentes (el giro agranda el lado cercano) → máscara fija (un solo cuadro con geq, repetido con loop: barato) → perspective.
+      const m = o.mascara, mw = Math.round(m.w * W / 2) * 2, mh = Math.round(mw / m.aspect / 2) * 2
+      const px = Math.round(mh * 0.1 / 2) * 2, py = Math.round(mh * 0.18 / 2) * 2, PW = mw + 2 * px, PH = mh + 2 * py, R = num(m.r * mw)
+      const mx0 = m.x * W - mw / 2, my0 = m.y * H - mh / 2, st = num(o.start), dd = num(D + 0.1)
+      const cr = o.crop ? `,crop=iw*${num(1 - o.crop.l - o.crop.r)}:ih*${num(1 - o.crop.t - o.crop.b)}:iw*${num(o.crop.l)}:ih*${num(o.crop.t)}` : ''
+      vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${st}/TB,fps=${fps}${cr},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba[cc${j}]`)
+      vf.push(`color=c=black:s=${PW}x${PH}:r=${fps}:d=${dd},setpts=PTS-STARTPTS+${st}/TB,format=rgba[cb${j}]`)
+      vf.push(`[cb${j}][cc${j}]overlay=x='${num(o.transform.x * W - mx0 + px)}-w/2':y='${num(o.transform.y * H - my0 + py)}-h/2':eof_action=repeat[cv${j}]`)
+      const sd = `(hypot(max(abs(X-${PW / 2})-${num(mw / 2)}+${R},0),max(abs(Y-${PH / 2})-${num(mh / 2)}+${R},0))+min(max(abs(X-${PW / 2})-${num(mw / 2)}+${R},abs(Y-${PH / 2})-${num(mh / 2)}+${R}),0)-${R})`
+      vf.push(`color=c=black:s=${PW}x${PH}:r=${fps}:d=${num(1 / fps)},format=gray,geq=lum='255*clip(0.5-${sd},0,1)',loop=loop=-1:size=1,trim=duration=${dd},setpts=N/(${fps}*TB)+${st}/TB[mk${j}]`)
+      const fd = o.transicion === '3d' ? CARD3D.fundido : 0.35
+      const fades = o.transicion ? `,fade=t=in:st=${st}:d=${num(fd)}:alpha=1,fade=t=out:st=${num(Math.max(o.start, o.start + D - fd))}:d=${num(fd)}:alpha=1` : ''
+      let persp = ''
+      if (o.transicion === '3d') {
+        const dir = ladoCard(o.id), U = `(in/${fps})`, x = `clip(${U}/${CARD3D.entra},0,1)`, v = `clip((${U}-${num(D - CARD3D.sale)})/${CARD3D.sale},0,1)`
+        const A = `(${dir}*(1-(1+2.70158*pow(${x}-1,3)+1.70158*pow(${x}-1,2)))*${CARD3D.max}-${dir}*pow(${v},2)*${CARD3D.max})`
+        const Dd = num(mw * CARD3D.dist), hw = PW / 2, hh = PH / 2
+        const sL = `${Dd}/(${Dd}-${hw}*sin(${A}))`, sR = `${Dd}/(${Dd}+${hw}*sin(${A}))`
+        const xl = `${hw}-${hw}*cos(${A})*${sL}`, xr = `${hw}+${hw}*cos(${A})*${sR}`
+        persp = `,perspective=x0='${xl}':y0='${hh}-${hh}*${sL}':x1='${xr}':y1='${hh}-${hh}*${sR}':x2='${xl}':y2='${hh}+${hh}*${sL}':x3='${xr}':y3='${hh}+${hh}*${sR}':sense=destination:eval=frame`
+      }
+      vf.push(`[cv${j}][mk${j}]alphamerge,colorchannelmixer=aa=${num(o.transform.opacity)}${fades}${persp}[ov${j}]`)
+      vf.push(`[${cur}][ov${j}]overlay=x=${Math.round(mx0 - px)}:y=${Math.round(my0 - py)}:eof_action=pass:enable='between(t,${st},${num(o.start + D)})'[b${j + 1}]`)
       cur = `b${j + 1}`
     } else if (o.kind === 'video' && !ts('v' + o.track).hidden) {
       const R = `(min(W,H)*0.06)`
@@ -234,7 +265,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
 
   // 4) rótulos (subtítulos y gráficos): secuencia de PNG con transparencia dibujada por el editor, encima de todo
   if (rot) {
-    inputs.push(['-framerate', String(fps), '-i', path.join(rot.dir, '%05d.png')]); const k = inputs.length - 1
+    inputs.push(['-f', 'concat', '-safe', '0', '-i', path.join(rot.dir, 'lista.txt')]); const k = inputs.length - 1
     vf.push(`[${k}:v]setpts=PTS-STARTPTS+${num(rot.t0)}/TB,format=rgba[txt]`)
     vf.push(`[${cur}][txt]overlay=0:0:eof_action=pass:enable='between(t,${num(rot.t0)},${num(rot.t1)})'[btxt]`); cur = 'btxt'
   }
@@ -269,6 +300,8 @@ export async function startExport(slug: string, projectFile: string, outDir: str
   void (async () => {
     try {
       const raw = parseProject(await fsp.readFile(projectFile, 'utf8'))     // también abre y migra proyectos de versiones anteriores
+      let marca = Date.now(); job.tiempos = {}
+      const etapa = (n: string) => { const a = Date.now(); job.tiempos![n] = Math.round((a - marca) / 100) / 10; marca = a }
       // rótulos visibles (no ocultos): se dibujan primero con Chromium sin pantalla
       const tr = raw.tracks, texts = raw.layers.filter(l => (l.type === 'subtitle' || l.type === 'graphic') && !tr?.[l.type]?.hidden)
       const total = duration(raw)
@@ -293,7 +326,9 @@ export async function startExport(slug: string, projectFile: string, outDir: str
           rotDetras = { dir, t0, t1 }
         }
       }
+      etapa('rotulos')
       if (raw.mejoras?.audio) { job.detail = 'Limpiando el audio…'; await asegurarVoz(raw.assets, root, p => { job.pct = Math.max(job.pct, p * 0.05) }) }
+      etapa('voz')
       const b = await buildExport(raw, root, opts, rot, rotDetras)
       await fsp.mkdir(outDir, { recursive: true })
       const safe = (opts.nombre ?? slug).normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || slug
@@ -310,6 +345,8 @@ export async function startExport(slug: string, projectFile: string, outDir: str
         p.on('error', reject)
         p.on('close', code => code === 0 ? resolve() : reject(new Error(job.cancelada ? 'Cancelado' : 'ffmpeg falló: ' + err.slice(-400))))
       })
+      etapa('ffmpeg'); console.log('[exportar] tiempos (s):', JSON.stringify(job.tiempos))
+      await fsp.writeFile(path.join(outDir, 'ultima-exportacion.tiempos.json'), JSON.stringify({ fecha: new Date().toISOString(), duracion: total, opts, tiempos: job.tiempos }, null, 2)).catch(() => {})      // para revisar qué etapa tarda
       await fsp.rm(script, { force: true }); await fsp.rm(path.join(outDir, '.rotulos'), { recursive: true, force: true }); await fsp.rm(path.join(outDir, '.rotulos-detras'), { recursive: true, force: true })
       await fsp.rename(tmp, out)
       const dest = await nombreLibre(carpeta, name)          // el video final queda en la carpeta que eligió el usuario, no escondido en la biblioteca

@@ -9,7 +9,7 @@ import {
 
 /** Capa nueva sin id; el transform puede ser parcial. */
 export type NewLayer = (Layer extends infer L ? L extends Layer ? Omit<L, 'id' | 'transform'> & { transform?: Partial<Transform> } : never : never)
-export type OverlayPatch = { transicion?: 'fundido' | 'subir' | null; crop?: { l: number; t: number; r: number; b: number } | null; blend?: 'screen' | null; start?: number; track?: number; srcIn?: number; srcOut?: number; speed?: number; volume?: number; transform?: Partial<Transform> }
+export type OverlayPatch = { mascara?: { x: number; y: number; w: number; aspect: number; r: number } | null; transicion?: 'fundido' | 'subir' | '3d' | null; crop?: { l: number; t: number; r: number; b: number } | null; blend?: 'screen' | null; start?: number; track?: number; srcIn?: number; srcOut?: number; speed?: number; volume?: number; transform?: Partial<Transform> }
 export type LayerPatch = { transform?: Partial<Transform>; [k: string]: unknown }
 
 /**
@@ -157,7 +157,8 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
     case 'update_overlay': {
       const o = p.overlays?.find(x => x.id === cmd.id)
       if (!o) return 'clip superpuesto no encontrado'
-      const { transform, blend, crop, transicion, ...rest } = cmd.patch
+      const { transform, blend, crop, transicion, mascara, ...rest } = cmd.patch
+      if (mascara !== undefined) { if (mascara) o.mascara = { x: clamp(mascara.x, 0, 1), y: clamp(mascara.y, 0, 1), w: clamp(mascara.w, 0.05, 1), aspect: clamp(mascara.aspect, 0.2, 5), r: clamp(mascara.r, 0, 0.5) }; else delete o.mascara }
       if (transicion !== undefined) { if (transicion) o.transicion = transicion; else delete o.transicion }
       const a = p.assets.find(x => x.id === o.assetId)
       Object.assign(o, rest)

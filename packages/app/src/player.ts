@@ -1,6 +1,6 @@
 import type { LoadedAsset } from './media'
 import { dibujarAsas, drawOverlays, setOverlayRedraw, type Geom } from './overlays'
-import { CLIP_TRANSFORM_DEFAULT, duration, fxAt, layout, locate, overlayEnd, type FxState, type Store } from '@gojaguar/core'
+import { CARD3D, CLIP_TRANSFORM_DEFAULT, anguloCard, duration, ladoCard, fxAt, layout, locate, overlayEnd, type FxState, type OverlayClip, type Store } from '@gojaguar/core'
 import { H, W, setCanvasSize } from './constants'
 
 /**
@@ -21,6 +21,8 @@ export class Player {
   images = new Map<string, ImageBitmap>()
   private lastFrame: VideoFrame | null = null
   private pCv: HTMLCanvasElement | null = null
+  private cardCv: OffscreenCanvas | null = null
+  private projCv: OffscreenCanvas | null = null
   private mCv: HTMLCanvasElement | null = null
   private personaDe = ''          // de qué video es la persona que quedó dibujada en pCv (para reusarla si falta un cuadro de la máscara)
   /** Cuántas veces la persona se dibujó con un cuadro de máscara que aún no llegaba (diagnóstico). */
@@ -390,6 +392,43 @@ export class Player {
     else this.ctx.drawImage(pc, 0, 0)
   }
 
+  /**
+   * Superpuesto con MÁSCARA tipo card (p. ej. 4:5 redondeada): el video completo se dibuja en su posición pero solo se ve dentro de la ventana.
+   * Con transición '3d' la card entra y sale girando en perspectiva (mismas cuentas que la exportación: `anguloCard`).
+   */
+  private dibujarCard(o: OverlayClip, f: CanvasImageSource, sx0: number, sy0: number, fw: number, fh: number, x: number, y: number, w: number, h: number, t: number) {
+    const m = o.mascara!, mw = m.w * W, mh = mw / m.aspect, mcx = m.x * W, mcy = m.y * H, mx0 = mcx - mw / 2, my0 = mcy - mh / 2
+    const cw = Math.max(2, Math.ceil(mw)), ch = Math.max(2, Math.ceil(mh))
+    const cv = (this.cardCv = this.cardCv && this.cardCv.width === cw && this.cardCv.height === ch ? this.cardCv : new OffscreenCanvas(cw, ch))
+    const g = cv.getContext('2d')!
+    g.clearRect(0, 0, cw, ch); g.save(); g.beginPath(); g.roundRect(0, 0, mw, mh, m.r * mw); g.clip()
+    g.fillStyle = '#000'; g.fillRect(0, 0, cw, ch)
+    g.translate(-mx0, -my0)
+    if (o.transform.rotation) { g.translate(x + w / 2, y + h / 2); g.rotate((o.transform.rotation * Math.PI) / 180); g.translate(-(x + w / 2), -(y + h / 2)) }
+    try { g.drawImage(f, sx0, sy0, fw, fh, x, y, w, h) } catch { /* frame cerrado */ }
+    g.restore()
+    const sel = this.store.selection?.type === 'overlay' && this.store.selection.id === o.id && !this.playing && !this.pantalla
+    if (sel) { this.ctx.save(); this.ctx.globalAlpha = 0.28; try { this.ctx.drawImage(f, sx0, sy0, fw, fh, x, y, w, h) } catch { /* */ } this.ctx.restore() }      // al seleccionarla se ve el video completo atenuado: así se sabe qué zona mostrar
+    const u = t - o.start, dur = overlayEnd(o) - o.start, fd = o.transicion === '3d' ? CARD3D.fundido : 0.35
+    const ang = o.transicion === '3d' ? anguloCard(u, dur, ladoCard(o.id)) : 0
+    this.ctx.save(); this.ctx.globalAlpha = o.transform.opacity * (o.transicion ? Math.min(clamp01q(u / fd), clamp01q((dur - u) / fd)) : 1)
+    if (Math.abs(ang) < 1e-4) this.ctx.drawImage(cv, mx0, my0)
+    else {
+      // proyección por tiras en un lienzo aparte SIN transparencia (si se dibujan con alfa, las uniones se ven como rayas) y luego el fundido
+      const D = mw * CARD3D.dist, N = 48, pw = Math.ceil(mw * 1.6), ph = Math.ceil(mh * 1.6), ox = pw / 2, oy = ph / 2
+      const pc = (this.projCv = this.projCv && this.projCv.width === pw && this.projCv.height === ph ? this.projCv : new OffscreenCanvas(pw, ph))
+      const q = pc.getContext('2d')!
+      q.clearRect(0, 0, pw, ph)
+      const px = (xa: number) => { const X = xa * Math.cos(ang), Z = xa * Math.sin(ang), s = D / (D + Z); return { p: ox + X * s, s } }
+      for (let i = 0; i < N; i++) {
+        const a = px((i / N - 0.5) * mw), b = px(((i + 1) / N - 0.5) * mw), dh = mh * (a.s + b.s) / 2
+        q.drawImage(cv, (i / N) * cw, 0, cw / N + 0.5, ch, a.p, oy - dh / 2, b.p - a.p + 0.7, dh)
+      }
+      this.ctx.drawImage(pc, mcx - ox, mcy - oy)
+    }
+    this.ctx.restore()
+  }
+
   /** Videos superpuestos: de la pista más baja a la más alta, con su posición, tamaño, opacidad y esquinas redondeadas. */
   private drawOverlayVideos(t: number) {
     const ovs = (this.store.project.overlays ?? []).filter(o => o.kind === 'video' && !this.store.project.tracks?.['v' + o.track]?.hidden && t >= o.start && t < overlayEnd(o)).sort((a, b) => a.track - b.track)
@@ -415,6 +454,7 @@ export class Player {
       // transición suave: aparece y se desvanece (y con 'subir' flota un poco hacia arriba al entrar)
       let alfaT = 1, dy = 0
       if (o.transicion) { const u = t - o.start, d = overlayEnd(o) - o.start, ent = clamp01q(u / 0.35), sal = clamp01q((d - u) / 0.3); alfaT = Math.min(ent, sal); if (o.transicion === 'subir') dy = H * 0.025 * Math.pow(1 - ent, 2) }
+      if (o.mascara && !screen) { this.dibujarCard(o, f, sx0, sy0, fw, fh, x, y, w, h, t); continue }
       this.ctx.save()
       if (dy) this.ctx.translate(0, dy)
       if (o.transform.rotation && !screen) { this.ctx.translate(o.transform.x * W, o.transform.y * H); this.ctx.rotate((o.transform.rotation * Math.PI) / 180); this.ctx.translate(-o.transform.x * W, -o.transform.y * H) }
