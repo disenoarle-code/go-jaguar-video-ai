@@ -256,3 +256,12 @@ suite('set_clip_color y set_audio_fx', () => {
     expect(store.project.mejoras?.audio).toBe(true)
   })
 })
+
+suite('capas: el fondo va debajo del texto', () => {
+  it('un fondo agregado después queda primero en la lista (se dibuja antes)', () => {
+    const store = fresh()
+    exec(store, { op: 'add_layer', layer: { type: 'graphic', template: 'contador', text: '', size: 40, color: '#fff', start: 0, end: 2 } })
+    exec(store, { op: 'add_layer', layer: { type: 'graphic', template: 'fondo', text: '', size: 40, color: '#000', start: 0, end: 2 } })
+    expect(store.project.layers.map(l => (l.type === 'graphic' ? l.template : l.type))).toEqual(['fondo', 'contador'])
+  })
+})

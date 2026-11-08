@@ -344,7 +344,8 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
     }
     case 'add_layer': {
       const l = { ...cmd.layer, id: store.newId('l'), transform: { ...DEFAULT_TRANSFORM, ...cmd.layer.transform } } as Layer
-      p.layers.push(l)
+      // un `fondo` (velo o pantalla de gráfico) SIEMPRE va debajo de los demás gráficos: el orden de la lista es el orden de dibujo, y un velo dibujado después del texto lo oscurece
+      if (l.type === 'graphic' && l.template === 'fondo') p.layers.unshift(l); else p.layers.push(l)
       return `${l.id} (${l.type}) añadido ${f2(l.start)}–${f2(l.end)}s`
     }
     case 'update_layer': {
