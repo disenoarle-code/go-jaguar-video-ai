@@ -1,0 +1,3 @@
+## Sincronía audio/video de la vista previa (proxies)
+
+La vista previa busca el fotograma por su **PTS real** (`FrameSource.idxAt` en `media.ts`), no por índice÷fps. Motivo (2026-11-07): el decodificador por hardware (VideoToolbox) fallaba en los primeros cuadros de los videos Sony sin dar error y el proxy salía con **11 fotogramas de menos** (hueco de 0,4 s en t=0,1); con índice÷fps el video iba hasta 0,37 s adelantado al audio. `makeProxy` ahora repite por software si ffmpeg dice "failed to decode" y fuerza fps constante. Tras crear un proxy comprueba que no tenga huecos: `ffprobe -select_streams v -show_entries frame=pts_time -of csv=p=0 proxy.mp4` (saltos > 0,06 s = mal) y que los frames igualen a los del original.

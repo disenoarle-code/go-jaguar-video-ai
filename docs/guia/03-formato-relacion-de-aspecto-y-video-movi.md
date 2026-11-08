@@ -1,0 +1,5 @@
+## Formato (relación de aspecto) y video movible
+
+- El formato del proyecto sale del primer video **ya con su giro** (los videos del celular traen una marca de rotación: 3840×2160 con `rotation -90` es VERTICAL 2160×3840; `probe()` en `api.ts` lo corrige) y se limita a 1080 de lado corto (`formatoDe` en core). Un video vertical llena todo el alto del editor.
+- Botón **9:16** (barra bajo el video, junto al tiempo): menú de relación de aspecto (9:16, 16:9, 1:1, 4:5, 4:3, "igual que el video") → `set_format`. El video nunca se deforma: se ajusta dentro del cuadro.
+- Al tocar el video (o seleccionar su clip) aparece su caja con asas, como en el texto pero **sin estirar por un lado**: arrastrar dentro = mover (con imán al centro), esquinas = agrandar/achicar, asa de abajo = girar (se pega a 0°/45°/90°…). Vale para clips de la pista principal (`Clip.transform`) y videos superpuestos (`OverlayClip.transform`, ahora con giro). En el inspector del clip: "Posición y tamaño" con deslizadores, "Ajustar al cuadro" y "Llenar el cuadro" (cubre el cuadro y recorta lo que sobra). La exportación hace lo mismo (`exportar.ts`: scale + rotate + overlay sobre negro).

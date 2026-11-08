@@ -12,24 +12,20 @@ Editor de video local que tú (Claude) controlas con comandos. El usuario ve los
 3. Inicia **en segundo plano**: `npm run dev` → http://127.0.0.1:5273
 4. Ábrelo en el panel del navegador. Verás el **Home** (lista de proyectos).
 
-## Cómo se usa (lo hace el usuario en la interfaz)
+## Cómo se usa (flujo por fases; el usuario lo hace en la interfaz)
 
-1. **Home** → *Nuevo proyecto* (nombre + idioma).
-2. **Material**: acepta **videos, música (mp3, wav, m4a…) e imágenes**. Botón *Elegir archivos* (diálogo del sistema) o arrastrar: los archivos se **enlazan donde ya están, no se copian** (cada tarjeta dice 🔗 enlazado o 📁 copia). Si el original se mueve o se borra, la tarjeta avisa y se puede *Ubicar* de nuevo; mientras tanto se puede seguir editando con la copia liviana (proxy). Botón **"Recorta silencios y errores"**: la app crea proxies, convierte el audio en texto, quita silencios, arma la edición base y **le pide a Claude** quitar lo repetido y ordenar el guion.
-3. **Referencias**: elige las ya guardadas (casilla) o sube nuevas (compartidas por todos los proyectos). Antes del botón hay un cuadro opcional *"¿Alguna recomendación para el video?"*. Botón **"Edición completa basada en referencias"**: le pide a Claude convertir el video según las referencias marcadas y la recomendación. **Es una opción independiente, no el paso 2 del recorte:** si el material aún no está preparado, la app lo prepara en el mismo paso (proxies, texto, silencios y edición base) y solo entonces te llega el pedido `completa`; si ya estaba preparado, el pedido llega directo. Por eso un pedido `completa` puede llegar con un proyecto que el usuario nunca recortó (la edición base ya está hecha por la app: sobre ella aplicas el guion y el estilo). Opción 1 ("Recorta silencios y errores") = solo limpiar; opción 2 = todo.
-4. **Abrir editor**: timeline para corregir a mano. Se guarda solo.
-
-**El usuario también puede pedirte cosas directamente en el chat.** Los botones de la app que necesitan criterio dejan un *pedido* que tú recibes (ver abajo); la app muestra su estado ("esperando a Claude…", "Claude está editando…", "✓ Listo").
+Barra de fases arriba: **1 Material → 2 Guion → 3 Propuesta → 4 Editar** (Anterior/Siguiente; se puede retroceder mientras el video no esté en el editor).
+1. **Material** (los archivos se ENLAZAN, no se copian; si el original se mueve, *Ubicar*): **Contenido principal** (de aquí sale el guion; es lo único que procesa el botón final **"Recortar silencios y revisar guion"**), **Cámaras adicionales** (se guardan, aún sin usar: PENDIENTE sincronizarlas con el audio del principal), **Tomas de apoyo** (videos/imágenes, SIN audio) y **Referencias** (se quitará cuando los estilos estén entrenados). **4 · Recomendaciones (opcional)**: texto libre del usuario (`analisis/notas-edicion.json`), antes del botón final.
+   - Cada toma de apoyo y referencia nueva deja una **hoja de contacto por escenas** (`scripts/escenas-contacto.py`, PySceneDetect+ffmpeg+Pillow; `pip3 install "scenedetect[opencv-headless]" pillow`): `analisis/apoyo/<toma>/hoja.jpg` + `escenas.json` e índice `analisis/apoyo/<toma>.json` (`descripcion: null` hasta que TÚ la escribas mirando la hoja). **Mira la hoja (1 imagen), nunca fotogramas sueltos.** Referencias: `biblioteca/referencias/<id>.analisis/`.
+2. **Guion** (`guion.ts`): secciones con miniatura; el usuario reordena, quita palabras (clic, arrastrar, Mayús+clic) o secciones; muletillas ya quitadas. Estado en `analisis/guion.json`; para LEER usa `analisis/guion-texto.txt` (texto plano, ~5× menos tokens). **Padding de 30 ms en TODOS los cortes** (`PADDING` en `server/guion.ts`): respétalo si cortas tú.
+3. **Propuesta** (`propuesta.ts`): pedido **`propuesta`** → `.claude/skills/propuesta-zonas/SKILL.md` escribe `analisis/propuesta.json`. Solo hay zonas donde entra OTRA imagen (toma de apoyo, imagen, video generado, animación 2D/3D); textos, subtítulos, letras y zooms los decides tú (subtítulos virales: sección propia pendiente). Lee SIEMPRE `analisis/notas-edicion.json` (recomendaciones generales del usuario).
+4. **Editar**: hasta este botón NO se ha editado nada. Arma el video con el guion (`aplicarGuion`) y deja un pedido **`edicion`**; la app muestra "Editando tu video" con 7 pasos que tú marcas (`npm run progreso -- <slug> <voz|zonas|movimiento|color|textos|revision> <en_curso|hecho|omitido> "detalle"`). Sigue `.claude/skills/edicion-inicial/SKILL.md`. Estilos y REGLA DE MOVIMIENTO (nada >8 s igual): `.claude/skills/estilos/`.
+   - Etapas en `analisis/fase.json`: `creacion` → `editando` → `editor`. **Ya en `editor` NO se vuelve a las fases de creación** (API 409): lo grande va por el chat o a mano. Los proyectos anteriores cuentan como `editor`.
+5. **Editor**: línea de tiempo para corregir a mano. El usuario también puede pedirte cosas por el chat.
 
 ## Al empezar: vigila los pedidos de la app
 
-Al abrir esta carpeta, **arranca en segundo plano**: `npm run vigilar`. Termina (y te avisa) cuando un botón de la app deja un pedido `pendiente`, imprimiendo `PEDIDO {json}` (`id`, `slug`, `tipo`: `errores`|`completa`, `referencias`, `recomendacion`: texto opcional del usuario, **tenla muy en cuenta**). Cuando te avise:
-1. `npm run solicitud -- <id> en_curso` (la app muestra "Claude está editando…").
-2. Ejecuta el pedido (abajo).
-3. `npm run solicitud -- <id> hecho` (o `error "motivo"`). La app muestra "✓ Listo".
-4. **Vuelve a arrancar `npm run vigilar`** para el siguiente pedido.
-
-Los pedidos viven en `biblioteca/solicitudes/*.json`.
+Arranca en segundo plano `npm run vigilar`: termina imprimiendo `PEDIDO {json}` (`id`, `slug`, `tipo`: `propuesta`|`edicion`; los antiguos `errores`/`completa` ya no se crean). Al recibirlo: `npm run solicitud -- <id> en_curso` → ejecuta el pedido con su skill → `npm run solicitud -- <id> hecho` (o `error "motivo"`) → **vuelve a arrancar `npm run vigilar`**. Los pedidos viven en `biblioteca/solicitudes/*.json`.
 
 ## Referencias en el editor (qué subió y qué seleccionó el usuario)
 
@@ -57,29 +53,15 @@ biblioteca/
   referencias/             <id>.ref.json (enlaces) o copias, y <nombre>.estilo.json (compartidas por todos los proyectos)
 ```
 
-## Procedimientos estándar de TODA edición (botón 1 y botón 2, siempre)
+## Procedimientos estándar de TODA edición
+Guion (lo revisa el usuario en la app), muletillas (`docs/guia/15-…`), voz limpia y pareja y luces/color (pasos `voz` y `color` de `.claude/skills/edicion-inicial/SKILL.md`). El estilo (`.claude/skills/estilos/`) se aplica encima.
 
-Antes de cualquier otra cosa, en TODO video que entre a edición, ya sea el pedido `errores` (botón 1 "Recorta silencios y errores") o `completa` (botón 2 "Edición completa basada en referencias"):
-
-1. **Guion al grano para quien lo ve en frío**: solo lo más interesante; lo repetitivo o irrelevante se elimina.
-2. **Muletillas, tartamudeos y repetidas** fuera (`scripts/detectar-muletillas.py`).
-3. **Cortes y orden** (silencios, tropiezos, tomas repetidas, gancho, clips organizados).
-4. **Voz limpia y pareja**: `set_audio_fx {on:true}` (quita ruido y nivela para que la voz suene siempre igual de fuerte; la app ya lo hace al procesar el material).
-5. **Luces y color**: `scripts/analizar-color.py` por clip → `set_clip_color`, y revisar cuadros antes/después.
-
-Detalle y criterios en `.claude/skills/guion-viral/SKILL.md` (sección "PROCEDIMIENTOS ESTÁNDAR"). Estos pasos van primero; el estilo de las referencias (botón 2) se aplica encima de ellos.
-
-## Ejecutar un pedido (o una orden del chat)
-
-1. **Proyecto:** `slug` del pedido (o el que esté abierto en el panel). Referencias: `proyecto.json` → `referencias`. Texto: `biblioteca/proyectos/<slug>/transcripciones/`.
-2. **`errores` (guion)** → primero los **procedimientos estándar** (arriba) y sigue `.claude/skills/guion-viral/SKILL.md` (claridad para alguien que hace scroll sin contexto; duración NO es objetivo; 2 pasadas de revisión del guion final).
-3. **`completa`** → primero los **procedimientos estándar** (arriba); luego, por cada referencia sin perfil: analízala (cortes por escena con ffmpeg, fotogramas, subtítulos, paleta, zooms), guarda `biblioteca/referencias/<nombre>.estilo.json` y aplica ese estilo, además del guion (skill).
-4. Abre `http://127.0.0.1:5273/#/editor/<slug>` y aplica con `editor.batch([...])`. Se guarda solo en `proyecto.gojaguar`.
-5. Muestra al usuario el **guion final** (texto), el resultado de las pasadas y qué quedó pendiente.
+## Ejecutar una orden del chat
+Proyecto = `slug` (o el abierto en el panel); texto en `analisis/guion-texto.txt`; abre `http://127.0.0.1:5273/#/editor/<slug>` y aplica con `editor.batch([...])` (se guarda solo). Muestra al usuario qué hiciste y qué falta.
 
 ## Controlar el editor (desde el panel)
 
-`window.editor` existe en la página del editor. Úsalo con la herramienta de JavaScript del navegador:
+`window.editor` existe en la página del editor. Úsalo con la herramienta de JavaScript del navegador. **Para ahorrar tokens: `editor.describe('corto')` (resumen), `editor.verificar()` (revisión numérica: regla de movimiento y avisos) y `editor.hoja()` (UNA imagen con ~12–16 momentos, guardada en `analisis/hoja-edicion.jpg`: léela con Read) en lugar de varias capturas.**
 
 ```js
 editor.describe()                      // resumen compacto (léelo ANTES de editar)
@@ -103,10 +85,23 @@ Reglas:
 - No renderices para ver un cambio: la vista previa es en vivo.
 - Ediciones no destructivas (nunca tocan los originales).
 
-## Guía detallada (léela antes de una EDICIÓN COMPLETA o al tocar el área)
+## Guía detallada (índice por temas: lee SOLO el archivo que toques)
 
-Todo lo aprendido vive en `docs/GUIA-DEL-EDITOR.md`: música e imágenes, efectos de sonido y luces, formato y video movible, controles del reproductor, voz limpia/luces/color/dB, selección múltiple, plantillas de gráficos explicativos, **reglas de la edición con apoyo visual (cards 4:5 con 3D, tomas sin texto, verificar con capturas del editor y no exportando)**, recorte de persona (texto detrás), atajos, subtítulos y karaoke (**sincronía obligatoria**), muletillas, momentos sin voz, sincronía de proxies, escenas animadas y color de marca.
-Reglas de oro: nunca tocar los originales; lotes en vez de llamadas sueltas; no exportar pruebas; nada solo de Mac; SFX solo swooshes de aire suaves; sin comillas en subtítulos.
+`docs/GUIA-DEL-EDITOR.md` es un índice; cada tema vive en `docs/guia/NN-*.md` (música/imágenes, efectos de sonido, formato, reproductor, voz/color/dB, selección múltiple, **plantillas de gráficos + reglas de apoyo visual (07)**, recorte de persona, atajos, subtítulos y karaoke (**sincronía obligatoria**), muletillas, momentos sin voz, proxies, escenas animadas, color de marca). Reglas de oro: nunca tocar los originales; lotes en vez de llamadas sueltas; no exportar pruebas; nada solo de Mac; SFX solo swooshes de aire suaves; sin comillas en subtítulos.
+
+## Recursos ilustrativos para Remotion (mínimos tokens)
+- **Escalera de ilustración (2D minimalista primero; 3D solo si hace falta) y comando `scripts/ilustrar.py` (render + transparencia + caché en una llamada): `.claude/skills/ilustraciones/SKILL.md`. Léelo antes de ilustrar.**
+- **Una sola llamada:** `python3 experiments/estilo-3d/scripts/assets.py traer <icono|modelo|hdri|textura> <palabras en inglés>` → busca, elige el primero y lo baja a `public/assets/` (reutiliza lo ya descargado); imprime UNA línea (~20 tokens). Úsalo con `staticFile()`. NUNCA abras ni imprimas el archivo (SVG/gltf).
+- Si el primero no sirve: `assets.py buscar <tipo> <palabras>` (≤5 líneas) y `assets.py bajar <tipo> <id>`; `assets.py categorias <tipo>` para afinar. NO consultes las APIs a mano (Iconify devuelve ~5k tokens de metadatos; Poly Haven, listas enormes).
+- Iconos: solo MIT / Apache-2.0 / CC0 (el script descarta el resto). 3D/HDRI/texturas: Poly Haven, CC0, resolución 1k por defecto. Todo se registra en `public/assets/credits.json`.
+- 3D solo si el 2D no alcanza; Poly Haven es sobre todo utilería (muebles, plantas, herramientas): para un producto concreto no habrá modelo. Sin Blender MCP ni MCP de iconos.
+- Responde breve; no resumas paso a paso lo que hiciste.
+
+## Aprendizaje del estilo del usuario (casi 0 tokens)
+El editor anota lo que el usuario hace a mano; `scripts/aprender.py` (código, sin Claude) lo funde en `biblioteca/aprendizaje/perfil.json` y regenera `estilo-usuario.md`. **Lee ese .md (≈400 tokens) antes de proponer o editar; nunca el perfil ni los logs.** Solo si hay notas cualitativas nuevas llega un pedido `aprendizaje` (skill `aprender-estilo`). Cuando el usuario pida un cambio general por el chat, anótalo: `npm run nota-estilo -- <slug> "preferencia corta"`.
+
+## Verificación previa (nada entra a editar con archivos faltantes)
+`verificarProyecto` (`server/api.ts`): antes de **Editar** y al abrir el **editor** revisa ffmpeg, guion con contenido, y que existan las copias livianas de todos los videos (el original solo hace falta para exportar: es un aviso). Si falta algo, la app muestra qué y ofrece **Reparar** (regenera la copia liviana desde el original) en vez de quedarse en "Cargando…"; `GET /api/proyectos/:slug/verificacion?para=editar|editor`, `POST …/reparar`.
 
 ## Estructura del código
 
@@ -117,6 +112,8 @@ Reglas de oro: nunca tocar los originales; lotes en vez de llamadas sueltas; no 
 Antes de cambiar código: `npm test` y `npm run check` deben pasar.
 
 ## Límites actuales (no prometas lo que no existe)
+
+- **3D con Remotion/three.js: probado con transparencia** (MP4 "pack" color|alfa, assets con `alfa:'pack'`; receta en `docs/guia/07-…`). Falta la biblioteca de composiciones parametrizadas y el comando que renderiza e importa en un paso.
 
 - Los textos (subtítulos y gráficos) salen en el MP4: la exportación los dibuja con un Chromium sin pantalla (`server/rotulos.ts` + página `src/render.ts`, el MISMO código de `overlays.ts` que usa el editor) como PNG con transparencia y ffmpeg los superpone. Si un rótulo se ve distinto en el MP4, el cambio va en `overlays.ts`. Rótulo animado: capa `graphic` con `template:'lanzamiento'` y `props:{linea1,linea2,modelo,marca (ruta api/files/… del logo blanco con transparencia),acento}`.
 - **La exportación pregunta la carpeta** (campo "Guardar en" con botón Cambiar…, diálogo nativo del sistema vía `POST /api/carpeta`), recuerda la última en `biblioteca/configuracion.json` (por defecto `~/Movies`) y deja el MP4 final en esa carpeta, no en la biblioteca; lo exportado se registra en `biblioteca/exportaciones.json` (solo esas rutas se sirven o se muestran en el Finder).

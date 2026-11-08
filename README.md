@@ -11,7 +11,6 @@ Editor de video pensado para que Claude lo controle con pocos tokens y el usuari
 | `packages/core` | Modelo del proyecto (clips + capas), comandos, historial, `.gojaguar`. Sin navegador. |
 | `packages/app` | Interfaz (Home, Proyecto, Editor), motor de vista previa y API local (`server/api.ts`). |
 | `biblioteca/` | Tus proyectos y referencias (no va a git). Ver CLAUDE.md. |
-| `.claude/skills/guion-viral` | Criterios para editar el guion (claridad primero). |
 | `experiments/estilo-3d` | Ensayo de estilo con Remotion + three.js. |
 | `docs` | Plan, producto, benchmarks |
 
