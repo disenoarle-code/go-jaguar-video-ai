@@ -8,6 +8,8 @@ import { H, W, setCanvasSize } from './constants'
  * timeline -> (clip, tiempo fuente) -> frame decodificado (WebCodecs) -> canvas.
  * Audio: Web Audio agendado según el timeline (recortes y velocidad en vivo).
  */
+const clamp01q = (x: number) => Math.min(Math.max(x, 0), 1)
+
 export class Player {
   readonly canvas: HTMLCanvasElement
   readonly ctx: CanvasRenderingContext2D
@@ -410,9 +412,13 @@ export class Player {
       const k = (screen ? Math.max(W / fw, H / fh) : Math.min(W / fw, H / fh)) * o.transform.scale, w = fw * k, h = fh * k
       this.ovDims.set(o.id, { fw, fh })
       const x = o.transform.x * W - w / 2, y = o.transform.y * H - h / 2
+      // transición suave: aparece y se desvanece (y con 'subir' flota un poco hacia arriba al entrar)
+      let alfaT = 1, dy = 0
+      if (o.transicion) { const u = t - o.start, d = overlayEnd(o) - o.start, ent = clamp01q(u / 0.35), sal = clamp01q((d - u) / 0.3); alfaT = Math.min(ent, sal); if (o.transicion === 'subir') dy = H * 0.025 * Math.pow(1 - ent, 2) }
       this.ctx.save()
+      if (dy) this.ctx.translate(0, dy)
       if (o.transform.rotation && !screen) { this.ctx.translate(o.transform.x * W, o.transform.y * H); this.ctx.rotate((o.transform.rotation * Math.PI) / 180); this.ctx.translate(-o.transform.x * W, -o.transform.y * H) }
-      this.ctx.globalAlpha = o.transform.opacity
+      this.ctx.globalAlpha = o.transform.opacity * alfaT
       if (screen) this.ctx.globalCompositeOperation = 'screen'
       else { this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.06); this.ctx.clip() }
       try { this.ctx.drawImage(f, sx0, sy0, fw, fh, x, y, w, h) } catch { /* frame cerrado por el LRU */ }

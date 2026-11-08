@@ -8,7 +8,7 @@
  * Todo depende solo del tiempo `t`, así que la vista previa y la exportación (mismo código) coinciden.
  */
 import { H, W } from './constants'
-import type { Rect } from './overlays'
+import { getImg, type Rect } from './overlays'
 
 type Ctx = CanvasRenderingContext2D
 type L = { start: number; end: number; text: string; props?: Record<string, string> }
@@ -17,7 +17,7 @@ const clamp01 = (x: number) => Math.min(Math.max(x, 0), 1)
 const easeOut3 = (x: number) => 1 - Math.pow(1 - clamp01(x), 3)
 const easeBack = (x: number) => { const c1 = 1.70158, c3 = c1 + 1, v = clamp01(x); return 1 + c3 * Math.pow(v - 1, 3) + c1 * Math.pow(v - 1, 2) }
 const FONT = (px: number, w = 800) => `${w} ${px}px Figtree, "Segoe UI", system-ui, sans-serif`
-export const PLANTILLAS_NUEVAS = ['fondo', 'clave', 'busqueda', 'contador', 'preguntas', 'ficha']
+export const PLANTILLAS_NUEVAS = ['fondo', 'clave', 'busqueda', 'contador', 'preguntas', 'ficha', 'foto']
 const VERDE = '#2fd18b', ROJO = '#ff5a4d', ORO = '#ffc233'
 
 /** Panel de cristal oscuro con borde brillante. */
@@ -39,7 +39,7 @@ const POS_Y: Record<string, number> = { arriba: 0.14, centro: 0.4, abajo: 0.68 }
 const posY = (o: L) => POS_Y[o.props?.pos ?? 'arriba'] ?? (Number(o.props?.pos) || 0.14)      // pos: 'arriba' | 'centro' | 'abajo' o una altura 0–1
 function medidaClave(c: Ctx, o: L) {
   const txt = (o.props?.texto ?? o.text).toUpperCase(), maxW = W * 0.9
-  let size = W * 0.17; c.font = FONT(size, 900)
+  let size = W * (Number(o.props?.tam) || 0.17); c.font = FONT(size, 900)        // tam: tamaño base (fracción del ancho); se achica solo si no cabe
   while (c.measureText(txt).width > maxW && size > W * 0.05) { size *= 0.94; c.font = FONT(size, 900) }
   return { txt, size, w: c.measureText(txt).width }
 }
@@ -50,6 +50,7 @@ export function cajaPlantilla(c: Ctx, o: L & { template: string }): Rect | null 
     case 'clave': { c.save(); const m = medidaClave(c, o); c.restore(); return { x: W / 2 - m.w / 2, y: H * pos - m.size * 0.6, w: m.w, h: m.size * 1.4 } }
     case 'busqueda': return { x: W * 0.1, y: H * 0.1, w: W * 0.8, h: H * 0.17 }
     case 'contador': return { x: W * 0.12, y: H * 0.08, w: W * 0.76, h: H * 0.2 }
+    case 'foto': { const lado = o.props?.lado ?? 'izq', w = W * Number(o.props?.w ?? 0.46), yy = Number(o.props?.y ?? 0.6); return { x: (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W - w / 2, y: H * yy - w * 0.6, w, h: w * 1.2 } }
     case 'preguntas': return { x: W * 0.07, y: H * 0.09, w: W * 0.86, h: H * 0.3 }
     case 'ficha': { const lado = o.props?.lado ?? 'der', yy = Number(o.props?.y ?? 0.3), w = W * 0.52; return { x: (lado === 'izq' ? 0.05 : lado === 'der' ? 0.95 - 0.52 : 0.24) * W, y: H * yy - H * 0.03, w, h: H * 0.06 } }
   }
@@ -67,12 +68,14 @@ function dibujarClave(c: Ctx, o: L, t: number) {
   c.font = FONT(m.size, 900); c.textBaseline = 'middle'; c.letterSpacing = `${-m.size * 0.01}px`
   const x = -m.w / 2, y0 = -m.size * 0.55, y1 = m.size * 0.55
   const g = c.createLinearGradient(0, y0, 0, y1)           // cromo: luz arriba, horizonte oscuro en el medio, rebote claro abajo
-  g.addColorStop(0, '#ffffff'); g.addColorStop(0.42, '#d9dde3'); g.addColorStop(0.5, '#6d7580'); g.addColorStop(0.58, '#aeb5be'); g.addColorStop(1, '#f1f3f6')
+  if (o.props?.claro === '1') { g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, '#f4f6f8'); g.addColorStop(0.5, '#cdd3da'); g.addColorStop(0.6, '#f1f3f6'); g.addColorStop(1, '#ffffff') }      // cromo claro: para fondos oscuros o grises
+  else { g.addColorStop(0, '#ffffff'); g.addColorStop(0.42, '#e4e7ec'); g.addColorStop(0.5, '#9aa3af'); g.addColorStop(0.58, '#c6ccd4'); g.addColorStop(1, '#f6f7f9') }
   c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = m.size * 0.28; c.shadowOffsetY = m.size * 0.06
-  c.lineJoin = 'round'; c.lineWidth = m.size * 0.05; c.strokeStyle = 'rgba(25,28,34,.55)'; c.strokeText(m.txt, x, 0)
+  c.lineJoin = 'round'; c.lineWidth = m.size * 0.07; c.strokeStyle = 'rgba(12,14,18,.8)'; c.strokeText(m.txt, x, 0)
   c.shadowColor = 'transparent'; c.fillStyle = g; c.fillText(m.txt, x, 0)
   c.lineWidth = Math.max(1, m.size * 0.012); c.strokeStyle = 'rgba(255,255,255,.7)'; c.strokeText(m.txt, x, 0)
-  if (sub) { c.filter = 'none'; c.font = FONT(m.size * 0.2, 700); c.letterSpacing = `${m.size * 0.03}px`; c.fillStyle = 'rgba(255,255,255,.92)'; c.shadowColor = 'rgba(0,0,0,.7)'; c.shadowBlur = m.size * 0.12; const sw = c.measureText(sub.toUpperCase()).width; c.fillText(sub.toUpperCase(), -sw / 2, m.size * 0.72) }
+  if (sub) { c.filter = 'none'; let sf = m.size * 0.2; c.font = FONT(sf, 700); c.letterSpacing = `${sf * 0.12}px`; while (c.measureText(sub.toUpperCase()).width > W * 0.84 && sf > W * 0.02) { sf *= 0.94; c.font = FONT(sf, 700); c.letterSpacing = `${sf * 0.12}px` }      // el subtítulo se achica para caber dentro del margen
+  c.fillStyle = 'rgba(255,255,255,.96)'; c.shadowColor = 'rgba(0,0,0,.75)'; c.shadowBlur = sf * 0.5; const sw = c.measureText(sub.toUpperCase()).width; c.fillText(sub.toUpperCase(), -sw / 2, m.size * 0.72) }
   c.restore()
 }
 
@@ -109,16 +112,22 @@ function dibujarBusqueda(c: Ctx, o: L, t: number) {
 function dibujarContador(c: Ctx, o: L, t: number) {
   const pr = o.props ?? {}, de = Number(pr.desde ?? 0), a = Number(pr.hasta ?? 100), suf = pr.sufijo ?? '', et = pr.etiqueta ?? '', col = pr.color ?? ORO
   const tt = t - o.start, dur = o.end - o.start, ex = clamp01((tt - (dur - 0.35)) / 0.35), ent = easeOut3(tt / 0.4)
-  const v = de + (a - de) * easeOut3((tt - 0.15) / 1.3), txt = Math.round(v).toLocaleString('es-CO') + (suf ? ' ' + suf : '')
-  const size = W * 0.2; c.save(); c.globalAlpha = ent * (1 - ex); c.translate(W / 2, H * 0.17 + (1 - ent) * 14)
-  c.font = `italic 700 ${size}px Georgia, "Times New Roman", serif`; c.textBaseline = 'middle'
-  let fs = size; while (c.measureText(txt).width > W * 0.88 && fs > W * 0.06) { fs *= 0.95; c.font = `italic 700 ${fs}px Georgia, "Times New Roman", serif` }
-  const w = c.measureText(txt).width
-  const rg = c.createRadialGradient(0, 0, 0, 0, 0, Math.max(w, W * 0.5) * 0.6); rg.addColorStop(0, `${col}66`); rg.addColorStop(1, `${col}00`)
-  c.fillStyle = rg; c.fillRect(-W / 2, -H * 0.1, W, H * 0.2)
-  const g = c.createLinearGradient(0, -fs * 0.5, 0, fs * 0.5); g.addColorStop(0, '#fff6d6'); g.addColorStop(0.5, col); g.addColorStop(1, '#b97a00')
-  c.shadowColor = 'rgba(0,0,0,.65)'; c.shadowBlur = fs * 0.25; c.fillStyle = g; c.fillText(txt, -w / 2, 0); c.shadowColor = 'transparent'
-  if (et) { c.font = FONT(W * 0.04, 700); c.letterSpacing = `${W * 0.004}px`; c.fillStyle = 'rgba(255,255,255,.92)'; c.shadowColor = 'rgba(0,0,0,.7)'; c.shadowBlur = 8; const lw = c.measureText(et.toUpperCase()).width; c.fillText(et.toUpperCase(), -lw / 2, fs * 0.62) }
+  const v = de + (a - de) * easeOut3((tt - 0.1) / 0.8), num = Math.round(v).toLocaleString('es-CO')
+  c.save(); c.globalAlpha = ent * (1 - ex); const cy = H * 0.2 + (1 - ent) * 16
+  // degradado oscuro SOLO detrás del texto (la foto de abajo no se oscurece)
+  const rg = c.createRadialGradient(W / 2, cy, 0, W / 2, cy, W * 0.62); rg.addColorStop(0, 'rgba(0,0,0,.5)'); rg.addColorStop(1, 'rgba(0,0,0,0)')
+  c.fillStyle = rg; c.fillRect(0, cy - H * 0.16, W, H * 0.32)
+  c.textBaseline = 'middle'
+  // número grande en sans moderna (blanco) + palabra en dorado
+  let fs = W * 0.28; c.font = FONT(fs, 900); const w1 = () => c.measureText(num).width, sw = () => c.measureText(suf ? ' ' + suf : '').width
+  c.font = FONT(fs, 900); while (w1() + sw() * 0.5 > W * 0.88 && fs > W * 0.08) { fs *= 0.95; c.font = FONT(fs, 900) }
+  const fsSuf = fs * 0.42; c.font = FONT(fsSuf, 900); const wSuf = suf ? c.measureText(suf.toUpperCase()).width : 0
+  c.font = FONT(fs, 900); const wNum = c.measureText(num).width, total = wNum + (suf ? fs * 0.14 + wSuf : 0), x0 = W / 2 - total / 2
+  c.shadowColor = 'rgba(0,0,0,.55)'; c.shadowBlur = fs * 0.2; c.shadowOffsetY = fs * 0.04
+  c.fillStyle = '#fff'; c.fillText(num, x0, cy)
+  if (suf) { c.font = FONT(fsSuf, 900); c.fillStyle = col; c.letterSpacing = `${fsSuf * 0.04}px`; c.fillText(suf.toUpperCase(), x0 + wNum + fs * 0.14, cy + fs * 0.2) }
+  c.shadowColor = 'transparent'; c.letterSpacing = '0px'
+  if (et) { c.font = FONT(W * 0.043, 700); c.letterSpacing = `${W * 0.006}px`; c.fillStyle = '#fff'; c.shadowColor = 'rgba(0,0,0,.8)'; c.shadowBlur = 10; const lw = c.measureText(et.toUpperCase()).width; c.fillText(et.toUpperCase(), W / 2 - lw / 2, cy + fs * 0.62) }
   c.restore()
 }
 
@@ -167,11 +176,46 @@ function dibujarFicha(c: Ctx, o: L, t: number) {
 /** Cubre todo el cuadro con un fondo liso (negro con resplandor, o crema; `alpha` < 1 lo vuelve un velo que oscurece el video de abajo para que se lean los gráficos): el video sigue sonando; los gráficos de encima se leen como en un corte a "pantalla de gráfico". */
 function dibujarFondo(c: Ctx, o: L, t: number) {
   const tt = t - o.start, dur = o.end - o.start, a = clamp01(tt / 0.3) * (1 - clamp01((tt - (dur - 0.3)) / 0.3)) * clamp01(Number(o.props?.alpha ?? 1)), acc = o.props?.acento ?? ORO, crema = (o.props?.tono ?? 'negro') === 'crema'
+  if ((o.props?.tono ?? 'negro') === 'degradado') {       // velo SOLO arriba (donde van los gráficos): la foto de abajo se ve limpia
+    c.save(); c.globalAlpha = a; const g2 = c.createLinearGradient(0, 0, 0, H * 0.72); g2.addColorStop(0, 'rgba(0,0,0,.88)'); g2.addColorStop(0.5, 'rgba(0,0,0,.5)'); g2.addColorStop(1, 'rgba(0,0,0,0)')
+    c.fillStyle = g2; c.fillRect(0, 0, W, H * 0.72); c.restore(); return
+  }
   c.save(); c.globalAlpha = a
   const g = c.createLinearGradient(0, 0, 0, H)
   if (crema) { g.addColorStop(0, '#f8f2e8'); g.addColorStop(1, '#e8dfd0') } else { g.addColorStop(0, '#0a0a0c'); g.addColorStop(1, '#17171b') }
   c.fillStyle = g; c.fillRect(0, 0, W, H)
   if (!crema) { const rg = c.createRadialGradient(W / 2, H * 0.2, 0, W / 2, H * 0.2, W * 0.9); rg.addColorStop(0, `${acc}44`); rg.addColorStop(1, `${acc}00`); c.fillStyle = rg; c.fillRect(0, 0, W, H) }
+  c.restore()
+}
+
+// ---------------------------------------------------------------- foto: tarjeta 3D (polaroid / cristal) ----
+/**
+ * Foto como tarjeta que entra girando en 3D (perspectiva por franjas, como la tarjeta de cristal), con sombra, flota un poco y sale girando.
+ * props: src (URL de la imagen del proyecto), estilo 'polaroid' | 'cristal', pie (texto de la polaroid), lado 'izq' | 'der' | 'centro', y (altura 0–1), w (ancho 0–1 del cuadro), rot (inclinación en grados).
+ */
+function dibujarFoto(c: Ctx, o: L, t: number) {
+  const pr = o.props ?? {}, im = getImg(pr.src); if (!im) return
+  const tt = t - o.start, dur = o.end - o.start, k = easeBack(tt / 0.75), ex = clamp01((tt - (dur - 0.45)) / 0.45)
+  const lado = pr.lado ?? 'izq', dir = lado === 'der' ? -1 : 1, estilo = pr.estilo ?? 'polaroid', rotG = (Number(pr.rot ?? (lado === 'izq' ? -4 : lado === 'der' ? 4 : 0)) * Math.PI) / 180
+  const w = W * Number(pr.w ?? 0.46), borde = estilo === 'polaroid' ? w * 0.05 : 0, pie = estilo === 'polaroid' ? w * (pr.pie ? 0.2 : 0.1) : 0
+  const iw = w - borde * 2, ih = Math.min(iw * (im.naturalHeight / im.naturalWidth), W * 0.7), h = ih + borde + pie
+  const S = 2, cv = new OffscreenCanvas(Math.ceil(w * S), Math.ceil(h * S)), g = cv.getContext('2d')!; g.scale(S, S)
+  if (estilo === 'polaroid') { g.fillStyle = '#f7f4ee'; g.beginPath(); g.roundRect(0, 0, w, h, w * 0.02); g.fill() }
+  g.save(); g.beginPath(); g.roundRect(borde, borde, iw, ih, estilo === 'polaroid' ? w * 0.01 : w * 0.05); g.clip()
+  const kk = Math.max(iw / im.naturalWidth, ih / im.naturalHeight), sw = iw / kk, sh = ih / kk       // la foto llena su marco, recortada al centro (nunca se estira)
+  g.drawImage(im, (im.naturalWidth - sw) / 2, (im.naturalHeight - sh) / 2, sw, sh, borde, borde, iw, ih); g.restore()
+  if (estilo === 'cristal') { g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 2; g.beginPath(); g.roundRect(1, 1, w - 2, h - 2, w * 0.05); g.stroke() }
+  if (pr.pie && estilo === 'polaroid') { let fs = pie * 0.34; g.font = FONT(fs, 700); while (g.measureText(pr.pie).width > w * 0.88 && fs > 7) { fs *= 0.94; g.font = FONT(fs, 700) } g.fillStyle = '#2a2a2a'; g.textBaseline = 'middle'; g.fillText(pr.pie, (w - g.measureText(pr.pie).width) / 2, ih + borde + pie * 0.52) }
+  // proyección 3D
+  const cx = (lado === 'izq' ? 0.3 : lado === 'der' ? 0.7 : 0.5) * W + dir * -(1 - Math.min(k, 1)) * W * 0.3, cy = H * Number(pr.y ?? 0.6) + Math.sin(tt * 1.6) * 3
+  const th = dir * (1 - Math.min(k, 1.1)) * -68 * Math.PI / 180 + dir * ex * -60 * Math.PI / 180 + Math.sin(tt * 1.3) * 0.02, D = w * 2.6, N = 56, alfa = clamp01(tt / 0.2) * (1 - ex)
+  c.save(); c.translate(cx, cy); c.rotate(rotG + (1 - Math.min(k, 1)) * dir * 0.12); c.globalAlpha = alfa
+  c.save(); c.filter = `blur(${(w * 0.06).toFixed(1)}px)`; c.fillStyle = 'rgba(0,0,0,.45)'; c.beginPath(); c.roundRect(-w * 0.46, -h * 0.5 + h * 0.07, w * 0.92, h * 0.96, w * 0.04); c.fill(); c.restore()      // sombra suave
+  const proj = (x: number) => { const X = x * Math.cos(th), Z = x * Math.sin(th), s = D / (D + Z); return { px: X * s, s } }
+  for (let i = 0; i < N; i++) {
+    const p0 = proj((i / N - 0.5) * w), p1 = proj(((i + 1) / N - 0.5) * w), s = (p0.s + p1.s) / 2, dh = h * s
+    c.drawImage(cv as unknown as CanvasImageSource, (i / N) * cv.width, 0, cv.width / N + 0.5, cv.height, p0.px, -dh / 2, p1.px - p0.px + 0.7, dh)
+  }
   c.restore()
 }
 
@@ -184,6 +228,7 @@ export function dibujarPlantillaNueva(c: Ctx, o: L & { template: string }, t: nu
     case 'contador': dibujarContador(c, o, t); return true
     case 'preguntas': dibujarPreguntas(c, o, t); return true
     case 'ficha': dibujarFicha(c, o, t); return true
+    case 'foto': dibujarFoto(c, o, t); return true
   }
   return false
 }

@@ -12,7 +12,7 @@ export interface Rect { x: number; y: number; w: number; h: number }
 const imgCache = new Map<string, HTMLImageElement>()
 let onImage: () => void = () => {}
 export const setOverlayRedraw = (fn: () => void) => { onImage = fn }
-function getImg(url?: string): HTMLImageElement | null {
+export function getImg(url?: string): HTMLImageElement | null {
   if (!url) return null
   let im = imgCache.get(url)
   if (!im) { im = new Image(); im.onload = () => onImage(); im.src = '/' + url; imgCache.set(url, im) }
@@ -20,7 +20,7 @@ function getImg(url?: string): HTMLImageElement | null {
 }
 /** Espera a que carguen las imágenes de todos los rótulos (lo usa el render de la exportación). */
 export async function preloadOverlayImages(p: Project) {
-  const urls = p.layers.flatMap(l => (l.type === 'graphic' && l.props?.marca ? [l.props.marca] : []))
+  const urls = p.layers.flatMap(l => (l.type === 'graphic' ? [l.props?.marca, l.props?.src].filter((u): u is string => !!u) : []))
   await Promise.all(urls.map(u => new Promise<void>(res => { const im = new Image(); im.onload = im.onerror = () => res(); im.src = '/' + u; imgCache.set(u, im) })))
 }
 

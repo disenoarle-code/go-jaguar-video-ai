@@ -9,7 +9,7 @@ import {
 
 /** Capa nueva sin id; el transform puede ser parcial. */
 export type NewLayer = (Layer extends infer L ? L extends Layer ? Omit<L, 'id' | 'transform'> & { transform?: Partial<Transform> } : never : never)
-export type OverlayPatch = { crop?: { l: number; t: number; r: number; b: number } | null; blend?: 'screen' | null; start?: number; track?: number; srcIn?: number; srcOut?: number; speed?: number; volume?: number; transform?: Partial<Transform> }
+export type OverlayPatch = { transicion?: 'fundido' | 'subir' | null; crop?: { l: number; t: number; r: number; b: number } | null; blend?: 'screen' | null; start?: number; track?: number; srcIn?: number; srcOut?: number; speed?: number; volume?: number; transform?: Partial<Transform> }
 export type LayerPatch = { transform?: Partial<Transform>; [k: string]: unknown }
 
 /**
@@ -157,10 +157,11 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
     case 'update_overlay': {
       const o = p.overlays?.find(x => x.id === cmd.id)
       if (!o) return 'clip superpuesto no encontrado'
-      const { transform, blend, crop, ...rest } = cmd.patch
+      const { transform, blend, crop, transicion, ...rest } = cmd.patch
+      if (transicion !== undefined) { if (transicion) o.transicion = transicion; else delete o.transicion }
       const a = p.assets.find(x => x.id === o.assetId)
       Object.assign(o, rest)
-      if (crop !== undefined) { if (crop) { const c = (v: number) => clamp(v, 0, 0.45); o.crop = { l: c(crop.l), t: c(crop.t), r: c(crop.r), b: c(crop.b) } } else delete o.crop }
+      if (crop !== undefined) { if (crop) { const c = (v: number) => clamp(v, 0, 0.9); let l = c(crop.l), r = c(crop.r), t = c(crop.t), b = c(crop.b); if (l + r > 0.92) { const k = 0.92 / (l + r); l *= k; r *= k } if (t + b > 0.92) { const k = 0.92 / (t + b); t *= k; b *= k }; o.crop = { l, t, r, b } } else delete o.crop }
       if (blend !== undefined) { if (blend) o.blend = blend; else delete o.blend }
       if (a) { o.srcIn = clamp(o.srcIn, 0, a.duration); o.srcOut = clamp(o.srcOut, o.srcIn + MIN_DUR * o.speed, a.duration) }
       o.start = Math.max(o.start, 0); o.speed = clamp(o.speed, 0.1, 8); o.volume = clamp(o.volume, 0, 4)

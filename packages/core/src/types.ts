@@ -109,6 +109,8 @@ export interface OverlayClip {
   transform: Transform            // posición/tamaño/opacidad (solo video)
   /** Recorte de bordes del propio video/imagen (fracciones 0–0.5 de cada lado): quita barras negras, subtítulos quemados, etc. Nunca deforma. */
   crop?: { l: number; t: number; r: number; b: number }
+  /** Entrada/salida suave: 'fundido' (aparece y se desvanece, 0,35 s) o 'subir' (además flota un poco hacia arriba al entrar). */
+  transicion?: 'fundido' | 'subir'
   blend?: 'screen'                // 'screen' suma la luz del clip al video de abajo (luces, destellos, humo): lo negro no se ve
 }
 
