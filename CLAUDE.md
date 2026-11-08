@@ -105,6 +105,10 @@ Cada pista de audio se analiza sola al agregarla → `analisis/<pista>.ritmo.jso
 - Botón **9:16** (barra bajo el video, junto al tiempo): menú de relación de aspecto (9:16, 16:9, 1:1, 4:5, 4:3, "igual que el video") → `set_format`. El video nunca se deforma: se ajusta dentro del cuadro.
 - Al tocar el video (o seleccionar su clip) aparece su caja con asas, como en el texto pero **sin estirar por un lado**: arrastrar dentro = mover (con imán al centro), esquinas = agrandar/achicar, asa de abajo = girar (se pega a 0°/45°/90°…). Vale para clips de la pista principal (`Clip.transform`) y videos superpuestos (`OverlayClip.transform`, ahora con giro). En el inspector del clip: "Posición y tamaño" con deslizadores, "Ajustar al cuadro" y "Llenar el cuadro" (cubre el cuadro y recorta lo que sobra). La exportación hace lo mismo (`exportar.ts`: scale + rotate + overlay sobre negro).
 
+## Controles del reproductor
+
+Bajo el video: ⏮ inicio (Inicio) · ⏪ atrás 5 s (J) · ▶ play (Espacio) · ⏩ velocidad 1× → 1,5× → 2× → 3× (L; un toque también pone a reproducir) · ⏭ final (Fin) · botón de relación de aspecto. La velocidad es solo de la vista previa (`Player.rate`, el audio sube de tono como al adelantar); no cambia la edición ni la exportación.
+
 ## Atajos de la línea de tiempo (como CapCut)
 
 ⌘B (o S) corta el clip en el cabezal; **Q** borra lo anterior del clip bajo el cabezal; **W** borra lo posterior; los botones `][` de la barra hacen lo mismo y muestran la tecla al pasar el mouse. Borrar y recortar bordes (`delete_range`, `trim`) **corren juntos** las capas, los tiempos de las palabras del karaoke (`props.palabras`) y los superpuestos/sonidos que vienen después (`rippleTodo` en `commands.ts`): no hace falta moverlos a mano.

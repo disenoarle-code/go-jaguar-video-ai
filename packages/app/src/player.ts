@@ -24,6 +24,8 @@ export class Player {
   hover: number | null = null      // scrub con el mouse sobre el timeline
   override: number | null = null   // tiempo forzado (p. ej. mientras se recorta)
   playing = false
+  /** Velocidad de reproducción de la vista previa (1, 1,5, 2…): solo al ver; no cambia la edición ni la exportación. El audio sube de tono, como al adelantar. */
+  rate = 1
   dirty = true
 
   private t0 = 0
@@ -119,7 +121,7 @@ export class Player {
 
   /** Tiempo que se muestra ahora mismo en la vista previa. */
   time() {
-    if (this.playing) return this.t0 + (this.actx.currentTime - this.ctxStart)
+    if (this.playing) return this.t0 + (this.actx.currentTime - this.ctxStart) * this.rate
     return this.override ?? this.hover ?? this.playhead
   }
 
@@ -151,6 +153,13 @@ export class Player {
 
   toggle() { this.playing ? this.pause() : void this.play() }
 
+  /** Cambia la velocidad de la vista previa; si está sonando, sigue desde donde va. */
+  setRate(r: number) {
+    const t = this.time()
+    this.rate = r
+    if (this.playing) this.scheduleAudio(t)
+  }
+
   private stopAudio() {
     for (const n of this.nodes) { try { n.stop() } catch { /* ya parado */ } n.disconnect() }
     this.nodes = []
@@ -158,6 +167,7 @@ export class Player {
 
   private scheduleAudio(from: number) {
     this.stopAudio()
+    const R = this.rate     // a velocidad R todo pasa R veces más rápido: los inicios se acercan y el audio se lee R veces más rápido
     this.t0 = from
     this.ctxStart = this.actx.currentTime + 0.05
     const placed = layout(this.store.project)
@@ -175,11 +185,11 @@ export class Player {
       const offset = (clip.srcIn + inClip * clip.speed) * bufScale
       const bufLen = (clip.srcOut - clip.srcIn) * bufScale - inClip * clip.speed * bufScale
       if (bufLen <= 0) return
-      const realDur = bufLen / rate
-      const when = this.ctxStart + Math.max(start - from, 0)
+      const realDur = bufLen / (rate * R)
+      const when = this.ctxStart + Math.max(start - from, 0) / R
       const src = this.actx.createBufferSource()
       src.buffer = buffer
-      src.playbackRate.value = rate
+      src.playbackRate.value = rate * R
       const g = this.actx.createGain()
       // Fundido mínimo solo donde el audio NO es continuo con el clip vecino (evita chasquidos).
       const prev = placed[i - 1]?.clip, next = placed[i + 1]?.clip
@@ -204,10 +214,10 @@ export class Player {
       const inO = Math.max(from - o.start, 0)
       const len = (o.srcOut - o.srcIn) - inO * o.speed
       if (len <= 0) continue
-      const src = this.actx.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.speed
+      const src = this.actx.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.speed * R
       const g = this.actx.createGain(); g.gain.value = o.volume
       src.connect(g).connect(this.actx.destination)
-      src.start(this.ctxStart + Math.max(o.start - from, 0), Math.min(o.srcIn + inO * o.speed, buf.duration - 0.01), len)
+      src.start(this.ctxStart + Math.max(o.start - from, 0) / R, Math.min(o.srcIn + inO * o.speed, buf.duration - 0.01), len)
       this.nodes.push(src)
     }
     // música: suena desde el inicio de la línea de tiempo, con fundido al final
@@ -215,11 +225,11 @@ export class Player {
     if (m && mb && !ts('music').muted) {
       const total = duration(this.store.project), len = total - from
       if (len > 0) {
-        const src = this.actx.createBufferSource(); src.buffer = mb
+        const src = this.actx.createBufferSource(); src.buffer = mb; src.playbackRate.value = R
         const g = this.actx.createGain()
         g.gain.setValueAtTime(m.volume, this.ctxStart)
-        const fadeAt = this.ctxStart + len - m.fadeOut
-        if (m.fadeOut > 0 && fadeAt >= this.ctxStart) { g.gain.setValueAtTime(m.volume, fadeAt); g.gain.linearRampToValueAtTime(0, this.ctxStart + len) }
+        const fadeAt = this.ctxStart + (len - m.fadeOut) / R
+        if (m.fadeOut > 0 && fadeAt >= this.ctxStart) { g.gain.setValueAtTime(m.volume, fadeAt); g.gain.linearRampToValueAtTime(0, this.ctxStart + len / R) }
         src.connect(g).connect(this.actx.destination)
         src.start(this.ctxStart, Math.min(m.srcIn + from, mb.duration - 0.01), len)
         this.nodes.push(src)

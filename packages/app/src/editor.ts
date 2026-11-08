@@ -169,6 +169,18 @@ export async function bootEditor(slug: string) {
   // --- barra de herramientas ---------------------------------------------------
   const sel = () => store.selection
   $('play').onclick = () => player.toggle()
+  // inicio · atrás 5 s · play · más rápido · final
+  const RATES = [1, 1.5, 2, 3]
+  const fmtRate = (r: number) => `${String(r).replace('.', ',')}×`
+  const irA = (t: number) => { player.seek(t) }
+  $('tostart').onclick = () => irA(0)
+  $('toend').onclick = () => { const d = duration(store.project); if (player.playing) player.pause(); irA(Math.max(0, d - 0.04)) }
+  $('back5').onclick = () => irA(player.time() - 5)
+  $('fast').onclick = () => {
+    const r = RATES[(RATES.indexOf(player.rate) + 1) % RATES.length]
+    player.setRate(r); $('fastlab').textContent = fmtRate(r); $('fast').classList.toggle('on', r !== 1)
+    if (!player.playing) void player.play()      // un toque = verlo ya a esa velocidad
+  }
   $('undo').onclick = () => store.undo()
   $('redo').onclick = () => store.redo()
   const splitHere = () => { if (store.project.tracks?.main?.locked) { notify('La pista principal está bloqueada'); return } exec(store, { op: 'split', at: player.playhead }) }
@@ -211,6 +223,10 @@ export async function bootEditor(slug: string) {
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); trimHere('despues') }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected() }
     else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? store.redo() : store.undo() }
+    else if (!mod && !e.altKey && e.key.toLowerCase() === 'j') $('back5').click()
+    else if (!mod && !e.altKey && e.key.toLowerCase() === 'l') $('fast').click()
+    else if (e.key === 'Home') { e.preventDefault(); $('tostart').click() }
+    else if (e.key === 'End') { e.preventDefault(); $('toend').click() }
     else if (e.key === 'ArrowLeft') player.seek(player.playhead - 1 / 30)
     else if (e.key === 'ArrowRight') player.seek(player.playhead + 1 / 30)
   })
