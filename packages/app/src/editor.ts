@@ -251,6 +251,10 @@ export async function bootEditor(slug: string) {
   zoomR.oninput = () => { const target = 2 * Math.pow(300, Number(zoomR.value) / 100); tl.zoom(target / tl.pps) }
 
   function deleteSelected() {
+    if (store.multi.length) {        // varios seleccionados: se borran todos juntos (una sola entrada de deshacer)
+      const cmds: Cmd[] = [...store.multi.filter(m => m.type === 'overlay').map((m): Cmd => ({ op: 'delete_overlay', id: m.id })), ...store.multi.filter(m => m.type === 'clip').map((m): Cmd => ({ op: 'delete_clip', id: m.id })), ...(store.multi.some(m => m.type === 'music') ? [{ op: 'clear_music' } as Cmd] : [])]
+      execBatch(store, cmds); store.select(null); return
+    }
     const s = sel(); if (!s) return
     exec(store, s.type === 'clip' ? { op: 'delete_clip', id: s.id } : s.type === 'overlay' ? { op: 'delete_overlay', id: s.id } : s.type === 'music' ? { op: 'clear_music' } : { op: 'delete_layer', id: s.id })
     store.select(null)
@@ -268,6 +272,7 @@ export async function bootEditor(slug: string) {
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); trimHere('despues') }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected() }
     else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? store.redo() : store.undo() }
+    else if (e.key === 'Escape' && store.multi.length) store.select(null)
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'j') $('prevclip').click()
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'l') $('fast').click()
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'f') $('fullscreen').click()
@@ -519,7 +524,78 @@ export async function bootEditor(slug: string) {
     box.querySelector('.subrow.on')?.scrollIntoView({ block: 'center' })
   }
   let subTab: 'ajustes' | 'lista' = 'ajustes'
+  /** Panel de varios elementos seleccionados: solo lo que tienen en común (volumen, velocidad, color si todos son clips, borrar). */
+  function renderMulti() {
+    const p = store.project
+    const clips = store.multi.filter(m => m.type === 'clip').map(m => p.clips.find(c => c.id === m.id)).filter((c): c is NonNullable<typeof c> => !!c)
+    const ovs = store.multi.filter(m => m.type === 'overlay').map(m => p.overlays?.find(o => o.id === m.id)).filter((o): o is NonNullable<typeof o> => !!o)
+    const music = store.multi.some(m => m.type === 'music') && p.music ? p.music : undefined
+    const n = clips.length + ovs.length + (music ? 1 : 0)
+    if (n !== store.multi.length) { store.selectMany([...clips.map(c => ({ type: 'clip' as const, id: c.id })), ...ovs.map(o => ({ type: 'overlay' as const, id: o.id })), ...(music ? [{ type: 'music' as const, id: 'music' }] : [])]); return }     // algo seleccionado ya no existe
+    const vols = [...clips.map(c => c.volume), ...ovs.filter(o => o.kind === 'audio' || o.volume !== undefined).map(o => o.volume), ...(music ? [music.volume] : [])]
+    const speeds = [...clips.map(c => c.speed), ...ovs.map(o => o.speed)]
+    const key = `multi:${store.multi.map(m => m.id).join(',')}:${vols.map(v => Math.round(v * 100)).join(',')}:${speeds.join(',')}:${clips.map(c => c.color ? `${c.color.brillo}/${c.color.contraste}/${c.color.saturacion}` : '').join(',')}`
+    if (key === lastKey) return
+    if (lastKey.startsWith('multi:' + store.multi.map(m => m.id).join(',') + ':') && insp.contains(document.activeElement) && (document.activeElement as HTMLElement).tagName === 'INPUT') return     // moviendo un deslizador de aquí
+    lastKey = key; insp.innerHTML = ''
+    const nVid = clips.length + ovs.filter(o => o.kind === 'video').length, nAud = ovs.filter(o => o.kind === 'audio').length
+    const partes = [nVid ? `${nVid} de video` : '', nAud ? `${nAud} de audio` : '', music ? 'música' : ''].filter(Boolean).join(' · ')
+    insp.insertAdjacentHTML('beforeend', `<h3>${n} seleccionados</h3><p class="hint" style="margin:0 0 6px">${partes}. Lo que cambies aquí se aplica a todos.</p>`)
+    const section = (title: string) => insp.insertAdjacentHTML('beforeend', `<h3 class="sec">${title}</h3>`)
+    const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length)
+    const same = (a: number[]) => a.every(v => Math.abs(v - a[0]) < 0.001)
+    const ids = { clips: clips.map(c => c.id), ovs: ovs.map(o => o.id) }
+    const each = (pr: Project, fn: (x: { volume: number }) => void) => { for (const id of ids.clips) { const c = pr.clips.find(q => q.id === id); if (c) fn(c) } for (const id of ids.ovs) { const o = pr.overlays?.find(q => q.id === id); if (o) fn(o) } if (music && pr.music) fn(pr.music) }
+    // ---- VOLUMEN ----
+    section('Volumen')
+    const lv = document.createElement('label'); lv.innerHTML = `Volumen <span class="val">${same(vols) ? Math.round(vols[0] * 100) + ' %' : 'distintos'}</span>`
+    const sv = input('range', Math.min(2, avg(vols)), (pr, v) => each(pr, x => { x.volume = Math.round(parseFloat(v) * 1000) / 1000 }), { min: '0', max: '2', step: '0.01' })
+    sv.addEventListener('input', () => { lv.querySelector('.val')!.textContent = Math.round(parseFloat(sv.value) * 100) + ' %' })
+    insp.append(lv, sv)
+    const rowV = document.createElement('div'); rowV.style.cssText = 'display:flex;gap:6px;margin:4px 0'
+    for (const db of [-3, -1, 1, 3]) {
+      const b = document.createElement('button'); b.textContent = `${db > 0 ? '+' : ''}${db} dB`; b.title = 'Sube o baja el volumen de todos los seleccionados'
+      b.onclick = () => store.mutate(pr => each(pr, x => { x.volume = Math.min(4, Math.max(0, Math.round(x.volume * Math.pow(10, db / 20) * 1000) / 1000)) }))
+      rowV.append(b)
+    }
+    insp.append(rowV)
+    // ---- VELOCIDAD (clips y superpuestos; la música no) ----
+    if (speeds.length) {
+      section('Velocidad')
+      const sp = document.createElement('input'); sp.type = 'number'; sp.step = '0.05'; sp.min = '0.1'; sp.max = '8'
+      sp.value = same(speeds) ? String(speeds[0]) : ''; sp.placeholder = 'varias'
+      const lab = document.createElement('label'); lab.textContent = 'Velocidad (×)'
+      sp.onchange = () => { const v = parseFloat(sp.value); if (v > 0) execBatch(store, [...ids.clips.map((id): Cmd => ({ op: 'speed', clip: id, value: v })), ...ids.ovs.map((id): Cmd => ({ op: 'update_overlay', id, patch: { speed: v } }))]) }
+      insp.append(lab, sp)
+      const rowS = document.createElement('div'); rowS.style.cssText = 'display:flex;gap:6px;margin:4px 0;flex-wrap:wrap'
+      for (const v of [0.5, 0.75, 1, 1.25, 1.5, 2]) { const b = document.createElement('button'); b.textContent = `${String(v).replace('.', ',')}×`; b.onclick = () => { sp.value = String(v); sp.onchange!(new Event('change')) }; rowS.append(b) }
+      insp.append(rowS)
+      if (ids.clips.length) insp.insertAdjacentHTML('beforeend', '<p class="hint">En los clips de la pista principal el video se acorta o alarga y lo de después se corre.</p>')
+    }
+    // ---- LUCES Y COLOR (solo si todos son clips de la pista principal) ----
+    if (clips.length && !ovs.length && !music) {
+      section('Luces y color')
+      const K = (c: typeof clips[number]) => ({ ...CLIP_COLOR_DEFAULT, ...c.color })
+      const setAll = (pr: Project, patch: Partial<typeof CLIP_COLOR_DEFAULT>) => { for (const id of ids.clips) { const c = pr.clips.find(q => q.id === id); if (c) c.color = { ...CLIP_COLOR_DEFAULT, ...c.color, ...patch } } }
+      const mk = (label: string, k: 'brillo' | 'contraste' | 'saturacion', lo: number, hi: number) => {
+        const l = document.createElement('label'); const vs = clips.map(c => K(c)[k]); l.innerHTML = `${label} <span class="val">${same(vs) ? Math.round(vs[0] * 100) + ' %' : 'distintos'}</span>`
+        const el = input('range', avg(vs), (pr, v) => setAll(pr, { [k]: parseFloat(v) }), { min: String(lo), max: String(hi), step: '0.01' })
+        el.addEventListener('input', () => { l.querySelector('.val')!.textContent = Math.round(parseFloat(el.value) * 100) + ' %' })
+        insp.append(l, el)
+      }
+      mk('Brillo', 'brillo', 0.5, 1.8); mk('Contraste', 'contraste', 0.6, 1.6); mk('Saturación', 'saturacion', 0, 2)
+      const bq = document.createElement('button'); bq.textContent = 'Quitar corrección de color'; bq.style.margin = '4px 0'
+      bq.onclick = () => execBatch(store, ids.clips.map((id): Cmd => ({ op: 'set_clip_color', clip: id, color: null }))); insp.append(bq)
+    }
+    // ---- borrar / soltar ----
+    const bd = document.createElement('button'); bd.textContent = `Borrar los ${n} seleccionados`; bd.className = 'danger'; bd.style.marginTop = '14px'; bd.onclick = deleteSelected
+    const bs = document.createElement('button'); bs.textContent = 'Quitar la selección'; bs.style.marginTop = '6px'; bs.onclick = () => store.select(null)
+    insp.append(bd, bs)
+    insp.insertAdjacentHTML('beforeend', '<p class="hint dimmer">Seleccionar varios: arrastra un cuadro sobre la línea de tiempo · Mayús + clic = todo lo que hay entre dos · ⌘ + clic = suma o quita uno.</p>')
+  }
+
   function renderInspector() {
+    if (store.multi.length) { renderMulti(); return }
     const s = sel()
     const p = store.project
     const clip = s?.type === 'clip' ? p.clips.find(c => c.id === s.id) : undefined

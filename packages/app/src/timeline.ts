@@ -1,3 +1,4 @@
+import type { SelItem } from '@gojaguar/core'
 import { PEAK_RATE, THUMB_H, THUMB_W } from './media'
 import { TRANSITION_INFO, ZOOM_INFO } from './fxinfo'
 import type { Player } from './player'
@@ -24,6 +25,7 @@ type Drag =
   | { k: 'clip'; id: string; x0: number; moved: boolean; target: number; start0: number; up: boolean; track: number }
   | { k: 'ovc'; id: string; mode: 'move' | 'l' | 'r'; x0: number; start0: number; in0: number; out0: number }
   | { k: 'ov'; id: string; mode: 'move' | 'l' | 'r'; x0: number; s0: number; e0: number; moved: boolean }
+  | { k: 'marquee'; x0: number; y0: number; moved: boolean; base: SelItem[] }
   | { k: 'gain'; type: 'clip' | 'overlay' | 'music'; id: string; y0: number; v0: number }
 
 export class Timeline {
@@ -261,6 +263,44 @@ export class Timeline {
     c.restore()
   }
 
+  // --- selección de varios elementos: cuadro con el mouse, Mayús (rango) y ⌘/Ctrl (suma uno a uno) ---------------------
+  /** Rectángulo en pantalla de cada elemento de medios (clips de la pista principal, superpuestos y música). */
+  private itemRects(): { it: SelItem; x0: number; x1: number; y0: number; y1: number }[] {
+    const p = this.store.project, out: { it: SelItem; x0: number; x1: number; y0: number; y1: number }[] = []
+    const V = ROWS.video
+    if (!this.ts('main').hidden) for (const pl of layout(p)) out.push({ it: { type: 'clip', id: pl.clip.id }, x0: this.t2x(pl.start), x1: this.t2x(pl.end), y0: V.y, y1: V.y + V.h })
+    for (const o of p.overlays ?? []) {
+      const R = (o.kind === 'video' ? this.vLanes : this.aLanes)[o.track - 1]; if (!R) continue
+      out.push({ it: { type: 'overlay', id: o.id }, x0: this.t2x(o.start), x1: this.t2x(overlayEnd(o)), y0: R.y, y1: R.y + R.h })
+    }
+    if (p.music) out.push({ it: { type: 'music', id: 'music' }, x0: this.t2x(0), x1: this.t2x(this.total()), y0: ROWS.music.y, y1: ROWS.music.y + ROWS.music.h })
+    return out
+  }
+  /** Elemento de medios bajo el mouse (sin importar la zona). */
+  private itemAt(x: number, y: number): SelItem | null {
+    const r = this.itemRects().reverse().find(q => x >= q.x0 && x <= q.x1 && y >= q.y0 && y < q.y1)
+    return r?.it ?? null
+  }
+  private inRect(a: { x0: number; x1: number; y0: number; y1: number }, b: { x0: number; x1: number; y0: number; y1: number }) {
+    return a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 < b.y1 && a.y1 > b.y0
+  }
+  /** Mayús: todo lo que cae en el bloque (tiempo × pistas) entre el elemento ancla y el que se tocó. */
+  private rangeSelect(a: SelItem, b: SelItem): SelItem[] {
+    const R = this.itemRects(), ra = R.find(q => q.it.type === a.type && q.it.id === a.id), rb = R.find(q => q.it.type === b.type && q.it.id === b.id)
+    if (!ra || !rb) return [b]
+    const box = { x0: Math.min(ra.x0, rb.x0), x1: Math.max(ra.x1, rb.x1), y0: Math.min(ra.y0, rb.y0), y1: Math.max(ra.y1, rb.y1) }
+    return R.filter(q => this.inRect(q, box)).map(q => q.it)
+  }
+  private sameItem = (a: SelItem, b: SelItem) => a.type === b.type && a.id === b.id
+  /** Clic en un hueco: si se arrastra, dibuja el cuadro de selección; si solo se hace clic, mueve el cabezal y quita la selección. */
+  private startMarquee(x: number, y: number, e: MouseEvent) {
+    const base = e.shiftKey || e.metaKey || e.ctrlKey ? this.store.selectedItems() : []
+    this.drag = { k: 'marquee', x0: x, y0: y, moved: false, base }
+    this.marquee = null
+  }
+  /** Cuadro de selección que se está dibujando (en pantalla). */
+  private marquee: { x0: number; y0: number; x1: number; y1: number } | null = null
+
   private onDown(e: MouseEvent) {
     const { x, y } = this.pos(e)
     if (x < LEFT) { this.onGutterDown(x, y); return }
@@ -270,7 +310,22 @@ export class Timeline {
 
     if (row === 'ruler') { this.drag = { k: 'seek' }; this.player.seek(t); return }
 
-    const gh = this.hitGain(x, y)
+    const mod = e.metaKey || e.ctrlKey
+    if (row !== 'subtitle' && row !== 'graphic' && (mod || e.shiftKey)) {
+      const hit = this.itemAt(x, y), cur = this.store.selectedItems()
+      if (hit && mod) {                       // ⌘/Ctrl: suma o quita ESE elemento, esté donde esté (no toca los de en medio)
+        const ya = cur.some(c => this.sameItem(c, hit))
+        this.store.selectMany(ya ? cur.filter(c => !this.sameItem(c, hit)) : [...cur, hit])
+        return
+      }
+      if (hit && e.shiftKey) {                // Mayús: todo lo que hay entre el primero que elegiste y este
+        const anc = this.store.anchor ?? cur[0]
+        this.store.selectMany(anc ? this.rangeSelect(anc, hit) : [hit])
+        return
+      }
+    }
+
+    const gh = (mod || e.shiftKey) ? null : this.hitGain(x, y)
     if (gh) {      // arrastrar la onda de audio = subir o bajar el volumen de ese clip / audio / música
       this.store.select(gh.type === 'music' ? { type: 'music', id: 'music' } : { type: gh.type, id: gh.id })
       this.store.beginTx()
@@ -291,7 +346,7 @@ export class Timeline {
     }
     if (row === 'video') {
       const h = this.hitClip(x)
-      if (!h) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
+      if (!h) { this.startMarquee(x, y, e); return }
       this.store.select({ type: 'clip', id: h.p.clip.id })
       if (h.zone === 'body') {
         this.drag = { k: 'clip', id: h.p.clip.id, x0: x, moved: false, target: this.store.project.clips.indexOf(h.p.clip), start0: h.p.start, up: false, track: 1 }
@@ -304,13 +359,13 @@ export class Timeline {
     }
 
     if (row === 'music') {
-      if (this.store.project.music && !this.locked('music')) this.store.select({ type: 'music', id: 'music' }); else this.store.select(null)
-      this.player.seek(t); this.drag = { k: 'seek' }; return
+      if (this.store.project.music && !this.locked('music') && x >= this.t2x(0) && x <= this.t2x(this.total())) { this.store.select({ type: 'music', id: 'music' }); this.player.seek(t); this.drag = { k: 'seek' }; return }
+      this.startMarquee(x, y, e); return
     }
 
     if (row === 'vlane' || row === 'alane') {
       const h = this.hitOverlayClip(x, y, row === 'vlane' ? 'video' : 'audio')
-      if (!h || this.locked(this.laneKey(h.o))) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
+      if (!h || this.locked(this.laneKey(h.o))) { this.startMarquee(x, y, e); return }
       this.store.select({ type: 'overlay', id: h.o.id })
       this.store.beginTx()
       this.drag = { k: 'ovc', id: h.o.id, mode: h.zone, x0: x, start0: h.o.start, in0: h.o.srcIn, out0: h.o.srcOut }
@@ -325,7 +380,7 @@ export class Timeline {
       this.drag = { k: 'ov', id: h.o.id, mode: h.zone, x0: x, s0: h.o.start, e0: h.o.end, moved: false }
       return
     }
-    this.store.select(null)
+    this.startMarquee(x, y, e)
   }
 
   private onMove(e: MouseEvent) {
@@ -355,6 +410,16 @@ export class Timeline {
 
     this.dirty = true
     if (d.k === 'seek') { this.player.seek(this.magnet(Math.min(this.x2t(x), this.total()))); return }
+    if (d.k === 'marquee') {
+      if (!d.moved && Math.hypot(x - d.x0, y - d.y0) < 4) return
+      d.moved = true
+      const r = { x0: Math.min(d.x0, x), x1: Math.max(d.x0, x), y0: Math.min(d.y0, y), y1: Math.max(d.y0, y) }
+      this.marquee = r
+      const dentro = this.itemRects().filter(q => this.inRect(q, r)).map(q => q.it)
+      const todos = [...d.base, ...dentro.filter(it => !d.base.some(b => this.sameItem(b, it)))]
+      this.store.selectMany(todos)
+      return
+    }
     if (d.k === 'gain') {
       // 0,5 dB por pixel hacia arriba/abajo; sin Mayús se pega a 0 dB (volumen original) cuando pasa cerca
       let db = this.dbOf(d.v0) + (d.y0 - y) * 0.5
@@ -455,6 +520,10 @@ export class Timeline {
     this.snapAt = null
     this.player.override = null
     if (d.k === 'ovc') { this.extra = null; this.store.live(pr => compactTracks(pr)) }   // si una pista quedó vacía, desaparece
+    if (d.k === 'marquee') {
+      this.marquee = null; this.dirty = true
+      if (!d.moved) { if (!d.base.length) this.store.select(null); this.player.seek(this.magnet(Math.min(this.x2t(d.x0), this.total()))) }      // solo un clic en el hueco
+    }
     if (d.k === 'trim' || d.k === 'ov' || d.k === 'ovc' || d.k === 'gain') this.store.endTx()
     if (d.k === 'clip') this.extra = null
     if (d.k === 'clip' && d.moved && d.up) {
@@ -594,6 +663,7 @@ export class Timeline {
     }
 
     this.drawGain()
+    if (this.marquee) { const m = this.marquee, c2 = this.ctx; c2.save(); c2.fillStyle = 'rgba(53,194,181,.16)'; c2.strokeStyle = '#35c2b5'; c2.lineWidth = 1; c2.fillRect(m.x0, m.y0, m.x1 - m.x0, m.y1 - m.y0); c2.strokeRect(m.x0 + .5, m.y0 + .5, m.x1 - m.x0, m.y1 - m.y0); c2.restore() }
 
     // pistas bloqueadas: rayado diagonal sobre la fila
     for (const r of this.rowList()) if (this.ts(r.key).locked) {
@@ -671,7 +741,7 @@ export class Timeline {
     const x0 = this.t2x(pl.start) + 0.5, x1 = this.t2x(pl.end) - 0.5     // casi pegados, como en CapCut
     if (x1 < LEFT || x0 > this.w) return
     const a = this.player.assets.get(pl.clip.assetId)
-    const sel = this.store.selection?.type === 'clip' && this.store.selection.id === pl.clip.id
+    const sel = this.store.isSelected('clip', pl.clip.id), grupo = this.store.multi.length > 0
     const V = ROWS.video, w = Math.max(x1 - x0, 2), HEAD = 18, WAVE = 20, TH = V.h - HEAD - WAVE
     const dur = (pl.end - pl.start)
 
@@ -726,8 +796,8 @@ export class Timeline {
     if (sel) {
       c.strokeStyle = '#fff'; c.lineWidth = 2
       c.beginPath(); c.roundRect(x0 + 1, V.y + 1, w - 2, V.h - 2, 3); c.stroke()
-      c.fillStyle = '#fff'
-      for (const xx of [x0 + 1, x1 - 7]) { c.beginPath(); c.roundRect(xx, V.y + V.h / 2 - 14, 6, 28, 3); c.fill() }
+      if (grupo) { c.fillStyle = 'rgba(255,255,255,.12)'; c.fillRect(x0 + 1, V.y + 1, w - 2, V.h - 2) }       // en grupo: sin asas de recorte, con velo claro
+      else { c.fillStyle = '#fff'; for (const xx of [x0 + 1, x1 - 7]) { c.beginPath(); c.roundRect(xx, V.y + V.h / 2 - 14, 6, 28, 3); c.fill() } }
     }
   }
 
@@ -738,8 +808,7 @@ export class Timeline {
   }
   /** El corte está "ocupado" si uno de sus dos clips vecinos está seleccionado: ahí van las asas de recorte, no la transición. */
   private cutBusy(placed: Placed[], i: number) {
-    const s = this.store.selection
-    return s?.type === 'clip' && (s.id === placed[i].clip.id || s.id === placed[i - 1].clip.id)
+    return this.store.isSelected('clip', placed[i].clip.id) || this.store.isSelected('clip', placed[i - 1].clip.id)
   }
   /** Corte entre dos clips que aún NO tiene transición (zona de la pastilla "+"). */
   private hitCut(x: number, y: number): Placed | null {
@@ -782,7 +851,7 @@ export class Timeline {
       const tr = placed[i].clip.transition; if (!tr) continue
       const { cx, cy, w, h } = this.chipPos(placed[i])
       if (cx + w / 2 < LEFT || cx - w / 2 > this.w) continue
-      const info = TRANSITION_INFO[tr.kind], sel = this.store.selection?.type === 'clip' && (this.store.selection.id === placed[i].clip.id || this.store.selection.id === placed[i - 1].clip.id)
+      const info = TRANSITION_INFO[tr.kind], sel = this.store.isSelected('clip', placed[i].clip.id) || this.store.isSelected('clip', placed[i - 1].clip.id)
       c.save()
       c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 4
       c.fillStyle = '#fff'; c.beginPath(); c.roundRect(cx - w / 2, cy - h / 2, w, h, 3); c.fill()
@@ -813,7 +882,7 @@ export class Timeline {
       const x0 = this.t2x(o.start) + 0.5, x1 = this.t2x(overlayEnd(o)) - 0.5
       if (x1 < LEFT || x0 > this.w) continue
       const w = Math.max(x1 - x0, 2), a = this.player.assets.get(o.assetId)
-      const sel = this.store.selection?.type === 'overlay' && this.store.selection.id === o.id
+      const sel = this.store.isSelected('overlay', o.id), grupo = this.store.multi.length > 0
       const name = this.store.asset(o.assetId)?.name ?? o.id
       c.save(); c.globalAlpha = (o.kind === 'video' ? this.ts(this.laneKey(o)).hidden : this.ts(this.laneKey(o)).muted) ? 0.4 : 1
       c.beginPath(); c.roundRect(x0, R.y, w, R.h, 3); c.clip()
@@ -848,7 +917,8 @@ export class Timeline {
       c.restore()
       if (sel) {
         c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 1, w - 2, R.h - 2, 3); c.stroke()
-        c.fillStyle = '#fff'; for (const xx of [x0 + 1, x1 - 7]) { c.beginPath(); c.roundRect(xx, R.y + R.h / 2 - 9, 6, 18, 3); c.fill() }
+        if (grupo) { c.fillStyle = 'rgba(255,255,255,.12)'; c.fillRect(x0 + 1, R.y + 1, w - 2, R.h - 2) }
+        else { c.fillStyle = '#fff'; for (const xx of [x0 + 1, x1 - 7]) { c.beginPath(); c.roundRect(xx, R.y + R.h / 2 - 9, 6, 18, 3); c.fill() } }
       }
     }
   }
@@ -874,6 +944,7 @@ export class Timeline {
     c.fillStyle = 'rgba(8,20,40,.6)'; c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 3); c.fill()
     c.save(); c.beginPath(); c.roundRect(Math.max(x0, LEFT) + 4, R.y + 3, 230, 14, 3); c.clip()
     c.fillStyle = '#fff'; c.fillText('♪ ' + (this.store.asset(m.assetId)?.name ?? 'música'), Math.max(x0, LEFT) + 10, R.y + 10); c.restore()
+    if (this.store.isSelected('music', 'music')) { c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.roundRect(x0 + 1, R.y + 2, Math.max(x1 - x0 - 2, 2), R.h - 4, 3); c.stroke(); if (this.store.multi.length) { c.fillStyle = 'rgba(255,255,255,.12)'; c.fillRect(x0 + 1, R.y + 2, x1 - x0 - 2, R.h - 4) } }
     c.restore()
   }
 
