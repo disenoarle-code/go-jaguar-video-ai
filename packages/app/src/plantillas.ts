@@ -36,6 +36,7 @@ function cristal(c: Ctx, x: number, y: number, w: number, h: number, r: number, 
 
 // ---------------------------------------------------------------- clave: palabra cromada ----
 const POS_Y: Record<string, number> = { arriba: 0.14, centro: 0.4, abajo: 0.68 }
+const posY = (o: L) => POS_Y[o.props?.pos ?? 'arriba'] ?? (Number(o.props?.pos) || 0.14)      // pos: 'arriba' | 'centro' | 'abajo' o una altura 0–1
 function medidaClave(c: Ctx, o: L) {
   const txt = (o.props?.texto ?? o.text).toUpperCase(), maxW = W * 0.9
   let size = W * 0.17; c.font = FONT(size, 900)
@@ -43,7 +44,7 @@ function medidaClave(c: Ctx, o: L) {
   return { txt, size, w: c.measureText(txt).width }
 }
 export function cajaPlantilla(c: Ctx, o: L & { template: string }): Rect | null {
-  const pos = POS_Y[o.props?.pos ?? 'arriba'] ?? 0.14
+  const pos = posY(o)
   switch (o.template) {
     case 'fondo': return { x: 0, y: 0, w: W, h: H }
     case 'clave': { c.save(); const m = medidaClave(c, o); c.restore(); return { x: W / 2 - m.w / 2, y: H * pos - m.size * 0.6, w: m.w, h: m.size * 1.4 } }
@@ -57,7 +58,7 @@ export function cajaPlantilla(c: Ctx, o: L & { template: string }): Rect | null 
 
 function dibujarClave(c: Ctx, o: L, t: number) {
   const tt = t - o.start, dur = o.end - o.start, ent = easeOut3(tt / 0.45), ex = clamp01((tt - (dur - 0.35)) / 0.35)
-  const pos = POS_Y[o.props?.pos ?? 'arriba'] ?? 0.14, sub = o.props?.sub ?? ''
+  const pos = posY(o), sub = o.props?.sub ?? ''
   c.save(); const m = medidaClave(c, o)
   const cx = W / 2, cy = H * pos + (1 - ent) * m.size * 0.25 - ex * m.size * 0.1
   c.translate(cx, cy); const s = (1.22 - 0.22 * ent) * (1 - 0.06 * ex); c.scale(s, s)

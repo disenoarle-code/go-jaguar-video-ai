@@ -33,7 +33,11 @@ export async function bootEditor(slug: string) {
         catch (e) { notify(`No se pudo cargar la música "${info.name}": ${(e as Error).message}`) }
         continue
       }
-      try { player.assets.set(info.id, await loadAsset(info, player.actx, () => { tl.dirty = true })) }
+      try {
+        player.assets.set(info.id, await loadAsset(info, player.actx, () => { tl.dirty = true }))
+        const murl = info.proxy.replace(/\.proxy\.mp4$/, '.recorte.mp4')      // ¿hay recorte de la persona? (texto detrás de ella)
+        void fetch(`/${murl}`, { headers: { Range: 'bytes=0-1' } }).then(async r => { if (r.ok && r.headers.get('content-type')?.includes('video')) { player.mattes.set(info.id, await loadAsset({ ...info, id: info.id + '#recorte', proxy: murl }, player.actx, () => {})); player.dirty = true } }).catch(() => {})
+      }
       catch (e) { notify(`No se pudo cargar "${info.name}": ${(e as Error).message}`) }
     }
     player.ensureStretched()
@@ -735,6 +739,14 @@ export async function bootEditor(slug: string) {
         cb.onchange = () => { try { localStorage.setItem('gj.aplicarTodos', cb.checked ? '1' : '0') } catch { /* sin almacenamiento */ } }
         lab.append(cb, 'Aplicar a todos los subtítulos'); insp.append(lab)
         insp.insertAdjacentHTML('beforeend', '<p class="hint" style="margin:0 0 8px">Mover, agrandar, estirar o girar un subtítulo lo hace en todos. Desmárcalo para cambiar solo este.</p>')
+      }
+      if (lay.type === 'graphic') {      // texto DETRÁS de la persona (necesita su recorte: scripts/recortar-persona.py)
+        const lab = document.createElement('label'); lab.className = 'chk'; lab.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;margin:6px 0'
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = lay.props?.detras === '1'; cb.style.cssText = 'width:auto;margin:0'
+        cb.onchange = () => exec(store, { op: 'update_layer', id, patch: { props: { ...(lay.props ?? {}), detras: cb.checked ? '1' : '0' } } } as Cmd)
+        lab.append(cb, 'Poner detrás de la persona'); insp.append(lab)
+        const hay = [...player.mattes.keys()].length > 0
+        insp.insertAdjacentHTML('beforeend', `<p class="hint" style="margin:0 0 8px">${hay ? 'La persona tapa el texto, como si estuviera entre ella y el fondo.' : 'Falta el recorte de la persona de este video (se crea con scripts/recortar-persona.py): por ahora el texto se ve al frente.'}</p>`)
       }
       field('Texto', input('text', lay.text, (pr, v) => { const l = T(pr); l.text = v; sincronizarPalabras(l) }))
       field('Tamaño', input('number', lay.size, (pr, v) => { T(pr).size = Math.max(10, parseFloat(v) || 10) }, { min: '10', max: '200' }))

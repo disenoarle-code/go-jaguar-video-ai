@@ -68,6 +68,9 @@ export async function asegurarVoz(assets: AssetInfo[], root: string, onPct: (p: 
   return out
 }
 
+/** Dónde queda el recorte (máscara de la persona) de un video: junto a su copia liviana, `<video>.recorte.mp4` (ver scripts/recortar-persona.py). */
+export const recortePath = (root: string, a: AssetInfo) => toPath(root, a.proxy).replace(/\.proxy\.mp4$/, '.recorte.mp4')
+
 /** Filtro de color de un clip como cadena de ffmpeg: brillo → contraste → saturación, la misma fórmula que el filtro del lienzo en la vista previa. */
 export function colorChain(k: ClipColor | undefined): string {
   if (!k) return ''
@@ -119,7 +122,7 @@ function fxExpr(clip: Clip, next: Clip | undefined, D: number, fps: number) {
   }
 }
 
-export async function buildExport(project: Project, root: string, opts: ExportOpts, rot?: { dir: string; t0: number; t1: number }) {
+export async function buildExport(project: Project, root: string, opts: ExportOpts, rot?: { dir: string; t0: number; t1: number }, rotDetras?: { dir: string; t0: number; t1: number }) {
   const fps = project.format.fps || 30
   const scale = opts.resolucion === 'original' ? 1 : (opts.resolucion === '720' ? 720 : 480) / Math.min(project.format.width, project.format.height)
   const W = even(project.format.width * Math.min(scale, 1)), H = even(project.format.height * Math.min(scale, 1))
@@ -134,6 +137,8 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   const voces = new Map<string, string>()      // asset → audio ya limpio y nivelado (si la mejora de voz está activa y el archivo existe)
   if (project.mejoras?.audio) for (const a of project.assets) { const f = vozPath(root, a); if (a.kind !== 'audio' && await fileOk(f)) voces.set(a.id, f) }
   const vozFile = (id: string) => voces.get(id)
+  const recortes = new Map<string, string>()      // asset → máscara de la persona (solo si hay texto detrás de la persona)
+  if (rotDetras) for (const a of project.assets) { const f = recortePath(root, a); if (a.kind !== 'audio' && await fileOk(f)) recortes.set(a.id, f) }
   const inputs: string[][] = []
   const audioCache = new Map<string, boolean>()
   const hasAudio = async (f: string) => { if (!audioCache.has(f)) audioCache.set(f, await probeAudio(f)); return audioCache.get(f)! }
@@ -145,7 +150,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   const A_FMT = 'aformat=sample_rates=44100:channel_layouts=stereo'
 
   // 1) pista principal
-  const vlabels: string[] = []
+  const vlabels: string[] = [], plabels: string[] = []
   for (const [i, pl] of placed.entries()) {
     const c = pl.clip, D = pl.end - pl.start, file = await srcOf(c.assetId)
     const k = addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, file)
@@ -161,13 +166,37 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
       vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(D)}[kb${i}]`)
       vf.push(`[kb${i}][vt${i}]overlay=x=${num((tf.x - 0.5) * W)}:y=${num((tf.y - 0.5) * H)}:eof_action=pass,format=yuv420p,setsar=1[v${i}]`)
     }
-    vlabels.push(`[v${i}]`)
+    if (rotDetras) {       // la persona recortada de ESTE clip (mismo encuadre, zoom y movimiento que el video) para ponerla por encima del texto que va detrás
+      const mf = recortes.get(c.assetId)
+      if (mf) {
+        const km = addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, mf)
+        vf.push(`[${km}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
+          + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=gray${tf ? `,scale=w='trunc(iw*${num(tf.scale)}/2)*2':h='trunc(ih*${num(tf.scale)}/2)*2',rotate=a=${num(tf.rotation * Math.PI / 180)}:ow=${W}:oh=${H}:c=black,setsar=1` : ''}[${tf ? 'mt' : 'm'}${i}]`)
+        if (tf) {
+          vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(D)},format=gray[kbm${i}]`)
+          vf.push(`[kbm${i}][mt${i}]overlay=x=${num((tf.x - 0.5) * W)}:y=${num((tf.y - 0.5) * H)}:eof_action=pass,format=gray[m${i}]`)
+        }
+        vf.push(`[v${i}]split=2[v${i}a][v${i}b]`)
+        vf.push(`[v${i}b]format=yuva420p[v${i}c]`, `[v${i}c][m${i}]alphamerge[p${i}]`)
+        vlabels.push(`[v${i}a]`); plabels.push(`[p${i}]`)
+      } else {
+        vf.push(`color=c=black@0:s=${W}x${H}:r=${fps}:d=${num(D)},format=yuva420p[p${i}]`)       // clip sin recorte: persona transparente (no tapa nada)
+        vlabels.push(`[v${i}]`); plabels.push(`[p${i}]`)
+      }
+    } else vlabels.push(`[v${i}]`)
     }
     if (!ts('main').muted && c.volume > 0 && await hasAudio(voz ?? file)) audio.push(`[${ka}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(c.speed)},volume=${num(c.volume)},atrim=0:${num(D)},adelay=${Math.round(pl.start * 1000)}:all=1[ac${i}]`)
   }
   vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(total)}[base]`)
   let cur = 'base'
   if (vlabels.length) { vf.push(`${vlabels.join('')}concat=n=${vlabels.length}:v=1:a=0[main]`); vf.push(`[base][main]overlay=0:0:eof_action=pass[b0]`); cur = 'b0' }
+  if (rotDetras && plabels.length && cur === 'b0') {       // texto detrás de la persona: video → texto → persona recortada por encima
+    inputs.push(['-framerate', String(fps), '-i', path.join(rotDetras.dir, '%05d.png')]); const kd = inputs.length - 1
+    vf.push(`[${kd}:v]setpts=PTS-STARTPTS+${num(rotDetras.t0)}/TB,format=rgba[txd]`)
+    vf.push(`[b0][txd]overlay=0:0:eof_action=pass:enable='between(t,${num(rotDetras.t0)},${num(rotDetras.t1)})'[bd]`)
+    vf.push(`${plabels.join('')}concat=n=${plabels.length}:v=1:a=0[persona]`)
+    vf.push(`[bd][persona]overlay=0:0:eof_action=pass,format=yuv420p[b1]`); cur = 'b1'
+  }
 
   // 2) clips superpuestos: video encima (pista baja primero) y audio
   const ovs = [...(project.overlays ?? [])].sort((a, b) => a.track - b.track || a.start - b.start)
@@ -242,18 +271,29 @@ export async function startExport(slug: string, projectFile: string, outDir: str
       // rótulos visibles (no ocultos): se dibujan primero con Chromium sin pantalla
       const tr = raw.tracks, texts = raw.layers.filter(l => (l.type === 'subtitle' || l.type === 'graphic') && !tr?.[l.type]?.hidden)
       const total = duration(raw)
-      let rot: { dir: string; t0: number; t1: number } | undefined
+      let rot: { dir: string; t0: number; t1: number } | undefined, rotDetras: { dir: string; t0: number; t1: number } | undefined
       const sc = opts.resolucion === 'original' ? 1 : (opts.resolucion === '720' ? 720 : 480) / Math.min(raw.format.width, raw.format.height)
       const ow = Math.max(2, Math.round(raw.format.width * Math.min(sc, 1) / 2) * 2), oh = Math.max(2, Math.round(raw.format.height * Math.min(sc, 1) / 2) * 2)
       if (texts.length) {
         job.detail = 'Dibujando rótulos…'
-        const t0 = Math.max(0, Math.min(...texts.map(l => l.start))), t1 = Math.min(total, Math.max(...texts.map(l => l.end)))
-        const dir = path.join(outDir, '.rotulos'); await fsp.rm(dir, { recursive: true, force: true })
-        await renderRotulos({ origin, slug, w: ow, h: oh, fps: raw.format.fps || 30, t0, t1, outDir: dir, cancelled: () => !!job.cancelada, onProgress: p => { job.pct = p * 0.25 } })
-        rot = { dir, t0, t1 }
+        // texto DETRÁS de la persona: solo si hay gráficos marcados y existe el recorte de al menos un video usado; si no, todo va al frente
+        const detras = texts.filter(l => l.type === 'graphic' && l.props?.detras === '1')
+        const hayRecorte = detras.length > 0 && (await Promise.all(raw.clips.map(c => { const a = raw.assets.find(x => x.id === c.assetId); return a ? fileOk(recortePath(root, a)) : false }))).some(Boolean)
+        const rango = (ls: typeof texts) => ({ t0: Math.max(0, Math.min(...ls.map(l => l.start))), t1: Math.min(total, Math.max(...ls.map(l => l.end))) })
+        const frente = hayRecorte ? texts.filter(l => !detras.includes(l)) : texts
+        if (frente.length) {
+          const { t0, t1 } = rango(frente), dir = path.join(outDir, '.rotulos'); await fsp.rm(dir, { recursive: true, force: true })
+          await renderRotulos({ origin, slug, w: ow, h: oh, fps: raw.format.fps || 30, t0, t1, outDir: dir, capa: hayRecorte ? 'frente' : 'todas', cancelled: () => !!job.cancelada, onProgress: p => { job.pct = p * (hayRecorte ? 0.12 : 0.25) } })
+          rot = { dir, t0, t1 }
+        }
+        if (hayRecorte) {
+          const { t0, t1 } = rango(detras), dir = path.join(outDir, '.rotulos-detras'); await fsp.rm(dir, { recursive: true, force: true })
+          await renderRotulos({ origin, slug, w: ow, h: oh, fps: raw.format.fps || 30, t0, t1, outDir: dir, capa: 'detras', cancelled: () => !!job.cancelada, onProgress: p => { job.pct = 0.12 + p * 0.13 } })
+          rotDetras = { dir, t0, t1 }
+        }
       }
       if (raw.mejoras?.audio) { job.detail = 'Limpiando el audio…'; await asegurarVoz(raw.assets, root, p => { job.pct = Math.max(job.pct, p * 0.05) }) }
-      const b = await buildExport(raw, root, opts, rot)
+      const b = await buildExport(raw, root, opts, rot, rotDetras)
       await fsp.mkdir(outDir, { recursive: true })
       const safe = (opts.nombre ?? slug).normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || slug
       const name = `${safe}-${b.W}x${b.H}.mp4`, out = path.join(outDir, name), tmp = out + '.part.mp4', script = path.join(outDir, '.exportar.filter.txt')
@@ -264,12 +304,12 @@ export async function startExport(slug: string, projectFile: string, outDir: str
       await new Promise<void>((resolve, reject) => {
         const p = spawn('ffmpeg', args); procs.set(job.id, p)
         let err = ''
-        p.stdout.on('data', d => { const m = /out_time_us=(\d+)/g; let x, last = 0; const s = String(d); while ((x = m.exec(s))) last = Number(x[1]); if (last) job.pct = Math.min(0.99, (rot ? 0.25 : 0) + (1 - (rot ? 0.25 : 0)) * (last / 1e6 / b.total)) })
+        p.stdout.on('data', d => { const m = /out_time_us=(\d+)/g; let x, last = 0; const s = String(d); while ((x = m.exec(s))) last = Number(x[1]); if (last) job.pct = Math.min(0.99, ((rot || rotDetras) ? 0.25 : 0) + (1 - ((rot || rotDetras) ? 0.25 : 0)) * (last / 1e6 / b.total)) })
         p.stderr.on('data', d => { err += d })
         p.on('error', reject)
         p.on('close', code => code === 0 ? resolve() : reject(new Error(job.cancelada ? 'Cancelado' : 'ffmpeg falló: ' + err.slice(-400))))
       })
-      await fsp.rm(script, { force: true }); await fsp.rm(path.join(outDir, '.rotulos'), { recursive: true, force: true })
+      await fsp.rm(script, { force: true }); await fsp.rm(path.join(outDir, '.rotulos'), { recursive: true, force: true }); await fsp.rm(path.join(outDir, '.rotulos-detras'), { recursive: true, force: true })
       await fsp.rename(tmp, out)
       const dest = await nombreLibre(carpeta, name)          // el video final queda en la carpeta que eligió el usuario, no escondido en la biblioteca
       await mover(out, dest)

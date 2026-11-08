@@ -13,6 +13,11 @@ export class Player {
   readonly ctx: CanvasRenderingContext2D
   readonly actx = new AudioContext()
   assets = new Map<string, LoadedAsset>()
+  /** Recorte (máscara) de la persona de cada video, si existe `proxies/<video>.recorte.mp4`: permite poner texto DETRÁS de la persona. */
+  mattes = new Map<string, LoadedAsset>()
+  private lastFrame: VideoFrame | null = null
+  private pCv: OffscreenCanvas | null = null
+  private mCv: OffscreenCanvas | null = null
   /** Audio estirado conservando el tono, por (asset, velocidad). */
   private stretched = new Map<string, AudioBuffer>()
   private computing = new Set<string>()
@@ -319,17 +324,45 @@ export class Player {
       this.ctx.save(); this.ctx.translate(tf.x * W, tf.y * H); this.ctx.rotate((tf.rotation * Math.PI) / 180); this.ctx.scale(tf.scale, tf.scale); this.ctx.translate(-W / 2, -H / 2)
       this.ctx.drawImage(this.layer, 0, 0); this.ctx.restore()
     } else this.ctx.drawImage(this.layer, 0, 0)
+    // texto DETRÁS de la persona: video → texto → persona recortada por encima (si hay recorte de este video); si no, el texto va al frente
+    let capa: 'todas' | 'frente' = 'todas'
+    const trk = this.store.project.tracks
+    const projT = trk?.subtitle?.hidden || trk?.graphic?.hidden ? { ...this.store.project, layers: this.store.project.layers.filter(l => !trk?.[l.type]?.hidden) } : this.store.project
+    const mt = loc && projT.layers.some(l => l.type === 'graphic' && l.props?.detras === '1' && t >= l.start && t < l.end) ? this.mattes.get(loc.placed.clip.assetId) : undefined
+    if (mt && loc) { drawOverlays(this.ctx, projT, t, null, 'detras'); this.dibujarPersona(mt, loc.srcTime, tf); capa = 'frente' }
     this.drawOverlayVideos(t)
     if (Math.abs(this.fx.flash) > 0.005) { this.ctx.fillStyle = this.fx.flash > 0 ? `rgba(255,255,255,${this.fx.flash})` : `rgba(0,0,0,${-this.fx.flash})`; this.ctx.fillRect(0, 0, W, H) }   // destello blanco o fundido a negro
     const sel = this.store.selection
     const tr = this.store.project.tracks
     const proj = tr?.subtitle?.hidden || tr?.graphic?.hidden ? { ...this.store.project, layers: this.store.project.layers.filter(l => !tr?.[l.type]?.hidden) } : this.store.project
     const pantallaCompleta = this.pantalla       // a pantalla completa se ve solo el video: sin cajas ni asas de edición
-    drawOverlays(this.ctx, proj, t, !pantallaCompleta && sel?.type === 'layer' ? sel.id : null)
+    drawOverlays(this.ctx, proj, t, !pantallaCompleta && sel?.type === 'layer' ? sel.id : null, capa)
     const vg = pantallaCompleta ? null : this.videoGeom(); if (vg) dibujarAsas(this.ctx, vg.geom, 'video')
     this.fps.n++
     const now = performance.now()
     if (now - this.fps.last > 1000) { this.fps.shown = this.fps.n; this.fps.n = 0; this.fps.last = now }
+  }
+
+  /** Dibuja SOLO la persona (el cuadro del video recortado con su máscara) con el mismo encuadre, color y movimiento que la pista principal. */
+  private dibujarPersona(mt: LoadedAsset, srcTime: number, tf?: { x: number; y: number; scale: number; rotation: number }) {
+    const f = this.lastFrame; if (!f) return
+    const idx = mt.source.idxAt(srcTime), mf = mt.source.peek(idx)
+    if (!mf) { void mt.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}); return }
+    const pc = (this.pCv = this.pCv && this.pCv.width === W && this.pCv.height === H ? this.pCv : new OffscreenCanvas(W, H)), mc = (this.mCv = this.mCv && this.mCv.width === W && this.mCv.height === H ? this.mCv : new OffscreenCanvas(W, H))
+    const g = pc.getContext('2d')!, mg = mc.getContext('2d')!
+    const caja = (fr: VideoFrame) => { const fw = fr.displayWidth || fr.codedWidth, fh = fr.displayHeight || fr.codedHeight, k = Math.min(W / fw, H / fh), z = this.fx.zoom, w = fw * k * z, h = fh * k * z; return { w, h, x: (W - w) / 2 - this.fx.shift * (fw * k * (z - 1)) / 2, y: (H - h) / 2 - this.fx.shiftY * (fh * k * (z - 1)) / 2 } }
+    g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, W, H); mg.clearRect(0, 0, W, H)
+    const a = caja(f), b = caja(mf)
+    g.filter = this.colorCss || 'none'
+    try { g.drawImage(f, a.x, a.y, a.w, a.h) } catch { return }
+    g.filter = 'none'
+    try { mg.drawImage(mf, b.x, b.y, b.w, b.h) } catch { return }
+    const im = mg.getImageData(0, 0, W, H), d = im.data
+    for (let i = 0; i < d.length; i += 4) d[i + 3] = d[i]          // la máscara es gris: su luz (rojo) pasa a ser la transparencia
+    mg.putImageData(im, 0, 0)
+    g.globalCompositeOperation = 'destination-in'; g.drawImage(mc, 0, 0); g.globalCompositeOperation = 'source-over'
+    if (tf) { this.ctx.save(); this.ctx.translate(tf.x * W, tf.y * H); this.ctx.rotate((tf.rotation * Math.PI) / 180); this.ctx.scale(tf.scale, tf.scale); this.ctx.translate(-W / 2, -H / 2); this.ctx.drawImage(pc, 0, 0); this.ctx.restore() }
+    else this.ctx.drawImage(pc, 0, 0)
   }
 
   /** Videos superpuestos: de la pista más baja a la más alta, con su posición, tamaño, opacidad y esquinas redondeadas. */
@@ -359,7 +392,7 @@ export class Player {
   /** Dibuja el frame ajustado al lienzo (sin deformar): videos verticales quedan con barras. */
   private blit(f: VideoFrame) {
     const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight
-    this.mainDims = { fw, fh }
+    this.mainDims = { fw, fh }; this.lastFrame = f
     const k = Math.min(W / fw, H / fh), z = this.fx.zoom, w = fw * k * z, h = fh * k * z
     this.layerCtx.fillStyle = '#000'; this.layerCtx.fillRect(0, 0, W, H)
     const dx = this.fx.shift * (fw * k * (z - 1)) / 2   // el efecto "slide" desplaza la ventana de recorte

@@ -16,12 +16,13 @@ export async function bootRender(slug: string, outW: number, outH: number) {
   await preloadOverlayImages(project)
   const cv = document.createElement('canvas'); cv.width = outW; cv.height = outH; document.body.append(cv)
   const ctx = cv.getContext('2d')!
+  const capa = (new URLSearchParams(location.hash.split('?')[1] ?? '').get('capa') ?? 'todas') as 'todas' | 'detras' | 'frente'
   const tr = project.tracks
   const shown = tr?.subtitle?.hidden || tr?.graphic?.hidden ? { ...project, layers: project.layers.filter(l => !tr?.[l.type]?.hidden) } : project
   ;(window as any).__draw = (t: number) => {
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, outW, outH)
     ctx.setTransform(outW / W, 0, 0, outH / H, 0, 0)
-    drawOverlays(ctx, shown, t, null)
+    drawOverlays(ctx, shown, t, null, capa)
     return cv.toDataURL('image/png')
   }
   ;(window as any).__ready = true

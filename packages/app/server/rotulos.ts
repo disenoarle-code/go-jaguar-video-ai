@@ -27,7 +27,7 @@ function findChromium(): { bin: string; headlessShell: boolean } | null {
 
 export const hayNavegador = () => !!findChromium()
 
-export async function renderRotulos(opts: { origin: string; slug: string; w: number; h: number; fps: number; t0: number; t1: number; outDir: string; onProgress?: (p: number) => void; cancelled?: () => boolean }) {
+export async function renderRotulos(opts: { origin: string; slug: string; w: number; h: number; fps: number; t0: number; t1: number; outDir: string; capa?: 'todas' | 'detras' | 'frente'; onProgress?: (p: number) => void; cancelled?: () => boolean }) {
   const found = findChromium()
   if (!found) throw new Error('No encuentro Chrome/Chromium para dibujar los rótulos. Instala Google Chrome.')
   await fsp.mkdir(opts.outDir, { recursive: true })
@@ -61,7 +61,7 @@ export async function renderRotulos(opts: { origin: string; slug: string; w: num
     }
     await send('Emulation.setDeviceMetricsOverride', { width: opts.w, height: opts.h, deviceScaleFactor: 1, mobile: false })
     await send('Page.enable')
-    await send('Page.navigate', { url: `${opts.origin}/#/render/${opts.slug}?w=${opts.w}&h=${opts.h}` })
+    await send('Page.navigate', { url: `${opts.origin}/#/render/${opts.slug}?w=${opts.w}&h=${opts.h}&capa=${opts.capa ?? 'todas'}` })
     let ready = false
     for (let i = 0; i < 200 && !ready; i++) { ready = await evaluate('window.__ready === true').catch(() => false); if (!ready) await new Promise(r => setTimeout(r, 150)) }
     if (!ready) throw new Error('La página de rótulos no cargó')

@@ -169,8 +169,13 @@ export function visibleOverlays(p: Project, t: number) {
   return p.layers.filter(isTextLayer).filter(o => t >= o.start && t < o.end)
 }
 
-export function drawOverlays(ctx: CanvasRenderingContext2D, p: Project, t: number, selectedId: string | null) {
+/** ¿La capa va DETRÁS de la persona? (solo gráficos con props.detras = '1'; requiere el recorte de la persona.) */
+export const esDetras = (o: TextLayer) => o.type === 'graphic' && o.props?.detras === '1'
+/** `capa`: 'detras' = solo los que van detrás de la persona, 'frente' = los demás, 'todas' = todos (sin recorte disponible, todo va al frente). */
+export function drawOverlays(ctx: CanvasRenderingContext2D, p: Project, t: number, selectedId: string | null, capa: 'todas' | 'detras' | 'frente' = 'todas') {
   for (const o of visibleOverlays(p, t)) {
+    if (capa === 'detras' && !esDetras(o)) continue
+    if (capa === 'frente' && esDetras(o)) continue
     const g = geomOf(ctx, o), b = g.b
     ctx.save(); aplicar(ctx, g)
     if (o.type === 'subtitle' && o.template === 'karaoke') drawKaraoke(ctx, o, t)
