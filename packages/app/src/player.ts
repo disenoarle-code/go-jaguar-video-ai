@@ -91,19 +91,34 @@ export class Player {
   private skey = (assetId: string, speed: number) => `${assetId}@${speed}`
   private jobs = new Map<string, { assetId: string; speed: number; sr: number; t0: number }>()
 
-  /** Prepara (en segundo plano) el audio de cada velocidad usada, sin cambiar el tono. */
-  ensureStretched() {
-    for (const c of this.store.project.clips) {
-      if (c.speed === 1) continue
-      const key = this.skey(c.assetId, c.speed)
-      const a = this.assets.get(c.assetId)
-      if (!a?.audio || this.stretched.has(key) || this.computing.has(key)) continue
+  /** Velocidad redondeada para usarla como llave (1,1 × 1,5 = 1,6500000000000001). */
+  private eff = (v: number) => Math.round(v * 1e4) / 1e4
+  private bufOf = (assetId: string) => this.assets.get(assetId)?.audio ?? this.music.get(assetId)
+
+  /**
+   * Prepara (en segundo plano) el audio de cada velocidad usada, sin cambiar el tono: la de cada clip y, si la vista previa va más rápido,
+   * la velocidad del clip × la de reproducción (clips, superpuestos y música). `rates` = otras velocidades de reproducción para dejar listas.
+   */
+  ensureStretched(rates: number[] = []) {
+    const need: [string, number][] = []
+    for (const R of [this.rate, ...rates]) {
+      for (const c of this.store.project.clips) need.push([c.assetId, this.eff(c.speed * R)])
+      if (R !== 1) {
+        for (const o of this.store.project.overlays ?? []) need.push([o.assetId, this.eff(o.speed * R)])
+        if (this.store.project.music) need.push([this.store.project.music.assetId, R])
+      }
+    }
+    for (const [assetId, speed] of need) {
+      if (speed === 1) continue
+      const key = this.skey(assetId, speed)
+      const au = this.bufOf(assetId)
+      if (!au || this.stretched.has(key) || this.computing.has(key)) continue
       this.computing.add(key)
-      const left = a.audio.getChannelData(0).slice()
-      const right = (a.audio.numberOfChannels > 1 ? a.audio.getChannelData(1) : a.audio.getChannelData(0)).slice()
-      this.jobs.set(key, { assetId: c.assetId, speed: c.speed, sr: a.audio.sampleRate, t0: performance.now() })
-      this.audioStatus = `procesando audio ×${c.speed}…`
-      this.worker.postMessage({ id: key, left, right, tempo: c.speed }, [left.buffer as ArrayBuffer, right.buffer as ArrayBuffer])
+      const left = au.getChannelData(0).slice()
+      const right = (au.numberOfChannels > 1 ? au.getChannelData(1) : au.getChannelData(0)).slice()
+      this.jobs.set(key, { assetId, speed, sr: au.sampleRate, t0: performance.now() })
+      this.audioStatus = `procesando audio ×${speed}…`
+      this.worker.postMessage({ id: key, left, right, tempo: speed }, [left.buffer as ArrayBuffer, right.buffer as ArrayBuffer])
     }
   }
 
@@ -157,6 +172,7 @@ export class Player {
   setRate(r: number) {
     const t = this.time()
     this.rate = r
+    this.ensureStretched(r === 1 ? [] : [1.5, 2, 3].filter(x => x !== r))     // el elegido primero; los demás quedan listos para el siguiente toque
     if (this.playing) this.scheduleAudio(t)
   }
 
@@ -177,19 +193,21 @@ export class Player {
       const a = this.assets.get(clip.assetId)
       if (!a?.audio) return
       const inClip = Math.max(from - start, 0)            // segundos de línea de tiempo ya consumidos
-      const st = clip.speed === 1 ? null : this.stretched.get(this.skey(clip.assetId, clip.speed))
+      const ef = this.eff(clip.speed * R)       // velocidad total: la del clip × la de reproducción
+      const st = ef === 1 ? null : this.stretched.get(this.skey(clip.assetId, ef))
+      if (!st && R !== 1) return                // aún se procesa el audio a esta velocidad: en silencio (nunca con la voz aguda)
       // Con audio estirado: se lee a velocidad 1 (tono intacto). Mientras se procesa: respaldo con playbackRate.
-      const bufScale = st ? 1 / clip.speed : 1
+      const bufScale = st ? 1 / ef : 1
       const buffer = st ?? a.audio
       const rate = st ? 1 : clip.speed
       const offset = (clip.srcIn + inClip * clip.speed) * bufScale
       const bufLen = (clip.srcOut - clip.srcIn) * bufScale - inClip * clip.speed * bufScale
       if (bufLen <= 0) return
-      const realDur = bufLen / (rate * R)
+      const realDur = bufLen / rate
       const when = this.ctxStart + Math.max(start - from, 0) / R
       const src = this.actx.createBufferSource()
       src.buffer = buffer
-      src.playbackRate.value = rate * R
+      src.playbackRate.value = rate
       const g = this.actx.createGain()
       // Fundido mínimo solo donde el audio NO es continuo con el clip vecino (evita chasquidos).
       const prev = placed[i - 1]?.clip, next = placed[i + 1]?.clip
@@ -214,10 +232,12 @@ export class Player {
       const inO = Math.max(from - o.start, 0)
       const len = (o.srcOut - o.srcIn) - inO * o.speed
       if (len <= 0) continue
-      const src = this.actx.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.speed * R
-      const g = this.actx.createGain(); g.gain.value = o.volume
+      const eo = this.eff(o.speed * R), so = eo === 1 ? null : this.stretched.get(this.skey(o.assetId, eo))
+      if (!so && R !== 1) continue
+      const src = this.actx.createBufferSource(); src.buffer = so ?? buf; src.playbackRate.value = so ? 1 : o.speed
+      const sc = so ? 1 / eo : 1, g = this.actx.createGain(); g.gain.value = o.volume
       src.connect(g).connect(this.actx.destination)
-      src.start(this.ctxStart + Math.max(o.start - from, 0) / R, Math.min(o.srcIn + inO * o.speed, buf.duration - 0.01), len)
+      src.start(this.ctxStart + Math.max(o.start - from, 0) / R, Math.min((o.srcIn + inO * o.speed) * sc, src.buffer!.duration - 0.01), len * sc)
       this.nodes.push(src)
     }
     // música: suena desde el inicio de la línea de tiempo, con fundido al final
@@ -225,13 +245,16 @@ export class Player {
     if (m && mb && !ts('music').muted) {
       const total = duration(this.store.project), len = total - from
       if (len > 0) {
-        const src = this.actx.createBufferSource(); src.buffer = mb; src.playbackRate.value = R
+        const sm = R === 1 ? null : this.stretched.get(this.skey(m.assetId, R))
+        if (R !== 1 && !sm) return
+        const src = this.actx.createBufferSource(); src.buffer = sm ?? mb
+        const smk = sm ? 1 / R : 1
         const g = this.actx.createGain()
         g.gain.setValueAtTime(m.volume, this.ctxStart)
         const fadeAt = this.ctxStart + (len - m.fadeOut) / R
         if (m.fadeOut > 0 && fadeAt >= this.ctxStart) { g.gain.setValueAtTime(m.volume, fadeAt); g.gain.linearRampToValueAtTime(0, this.ctxStart + len / R) }
         src.connect(g).connect(this.actx.destination)
-        src.start(this.ctxStart, Math.min(m.srcIn + from, mb.duration - 0.01), len)
+        src.start(this.ctxStart, Math.min((m.srcIn + from) * smk, src.buffer!.duration - 0.01), len * smk)
         this.nodes.push(src)
       }
     }
