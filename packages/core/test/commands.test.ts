@@ -244,3 +244,15 @@ suite('set_clip_transform', () => {
     expect(store.project.clips[0].transform).toBeUndefined()
   })
 })
+
+suite('set_clip_color y set_audio_fx', () => {
+  it('limita los valores y limpia cuando todo vuelve a 1', () => {
+    const store = fresh(), id = store.project.clips[0].id
+    exec(store, { op: 'set_clip_color', clip: id, color: { brillo: 3, contraste: 1.2, saturacion: 1.1 } })
+    expect(store.project.clips[0].color).toEqual({ brillo: 1.8, contraste: 1.2, saturacion: 1.1 })
+    exec(store, { op: 'set_clip_color', clip: id, color: null })
+    expect(store.project.clips[0].color).toBeUndefined()
+    exec(store, { op: 'set_audio_fx', on: true })
+    expect(store.project.mejoras?.audio).toBe(true)
+  })
+})

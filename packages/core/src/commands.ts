@@ -2,9 +2,9 @@ import { MIN_DUR, clipDur, compactTracks, duration, freeTrack, layout, overlayDu
 import { LIMITS, TRANSITION_DEFAULTS, ZOOM_DEFAULTS } from './fx'
 import type { Store } from './store'
 import {
-  CLIP_TRANSFORM_DEFAULT, DEFAULT_TRANSFORM, isTextLayer,
+  CLIP_COLOR_DEFAULT, CLIP_TRANSFORM_DEFAULT, DEFAULT_TRANSFORM, isTextLayer,
   TRANSITION_KINDS, ZOOM_KINDS,
-  type AssetInfo, type Clip, type ClipTransform, type Layer, type Project, type TextLayer, type Transform, type Transition, type ZoomFx,
+  type AssetInfo, type Clip, type ClipColor, type ClipTransform, type Layer, type Project, type TextLayer, type Transform, type Transition, type ZoomFx,
 } from './types'
 
 /** Capa nueva sin id; el transform puede ser parcial. */
@@ -26,6 +26,8 @@ export type Cmd =
   | { op: 'set_track'; track: string; locked?: boolean; hidden?: boolean; muted?: boolean }
   | { op: 'set_zoom'; clip: string; zoom: ZoomFx | null }
   | { op: 'set_transition'; clip: string; transition: Transition | null }
+  | { op: 'set_clip_color'; clip: string; color: Partial<ClipColor> | null }
+  | { op: 'set_audio_fx'; on: boolean }
   | { op: 'set_clip_transform'; clip: string; transform: Partial<ClipTransform> | null }
   | { op: 'set_music'; asset: string; src_in?: number; volume?: number; fade_out?: number }
   | { op: 'clear_music' }
@@ -191,6 +193,19 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       c.zoom = { kind: cmd.zoom.kind, amount: clamp(cmd.zoom.amount ?? d.amount, ...LIMITS.zoomAmount),
         ...(cmd.zoom.kind === 'punch' ? { duration: clamp(cmd.zoom.duration ?? d.duration ?? 0.35, ...LIMITS.zoomDuration) } : {}) }
       return `${c.id} zoom ${c.zoom.kind} ${Math.round(c.zoom.amount * 100)}%`
+    }
+    case 'set_clip_color': {
+      const c = p.clips.find(x => x.id === cmd.clip)
+      if (!c) return 'clip no encontrado'
+      if (!cmd.color) { delete c.color; return `clip ${c.id}: sin corrección de color` }
+      const k = { ...CLIP_COLOR_DEFAULT, ...c.color, ...cmd.color }
+      k.brillo = clamp(k.brillo, 0.5, 1.8); k.contraste = clamp(k.contraste, 0.6, 1.6); k.saturacion = clamp(k.saturacion, 0, 2)
+      if (k.brillo === 1 && k.contraste === 1 && k.saturacion === 1) delete c.color; else c.color = k
+      return `clip ${c.id}: brillo ${f2(k.brillo)} contraste ${f2(k.contraste)} saturación ${f2(k.saturacion)}`
+    }
+    case 'set_audio_fx': {
+      p.mejoras = { ...p.mejoras, audio: cmd.on }
+      return `voz limpia y pareja ${cmd.on ? 'activada' : 'desactivada'}`
     }
     case 'set_clip_transform': {
       const c = p.clips.find(x => x.id === cmd.clip)

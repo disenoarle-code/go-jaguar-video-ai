@@ -32,6 +32,18 @@ export interface Transition { kind: TransitionKind; duration: number; intensity:
 export interface ClipTransform { x: number; y: number; scale: number; rotation: number }
 export const CLIP_TRANSFORM_DEFAULT: ClipTransform = { x: 0.5, y: 0.5, scale: 1, rotation: 0 }
 
+/** Luces y color de un clip (1 = sin cambio). Misma fórmula en la vista previa (filtro del lienzo) y en la exportación (ffmpeg): brillo → contraste → saturación. */
+export interface ClipColor { brillo: number; contraste: number; saturacion: number }
+export const CLIP_COLOR_DEFAULT: ClipColor = { brillo: 1, contraste: 1, saturacion: 1 }
+
+/**
+ * Voz limpia y pareja (procedimiento estándar de TODA edición): quita el ruido, cierra el silencio entre frases y nivela el volumen
+ * para que la voz suene igual de fuerte siempre (también cuando la persona se acerca al micrófono). Se aplica al audio de los videos
+ * (no a la música ni a los efectos) y tanto la vista previa como la exportación usan el MISMO archivo ya procesado (`proxies/<video>.voz.m4a`).
+ * `atrim` quita los ~30 ms de retraso que mete el filtro de ruido, para que siga sincronizado con la imagen.
+ */
+export const VOZ_FILTRO = 'highpass=f=80,afftdn=nr=20:nf=-35:tn=1,agate=threshold=0.025:ratio=4:attack=5:release=250,acompressor=threshold=0.04:ratio=6:attack=5:release=200:makeup=3,dynaudnorm=f=300:g=31:p=0.9:m=30:s=3:t=0.05,alimiter=limit=0.95,atrim=start=0.03,asetpts=PTS-STARTPTS,apad=pad_dur=0.03'
+
 /** Tramo de un archivo fuente en la pista principal (magnética: sin huecos). */
 export interface Clip {
   id: string
@@ -39,6 +51,7 @@ export interface Clip {
   srcIn: number; srcOut: number   // segundos del archivo fuente
   speed: number; volume: number
   zoom?: ZoomFx
+  color?: ClipColor              // luces y color; ausente = sin corrección
   transform?: ClipTransform      // mover / agrandar / girar el video (sin deformarlo); ausente = ajustado y centrado
   transition?: Transition        // la del corte ANTES de este clip (entrada de este y salida del anterior)
 }
@@ -109,6 +122,8 @@ export interface Project {
   clips: Clip[]
   layers: Layer[]
   music?: Music
+  /** Mejoras automáticas: `audio` = voz limpia y pareja (ver VOZ_FILTRO). */
+  mejoras?: { audio?: boolean }
   overlays?: OverlayClip[]
   tracks?: Record<string, TrackState>
   nextId: number

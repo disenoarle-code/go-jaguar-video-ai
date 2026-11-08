@@ -44,6 +44,9 @@ export class Player {
   musicPeaks = new Map<string, Float32Array>()
   private fx: FxState = { zoom: 1, shift: 0, shiftY: 0, glitch: 0, flash: 0 }
   private fxKey = ''
+  /** Filtro de color del clip que se ve (brillo → contraste → saturación; igual que `colorChain` de la exportación). */
+  private colorCss = ''
+  private keyNow() { return `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}|${this.fx.glitch.toFixed(3)}|${this.colorCss}` }
   private sizeKey = ''
 
   /** Ajusta el lienzo al formato del proyecto. */
@@ -173,6 +176,14 @@ export class Player {
 
   toggle() { this.playing ? this.pause() : void this.play() }
 
+  /** El audio de un medio cambió (p. ej. voz limpia): descarta lo estirado de ese medio, prepara lo nuevo y, si suena, reprograma. */
+  refreshAudio(assetId: string) {
+    for (const k of [...this.stretched.keys()]) if (k.startsWith(assetId + '@')) this.stretched.delete(k)
+    this.ensureStretched()
+    if (this.playing) this.scheduleAudio(this.time())
+    this.dirty = true
+  }
+
   /** Cambia la velocidad de la vista previa; si está sonando, sigue desde donde va. */
   setRate(r: number) {
     const t = this.time()
@@ -283,12 +294,14 @@ export class Player {
     const tracks = this.store.project.tracks ?? {}
     const loc = tracks.main?.hidden ? null : locate(this.store.project, t)
     const cl = this.store.project.clips
+    const kc = loc?.placed.clip.color
+    this.colorCss = kc ? `brightness(${kc.brillo}) contrast(${kc.contraste}) saturate(${kc.saturacion})` : ''
     this.fx = loc ? fxAt(loc.placed.clip, cl[cl.indexOf(loc.placed.clip) + 1], t - loc.placed.start, loc.placed.end - loc.placed.start) : { zoom: 1, shift: 0, shiftY: 0, glitch: 0, flash: 0 }
     if (loc) {
       const asset = this.assets.get(loc.placed.clip.assetId)
       if (asset) {
         const idx = asset.source.idxAt(loc.srcTime)
-        const fk = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}|${this.fx.glitch.toFixed(3)}`
+        const fk = this.keyNow()
         const key = `${asset.info.id}:${idx}`
         if (key !== this.layerKey || fk !== this.fxKey) {
           const f = asset.source.peek(idx)
@@ -355,13 +368,17 @@ export class Player {
       const d = this.fx.glitch * 0.02 * W, tmp = (this.glitchTmp ??= new OffscreenCanvas(W, H)), t = tmp.getContext('2d')!
       for (const [off, col] of [[-d, '#ff0000'], [0, '#00ff00'], [d, '#0000ff']] as const) {
         t.globalCompositeOperation = 'source-over'; t.clearRect(0, 0, W, H)
+        t.filter = this.colorCss || 'none'
         try { t.drawImage(f, (W - w) / 2 - dx + off * 0.0, (H - h) / 2 - dy, w, h) } catch { /* frame cerrado */ }
+        t.filter = 'none'
         t.globalCompositeOperation = 'multiply'; t.fillStyle = col; t.fillRect(0, 0, W, H)
         this.layerCtx.globalCompositeOperation = 'lighter'; this.layerCtx.drawImage(tmp, off, 0); this.layerCtx.globalCompositeOperation = 'source-over'
       }
       return
     }
+    this.layerCtx.filter = this.colorCss || 'none'
     try { this.layerCtx.drawImage(f, (W - w) / 2 - dx, (H - h) / 2 - dy, w, h) } catch { /* frame cerrado por el LRU */ }
+    this.layerCtx.filter = 'none'
   }
 
   private async pump() {
@@ -372,7 +389,7 @@ export class Player {
         const w = this.wanted
         const f = await w.asset.source.getFrame(w.idx)
         this.blit(f)
-        this.layerKey = w.key; this.fxKey = `${this.fx.zoom.toFixed(3)}|${this.fx.shift.toFixed(3)}|${this.fx.shiftY.toFixed(3)}|${this.fx.glitch.toFixed(3)}`
+        this.layerKey = w.key; this.fxKey = this.keyNow()
         this.dirty = true
       }
     } finally { this.pumping = false }

@@ -8,7 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { renderRotulos } from './rotulos'
-import { layout, mainDuration, overlayDur, duration, parseProject, type Clip, type Project, type Transition } from '@gojaguar/core'
+import { CLIP_COLOR_DEFAULT, VOZ_FILTRO, layout, mainDuration, overlayDur, duration, parseProject, type AssetInfo, type Clip, type ClipColor, type Project, type Transition } from '@gojaguar/core'
 
 export interface ExportOpts { resolucion: 'original' | '720' | '480'; calidad: 'rapida' | 'buena' | 'maxima'; nombre?: string }
 export interface ExportJob {
@@ -35,6 +35,51 @@ function probeAudio(file: string): Promise<boolean> {
     const p = spawn('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file])
     let out = ''; p.stdout.on('data', d => { out += d }); p.on('error', () => resolve(false)); p.on('close', () => resolve(out.trim() === 'audio'))
   })
+}
+
+const fileOk = (f: string) => fsp.stat(f).then(s => s.isFile(), () => false)
+const toPath = (root: string, url: string) => path.join(root, decodeURIComponent(url.replace(/^api\/files\//, '')))
+/** Dónde queda el audio ya procesado ("voz limpia y pareja") de un video: junto a su copia liviana, `<video>.voz.m4a`. */
+export const vozPath = (root: string, a: AssetInfo) => toPath(root, a.proxy).replace(/\.proxy\.mp4$/, '.voz.m4a')
+
+/**
+ * Crea (si falta o quedó viejo) el audio procesado de cada video: quita ruido, cierra el silencio y nivela el volumen (VOZ_FILTRO).
+ * Se hace sobre el archivo ORIGINAL completo (no sobre un tramo) para que el filtro adaptativo se comporte igual en la vista previa y en la exportación:
+ * las dos usan este mismo archivo.
+ */
+export async function asegurarVoz(assets: AssetInfo[], root: string, onPct: (p: number) => void = () => {}): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  const vids = assets.filter(a => a.kind !== 'audio' && a.kind !== 'image')
+  for (const [i, a] of vids.entries()) {
+    const dst = vozPath(root, a)
+    const cand = [a.original, toPath(root, a.proxy)]
+    let src = ''; for (const f of cand) if (f && path.isAbsolute(f) && await fileOk(f)) { src = f; break }
+    if (!src || !(await probeAudio(src))) { onPct((i + 1) / vids.length); continue }
+    const fresh = await fileOk(dst) && (await fsp.stat(dst)).mtimeMs > (await fsp.stat(src)).mtimeMs
+    if (!fresh) {
+      const tmp = dst + '.part.m4a'
+      await new Promise<void>((resolve, reject) => {
+        const p = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vn', '-ac', '2', '-ar', '48000', '-af', VOZ_FILTRO, '-c:a', 'aac', '-b:a', '192k', '-f', 'mp4', tmp])
+        let err = ''; p.stderr.on('data', d => { err += d }); p.on('error', reject)
+        p.on('close', c => c === 0 ? resolve() : reject(new Error('No pude limpiar el audio de "' + a.name + '": ' + err.slice(-300))))
+      })
+      await fsp.rename(tmp, dst)
+    }
+    out[a.id] = a.proxy.replace(/\.proxy\.mp4$/, '.voz.m4a')
+    onPct((i + 1) / vids.length)
+  }
+  return out
+}
+
+/** Filtro de color de un clip como cadena de ffmpeg: brillo → contraste → saturación, la misma fórmula que el filtro del lienzo en la vista previa. */
+export function colorChain(k: ClipColor | undefined): string {
+  if (!k) return ''
+  const c = { ...CLIP_COLOR_DEFAULT, ...k }
+  if (c.brillo === 1 && c.contraste === 1 && c.saturacion === 1) return ''
+  const e = `clip((clip(val/maxval*${num(c.brillo)},0,1)-0.5)*${num(c.contraste)}+0.5,0,1)*maxval`
+  const s = c.saturacion, r = (n: number) => num(n)
+  const mix = `rr=${r(0.213 + 0.787 * s)}:rg=${r(0.715 - 0.715 * s)}:rb=${r(0.072 - 0.072 * s)}:gr=${r(0.213 - 0.213 * s)}:gg=${r(0.715 + 0.285 * s)}:gb=${r(0.072 - 0.072 * s)}:br=${r(0.213 - 0.213 * s)}:bg=${r(0.715 - 0.715 * s)}:bb=${r(0.072 + 0.928 * s)}`
+  return `,format=gbrp,lutrgb=r='${e}':g='${e}':b='${e}',colorchannelmixer=${mix},format=yuv420p`
 }
 
 /**
@@ -89,6 +134,9 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     for (const f of [a.original, path.join(root, decodeURIComponent((a.proxy ?? '').replace(/^api\/files\//, '')))]) { if (f && path.isAbsolute(f) && await fsp.stat(f).then(s => s.isFile()).catch(() => false)) return f }
     throw new Error(`No encuentro el archivo "${a.name}". Ubícalo de nuevo en el Material.`)
   }
+  const voces = new Map<string, string>()      // asset → audio ya limpio y nivelado (si la mejora de voz está activa y el archivo existe)
+  if (project.mejoras?.audio) for (const a of project.assets) { const f = vozPath(root, a); if (a.kind !== 'audio' && await fileOk(f)) voces.set(a.id, f) }
+  const vozFile = (id: string) => voces.get(id)
   const inputs: string[][] = []
   const audioCache = new Map<string, boolean>()
   const hasAudio = async (f: string) => { if (!audioCache.has(f)) audioCache.set(f, await probeAudio(f)); return audioCache.get(f)! }
@@ -105,11 +153,12 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     const c = pl.clip, D = pl.end - pl.start, file = await srcOf(c.assetId)
     const k = addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, file)
     const fx = fxExpr(c, placed[i + 1]?.clip, D, fps), tf = c.transform
+    const voz = vozFile(c.assetId), ka = voz ? addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, voz) : k      // la voz sale del audio ya limpio y nivelado
     if (!ts('main').hidden) {
     const eq = fx.flash ? `,eq=brightness='${fx.flash}':eval=frame` : ''
     const gpx = fx.glitch ? Math.max(2, Math.round(fx.glitch.amt * 0.04 * W)) : 0       // separación de color en px de salida (igual que la vista previa: 4 % del ancho × intensidad)
     const gl = fx.glitch ? `,format=gbrp,rgbashift=rh=-${gpx}:bh=${gpx}:enable='lt(t,${num(fx.glitch.dur)})',format=yuv420p` : ''
-    vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
+    vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps}${colorChain(c.color)},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
       + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps}${eq}${gl},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p${tf ? `,scale=w='trunc(iw*${num(tf.scale)}/2)*2':h='trunc(ih*${num(tf.scale)}/2)*2',rotate=a=${num(tf.rotation * Math.PI / 180)}:ow=${W}:oh=${H}:c=black,setsar=1` : ''}[${tf ? 'vt' : 'v'}${i}]`)
     if (tf) {     // el video movido/agrandado/girado se pone sobre negro en su posición (igual que la vista previa: el cuadro entero se transforma alrededor de su centro)
       vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(D)}[kb${i}]`)
@@ -117,7 +166,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     }
     vlabels.push(`[v${i}]`)
     }
-    if (!ts('main').muted && c.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(c.speed)},volume=${num(c.volume)},atrim=0:${num(D)},adelay=${Math.round(pl.start * 1000)}:all=1[ac${i}]`)
+    if (!ts('main').muted && c.volume > 0 && await hasAudio(voz ?? file)) audio.push(`[${ka}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(c.speed)},volume=${num(c.volume)},atrim=0:${num(D)},adelay=${Math.round(pl.start * 1000)}:all=1[ac${i}]`)
   }
   vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(total)}[base]`)
   let cur = 'base'
@@ -128,6 +177,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   for (const [j, o] of ovs.entries()) {
     const file = await srcOf(o.assetId), D = overlayDur(o)
     const k = addInput(o.srcIn, (o.srcOut - o.srcIn) + 0.3, file)
+    const vozO = o.kind === 'video' ? vozFile(o.assetId) : undefined, kaO = vozO ? addInput(o.srcIn, (o.srcOut - o.srcIn) + 0.3, vozO) : k
     if (o.kind === 'video' && o.blend === 'screen' && !ts('v' + o.track).hidden) {
       // luz (screen): cubre todo el cuadro; ambos lados en el MISMO formato (gbrp) o el color sale desviado (magenta)
       const st = num(o.start), en = num(o.start + D), kb = `kb${j}`
@@ -144,7 +194,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
       vf.push(`[${cur}][ov${j}]overlay=x='${num(W * o.transform.x)}-w/2':y='${num(H * o.transform.y)}-h/2':eof_action=pass:enable='between(t,${num(o.start)},${num(o.start + D)})'[b${j + 1}]`)
       cur = `b${j + 1}`
     }
-    if (!ts((o.kind === 'video' ? 'v' : 'a') + o.track).muted && o.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(o.speed)},volume=${num(o.volume)},atrim=0:${num(D)},adelay=${Math.round(o.start * 1000)}:all=1[ao${j}]`)
+    if (!ts((o.kind === 'video' ? 'v' : 'a') + o.track).muted && o.volume > 0 && await hasAudio(vozO ?? file)) audio.push(`[${kaO}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(o.speed)},volume=${num(o.volume)},atrim=0:${num(D)},adelay=${Math.round(o.start * 1000)}:all=1[ao${j}]`)
   }
 
   // 3) música
@@ -205,6 +255,7 @@ export async function startExport(slug: string, projectFile: string, outDir: str
         await renderRotulos({ origin, slug, w: ow, h: oh, fps: raw.format.fps || 30, t0, t1, outDir: dir, cancelled: () => !!job.cancelada, onProgress: p => { job.pct = p * 0.25 } })
         rot = { dir, t0, t1 }
       }
+      if (raw.mejoras?.audio) { job.detail = 'Limpiando el audio…'; await asegurarVoz(raw.assets, root, p => { job.pct = Math.max(job.pct, p * 0.05) }) }
       const b = await buildExport(raw, root, opts, rot)
       await fsp.mkdir(outDir, { recursive: true })
       const safe = (opts.nombre ?? slug).normalize('NFKD').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || slug

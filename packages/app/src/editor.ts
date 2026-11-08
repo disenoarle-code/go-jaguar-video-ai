@@ -1,12 +1,12 @@
 import {
-  CLIP_TRANSFORM_DEFAULT, Store, describe, formatoDe, duration, exec, execBatch, layout, locate, parseProject, serialize, sincronizarPalabras,
+  CLIP_COLOR_DEFAULT, CLIP_TRANSFORM_DEFAULT, Store, describe, formatoDe, duration, exec, execBatch, layout, locate, parseProject, serialize, sincronizarPalabras,
   TRANSITION_DEFAULTS, TRANSITION_KINDS, ZOOM_DEFAULTS, ZOOM_KINDS, type AssetInfo, type Cmd, type TransitionKind, type ZoomKind, type Project, type TextLayer,
 } from '@gojaguar/core'
 import { TRANSITION_INFO, ZOOM_INFO } from './fxinfo'
 import { H, W } from './constants'
 import { ico } from './icons'
 import { runBench } from './bench'
-import { loadAsset } from './media'
+import { loadAsset, loadAudioFrom } from './media'
 import { aLocal, geomOf, guias, hitAsa, hitOverlay, transformEfectivo, visibleOverlays } from './overlays'
 import { Player } from './player'
 import { Timeline } from './timeline'
@@ -38,7 +38,30 @@ export async function bootEditor(slug: string) {
     }
     player.ensureStretched()
   }
+  // Voz limpia y pareja (procedimiento estándar): si el proyecto la tiene activa, el audio de los videos es el ya procesado
+  // (`<video>.voz.m4a`, el MISMO que usa la exportación); si se desactiva, vuelve el audio original.
+  const vozDe = new Map<string, boolean>()      // asset → ¿tiene cargada la voz procesada?
+  let vozOcupada = false
+  async function sincronizarVoz() {
+    if (vozOcupada) return
+    const on = !!store.project.mejoras?.audio
+    const falta = [...player.assets.values()].filter(a => (vozDe.get(a.info.id) ?? false) !== on)
+    if (!falta.length) return
+    vozOcupada = true
+    try {
+      let voces: Record<string, string> = {}
+      if (on) { notify('Limpiando el ruido y nivelando la voz…'); voces = (await (await fetch(`/api/proyectos/${slug}/mejorar-audio`, { method: 'POST' })).json()).voces ?? {} }
+      for (const a of falta) {
+        const url = on ? voces[a.info.id] : a.info.proxy
+        if (!url) { vozDe.set(a.info.id, on); continue }
+        try { await loadAudioFrom(a, `/${url}`, player.actx); vozDe.set(a.info.id, on); player.refreshAudio(a.info.id); tl.dirty = true } catch (e) { notify(`No se pudo cambiar el audio de "${a.info.name}": ${(e as Error).message}`) }
+      }
+      if (on) notify('Voz limpia y pareja lista')
+    } finally { vozOcupada = false }
+    void sincronizarVoz()      // por si cambió mientras tanto
+  }
   await loadMedia()
+  setTimeout(() => void sincronizarVoz(), 300)      // (después de armar el aviso de la cabecera)
   $('loading').remove()
   requestAnimationFrame(() => { tl.fit(); player.seek(0) })
 
@@ -509,9 +532,10 @@ export async function bootEditor(slug: string) {
     const listaSig = esSub && subTab === 'lista' ? p.layers.filter(l => l.type === 'subtitle').map(l => l.id + '\u0001' + l.text).join('\u0002') : ''
     if (esSub && subTab === 'lista' && lastKey.startsWith(`layer:${s!.id}:`) && insp.contains(document.activeElement) && (document.activeElement as HTMLElement).classList.contains('subtxt')) return   // no pisar lo que se está escribiendo
     const tk = clip ? [clip.transform?.x, clip.transform?.y, clip.transform?.scale, clip.transform?.rotation].map(v => v === undefined ? '' : Math.round(v * 100)).join(',') : ''
-    const keyFull = key + (esSub ? `:${subTab}:${listaSig}` : '') + (clip ? `:t${tk}` : '')
+    const ck = clip?.color ? `c${Math.round(clip.color.brillo * 100)},${Math.round(clip.color.contraste * 100)},${Math.round(clip.color.saturacion * 100)}` : ''
+    const keyFull = key + (esSub ? `:${subTab}:${listaSig}` : '') + (clip ? `:t${tk}:${ck}` : '')
     if (keyFull === lastKey && key !== 'none') return
-    if (clip && lastKey.startsWith(`clip:${s!.id}:`) && insp.contains(document.activeElement) && /^(INPUT)$/.test((document.activeElement as HTMLElement).tagName) && lastKey.replace(/:t[^:]*$/, '') === keyFull.replace(/:t[^:]*$/, '')) return   // moviendo un deslizador de aquí: no reconstruir el panel
+    if (clip && lastKey.startsWith(`clip:${s!.id}:`) && insp.contains(document.activeElement) && /^(INPUT)$/.test((document.activeElement as HTMLElement).tagName) && lastKey.replace(/:t[^:]*:c?[^:]*$/, '') === keyFull.replace(/:t[^:]*:c?[^:]*$/, '')) return   // moviendo un deslizador de aquí: no reconstruir el panel
     if (lastKey.startsWith('overlay') && key.startsWith('overlay') && insp.contains(document.activeElement)) return   // no pisar lo que se está escribiendo
     if (key === 'none' && lastKey === 'none') { updatePool(); return }
     lastKey = keyFull
@@ -550,6 +574,17 @@ export async function bootEditor(slug: string) {
       bFill.onclick = () => { const cover = (() => { const a = store.asset(clip.assetId); const fw = a?.width || 16, fh = a?.height || 9, k = Math.min(W / fw, H / fh); return Math.max(W / (fw * k), H / (fh * k)) })(); exec(store, { op: 'set_clip_transform', clip: id, transform: { x: 0.5, y: 0.5, rotation: 0, scale: Math.round(cover * 1000) / 1000 } }) }
       rowT.append(bFit, bFill); insp.append(rowT)
       insp.insertAdjacentHTML('beforeend', '<p class="hint">También: toca el video y arrastra para moverlo, las esquinas para agrandarlo y el círculo de abajo para girarlo. La forma del video nunca se deforma.</p>')
+
+      // ---- LUCES Y COLOR del clip (brillo → contraste → saturación) ----
+      section('Luces y color')
+      const KC = { ...CLIP_COLOR_DEFAULT, ...clip.color }
+      const setK = (pr: Project, patch: Partial<typeof CLIP_COLOR_DEFAULT>) => { C(pr).color = { ...CLIP_COLOR_DEFAULT, ...C(pr).color, ...patch } }
+      slider('Brillo', KC.brillo, 0.5, 1.8, 0.01, pct, (pr, n) => setK(pr, { brillo: n }))
+      slider('Contraste', KC.contraste, 0.6, 1.6, 0.01, pct, (pr, n) => setK(pr, { contraste: n }))
+      slider('Saturación', KC.saturacion, 0, 2, 0.01, pct, (pr, n) => setK(pr, { saturacion: n }))
+      const bK = document.createElement('button'); bK.textContent = 'Quitar corrección de color'; bK.style.margin = '4px 0'
+      bK.onclick = () => exec(store, { op: 'set_clip_color', clip: id, color: null })
+      insp.append(bK)
 
       // ---- EFECTO (por ahora el único efecto es el Zoom; aquí irán los demás) ----
       section('Efecto')
@@ -774,7 +809,7 @@ export async function bootEditor(slug: string) {
     }
     poolSig = ''; updatePool()
   }
-  store.onChange(() => { renderInspector(); updAspect(); tl.dirty = true; player.dirty = true })
+  store.onChange(() => { renderInspector(); updAspect(); tl.dirty = true; player.dirty = true; void loadMedia().then(sincronizarVoz) })
   renderInspector()
 
   // --- bucle principal ---------------------------------------------------------

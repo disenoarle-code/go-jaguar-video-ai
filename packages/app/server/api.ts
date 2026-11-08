@@ -15,7 +15,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { analizarRitmo, type Ritmo } from './ritmo'
-import { activeExport, cancelExport, getExport, startExport, type ExportOpts, type Exportado } from './exportar'
+import { activeExport, asegurarVoz, cancelExport, getExport, startExport, type ExportOpts, type Exportado } from './exportar'
 import { fileURLToPath } from 'node:url'
 import { Store, createProject, exec, execBatch, formatoDe, serialize, type AssetInfo, type Cmd } from '@gojaguar/core'
 
@@ -464,6 +464,7 @@ function newJob(slug: string, modo: 'recorte' | 'completa' = 'recorte', recomend
     id: `${slug}-${Date.now()}`, slug, status: 'running', modo, recomendacion,
     steps: [
       { id: 'proxy', label: 'Preparando los videos para editar', state: 'pending' },
+      { id: 'voz', label: 'Limpiando el ruido y nivelando el volumen de la voz', state: 'pending' },
       { id: 'texto', label: 'Convirtiendo el audio en texto', state: 'pending' },
       { id: 'silencios', label: 'Detectando silencios', state: 'pending' },
       { id: 'base', label: 'Armando la edición base (sin silencios)', state: 'pending' },
@@ -605,6 +606,11 @@ async function processProjectInner(job: Job) {
     }
     set('proxy', { state: 'done', detail: undefined })
 
+    // 1b) voz limpia y pareja (procedimiento estándar de TODA edición): sin ruido y con el volumen parejo ---------------
+    set('voz', { state: 'running', pct: 0 })
+    try { await asegurarVoz(assets, ROOT, p => set('voz', { pct: p })); set('voz', { state: 'done', detail: undefined }) }
+    catch (e) { set('voz', { state: 'skipped', detail: (e as Error).message.slice(0, 120) }) }
+
     // 2) transcripción ---------------------------------------------------------------------
     if (!tools.whisper || !tools.whisperModel) {
       set('texto', { state: 'skipped', detail: !tools.whisper ? 'Falta whisper-cli (whisper.cpp)' : `Falta el modelo (${MODEL})` })
@@ -632,6 +638,7 @@ async function processProjectInner(job: Job) {
     set('base', { state: 'running' })
     const first = assets[0]
     const store = new Store(createProject(meta.name, formatoDe(first.width, first.height, first.fps)))
+    exec(store, { op: 'set_audio_fx', on: step(job, 'voz').state === 'done' })
     for (const a of assets) exec(store, { op: 'import_asset', asset: a })
     for (const a of assets) {
       const cmds: Cmd[] = keepSegments(a.duration, cuts.get(a.id) ?? []).map(([s, e]) => ({ op: 'add_clip', asset: a.id, src_in: s, src_out: e }))
@@ -851,6 +858,14 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
         }
       }
       return send(res, 200, { assets: nuevos, omitidos })
+    }
+
+    // --- voz limpia y pareja: crea (si falta) el audio procesado de cada video del proyecto; el editor lo usa en la vista previa ---
+    if ((g = /^\/proyectos\/([a-z0-9-]+)\/mejorar-audio$/.exec(p)) && m === 'POST') {
+      const file = isSlug(g[1]) ? path.join(projDir(g[1]), 'proyecto.gojaguar') : ''
+      if (!file || !(await exists(file))) return send(res, 404, { error: 'Proyecto no encontrado' })
+      const project = JSON.parse(await fsp.readFile(file, 'utf8')).project as { assets: AssetInfo[] }
+      return send(res, 200, { voces: await asegurarVoz(project.assets, ROOT) })
     }
 
     // --- exportar a MP4 (la edición actual, con efectos, superpuestos y música) ---

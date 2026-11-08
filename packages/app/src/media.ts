@@ -83,6 +83,22 @@ export class LoadedAsset {
 export const PEAK_RATE = 100
 export const THUMB_W = 192, THUMB_H = 108   // miniatura 16:9 (mayor resolución para pantallas retina)
 
+/** Pone un audio decodificado en el medio y calcula su onda (picos) para la línea de tiempo. */
+export function setAudioBuffer(asset: LoadedAsset, audio: AudioBuffer) {
+  asset.audio = audio
+  const ch = audio.getChannelData(0), step = Math.floor(audio.sampleRate / PEAK_RATE), n = Math.floor(ch.length / step)
+  asset.peaks = new Float32Array(n)
+  for (let i = 0; i < n; i++) {
+    let m = 0
+    for (let j = i * step, e = j + step; j < e; j += 4) { const v = Math.abs(ch[j]); if (v > m) m = v }
+    asset.peaks[i] = m
+  }
+}
+/** Cambia el audio de un medio por el de otro archivo (p. ej. la voz ya limpia y nivelada). */
+export async function loadAudioFrom(asset: LoadedAsset, url: string, actx: AudioContext) {
+  setAudioBuffer(asset, await actx.decodeAudioData(await (await fetch(url)).arrayBuffer()))
+}
+
 export async function loadAsset(info: AssetInfo, actx: AudioContext, onThumb: () => void): Promise<LoadedAsset> {
   const asset = new LoadedAsset(info)
   const buf = await (await fetch(`/${info.proxy}`)).arrayBuffer()
@@ -131,18 +147,7 @@ export async function loadAsset(info: AssetInfo, actx: AudioContext, onThumb: ()
   asset.source = new FrameSource(samples, config, fps)
 
   // --- audio ---------------------------------------------------------------
-  try {
-    asset.audio = await actx.decodeAudioData(buf.slice(0))
-    const ch = asset.audio.getChannelData(0)
-    const step = Math.floor(asset.audio.sampleRate / PEAK_RATE)
-    const n = Math.floor(ch.length / step)
-    asset.peaks = new Float32Array(n)
-    for (let i = 0; i < n; i++) {
-      let m = 0
-      for (let j = i * step, e = j + step; j < e; j += 4) { const v = Math.abs(ch[j]); if (v > m) m = v }
-      asset.peaks[i] = m
-    }
-  } catch (e) { console.warn('sin audio', e) }
+  try { setAudioBuffer(asset, await actx.decodeAudioData(buf.slice(0))) } catch (e) { console.warn('sin audio', e) }
 
   // --- miniaturas (decoder propio para no competir con el scrub) ------------
   void (async () => {

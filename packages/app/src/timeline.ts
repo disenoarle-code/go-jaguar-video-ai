@@ -24,6 +24,7 @@ type Drag =
   | { k: 'clip'; id: string; x0: number; moved: boolean; target: number; start0: number; up: boolean; track: number }
   | { k: 'ovc'; id: string; mode: 'move' | 'l' | 'r'; x0: number; start0: number; in0: number; out0: number }
   | { k: 'ov'; id: string; mode: 'move' | 'l' | 'r'; x0: number; s0: number; e0: number; moved: boolean }
+  | { k: 'gain'; type: 'clip' | 'overlay' | 'music'; id: string; y0: number; v0: number }
 
 export class Timeline {
   ctx: CanvasRenderingContext2D
@@ -54,7 +55,7 @@ export class Timeline {
     canvas.addEventListener('mousedown', e => this.onDown(e))
     window.addEventListener('mouseup', () => this.onUp())
     window.addEventListener('mousemove', e => { if (this.drag) this.onMove(e) })
-    canvas.addEventListener('mouseleave', () => { this.hoverIcon = ''; if (!this.drag) { this.hoverX = null; this.snapAt = null; this.hoverCut = null; player.hover = null; player.dirty = true; this.dirty = true } })
+    canvas.addEventListener('mouseleave', () => { this.gainShow = null; this.hoverIcon = ''; if (!this.drag) { this.hoverX = null; this.snapAt = null; this.hoverCut = null; player.hover = null; player.dirty = true; this.dirty = true } })
     canvas.addEventListener('dblclick', e => this.onDbl(e))
     canvas.addEventListener('wheel', e => this.onWheel(e), { passive: false })
     canvas.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('text/gojaguar-asset')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } })
@@ -221,6 +222,45 @@ export class Timeline {
   }
 
   // --- eventos ----------------------------------------------------------------
+  // --- volumen en dB arrastrando sobre la onda de audio (flecha ↕), como en CapCut ---------------------
+  /** Lo que se está mostrando/arrastrando: franja de la onda del elemento y su volumen. */
+  private gainShow: { rect: { x0: number; x1: number; y: number; h: number }; vol: number } | null = null
+  private dbOf = (v: number) => (v <= 0.0001 ? -60 : 20 * Math.log10(v))
+  private volOf = (db: number) => (db <= -40 ? 0 : Math.min(4, Math.pow(10, db / 20)))
+  /** La onda de audio bajo el mouse (clip de la pista principal, audio superpuesto o música), sin los bordes (que recortan). */
+  private hitGain(x: number, y: number): { type: 'clip' | 'overlay' | 'music'; id: string; vol: number; rect: { x0: number; x1: number; y: number; h: number } } | null {
+    const row = this.rowAt(y), p = this.store.project
+    if (row === 'video' && !this.locked('main')) {
+      const h = this.hitClip(x), V = ROWS.video, WAVE = 20
+      if (h && h.zone === 'body' && y >= V.y + V.h - WAVE) return { type: 'clip', id: h.p.clip.id, vol: h.p.clip.volume, rect: { x0: this.t2x(h.p.start), x1: this.t2x(h.p.end), y: V.y + V.h - WAVE, h: WAVE } }
+      return null
+    }
+    if (row === 'alane') {
+      const h = this.hitOverlayClip(x, y, 'audio'), R = h && this.aLanes[h.o.track - 1]
+      if (h && R && h.zone === 'move' && !this.locked(this.laneKey(h.o))) return { type: 'overlay', id: h.o.id, vol: h.o.volume, rect: { x0: this.t2x(h.o.start), x1: this.t2x(overlayEnd(h.o)), y: R.y, h: R.h } }
+      return null
+    }
+    if (row === 'music' && p.music && !this.locked('music')) {
+      const R = ROWS.music, x0 = this.t2x(0), x1 = this.t2x(this.total())
+      if (x > x0 + EDGE && x < x1 - EDGE) return { type: 'music', id: 'music', vol: p.music.volume, rect: { x0, x1, y: R.y, h: R.h } }
+    }
+    return null
+  }
+  private drawGain() {
+    const g = this.gainShow; if (!g) return
+    const c = this.ctx, db = this.dbOf(g.vol), cl = Math.min(Math.max(db, -24), 12)
+    const y = g.rect.y + g.rect.h * (1 - (cl + 24) / 36), x0 = Math.max(g.rect.x0, LEFT), x1 = Math.min(g.rect.x1, this.w)
+    c.save(); c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.setLineDash([5, 3]); c.shadowColor = 'rgba(0,0,0,.6)'; c.shadowBlur = 3
+    c.beginPath(); c.moveTo(x0, y); c.lineTo(x1, y); c.stroke(); c.setLineDash([])
+    const label = (db <= -40 ? 'silencio' : `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB`), mx = Math.min(Math.max(this.mouse.x, x0 + 30), x1 - 30)
+    c.font = '600 11px Figtree, system-ui, sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'center'
+    const w = c.measureText(label).width + 12
+    c.shadowBlur = 0; c.fillStyle = 'rgba(20,20,18,.92)'; c.beginPath(); c.roundRect(mx - w / 2, y - 18, w, 16, 5); c.fill()
+    c.fillStyle = '#fff'; c.fillText(label, mx, y - 10)
+    c.beginPath(); c.moveTo(mx - 3, y - 2); c.lineTo(mx + 3, y - 2); c.lineTo(mx, y + 4); c.closePath(); c.fill()       // flechita ↕ sobre la línea
+    c.restore()
+  }
+
   private onDown(e: MouseEvent) {
     const { x, y } = this.pos(e)
     if (x < LEFT) { this.onGutterDown(x, y); return }
@@ -229,6 +269,14 @@ export class Timeline {
     this.player.hover = null
 
     if (row === 'ruler') { this.drag = { k: 'seek' }; this.player.seek(t); return }
+
+    const gh = this.hitGain(x, y)
+    if (gh) {      // arrastrar la onda de audio = subir o bajar el volumen de ese clip / audio / música
+      this.store.select(gh.type === 'music' ? { type: 'music', id: 'music' } : { type: gh.type, id: gh.id })
+      this.store.beginTx()
+      this.drag = { k: 'gain', type: gh.type, id: gh.id, y0: y, v0: gh.vol }; this.gainShow = { rect: gh.rect, vol: gh.vol }
+      return
+    }
 
     if (row === 'video' && this.locked('main')) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
     if ((row === 'subtitle' || row === 'graphic') && this.locked(row)) { this.store.select(null); this.player.seek(t); this.drag = { k: 'seek' }; return }
@@ -298,13 +346,28 @@ export class Timeline {
       } else { this.hoverX = null; this.snapAt = null; this.player.hover = null; this.player.dirty = true }
       const cut = x >= LEFT ? this.hitCut(x, y) : null
       this.hoverCut = cut?.clip.id ?? null
-      this.canvas.style.cursor = cut || this.hitTransition(x, y) ? 'pointer' : this.cursorAt(x, y)
+      const gh = x >= LEFT ? this.hitGain(x, y) : null
+      this.gainShow = gh ? { rect: gh.rect, vol: gh.vol } : null
+      this.canvas.style.cursor = gh ? 'ns-resize' : cut || this.hitTransition(x, y) ? 'pointer' : this.cursorAt(x, y)
       this.dirty = true
       return
     }
 
     this.dirty = true
     if (d.k === 'seek') { this.player.seek(this.magnet(Math.min(this.x2t(x), this.total()))); return }
+    if (d.k === 'gain') {
+      // 0,5 dB por pixel hacia arriba/abajo; sin Mayús se pega a 0 dB (volumen original) cuando pasa cerca
+      let db = this.dbOf(d.v0) + (d.y0 - y) * 0.5
+      if (!e.shiftKey && Math.abs(db) < 1.2) db = 0
+      const v = Math.round(this.volOf(db) * 1000) / 1000
+      this.store.live(pr => {
+        if (d.type === 'clip') { const c = pr.clips.find(q => q.id === d.id); if (c) c.volume = v }
+        else if (d.type === 'overlay') { const o = pr.overlays?.find(q => q.id === d.id); if (o) o.volume = v }
+        else if (pr.music) pr.music.volume = v
+      })
+      if (this.gainShow) this.gainShow.vol = v
+      return
+    }
 
     if (d.k === 'ovc') {
       const dt = (x - d.x0) / this.pps, y = this.mouse.y
@@ -392,7 +455,7 @@ export class Timeline {
     this.snapAt = null
     this.player.override = null
     if (d.k === 'ovc') { this.extra = null; this.store.live(pr => compactTracks(pr)) }   // si una pista quedó vacía, desaparece
-    if (d.k === 'trim' || d.k === 'ov' || d.k === 'ovc') this.store.endTx()
+    if (d.k === 'trim' || d.k === 'ov' || d.k === 'ovc' || d.k === 'gain') this.store.endTx()
     if (d.k === 'clip') this.extra = null
     if (d.k === 'clip' && d.moved && d.up) {
       const start = Math.max(0, this.magnet(d.start0 + (this.mouse.x - d.x0) / this.pps)); this.snapAt = null
@@ -529,6 +592,8 @@ export class Timeline {
       c.fillStyle = '#ff4d4d'
       c.beginPath(); c.moveTo(ph - 6, 0); c.lineTo(ph + 6, 0); c.lineTo(ph, 10); c.closePath(); c.fill()
     }
+
+    this.drawGain()
 
     // pistas bloqueadas: rayado diagonal sobre la fila
     for (const r of this.rowList()) if (this.ts(r.key).locked) {
