@@ -172,7 +172,7 @@ export class Player {
   setRate(r: number) {
     const t = this.time()
     this.rate = r
-    this.ensureStretched(r === 1 ? [] : [1.5, 2, 3].filter(x => x !== r))     // el elegido primero; los demás quedan listos para el siguiente toque
+    this.ensureStretched(r === 1 ? [] : [1.5, 2].filter(x => x !== r))     // el elegido primero; los demás quedan listos para el siguiente toque
     if (this.playing) this.scheduleAudio(t)
   }
 
