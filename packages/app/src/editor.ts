@@ -778,6 +778,7 @@ export async function bootEditor(slug: string) {
   renderInspector()
 
   // --- bucle principal ---------------------------------------------------------
+  player.onSeek = t => tl.reveal(t)
   const timeEl = $('time'), statsEl = $('stats')
   let n = 0, shownPlaying = false
   function frame() {

@@ -427,6 +427,15 @@ export class Timeline {
     }
   }
 
+  /** Tras un salto del cabezal (botones, flechas): repinta ya y, si quedó fuera de la vista, desplaza la línea de tiempo para que se vea. */
+  reveal(t: number) {
+    const px = this.t2x(t)
+    if (px < LEFT + 24 || px > this.w - 60) {
+      const max = Math.max(0, this.total() * this.pps + 160 - (this.w - LEFT))
+      this.scrollX = Math.min(Math.max(0, t * this.pps - (this.w - LEFT) * 0.3), max)
+    }
+    this.dirty = true
+  }
   private onWheel(e: WheelEvent) {
     e.preventDefault()
     if (e.ctrlKey || e.metaKey) this.zoom(Math.exp(-e.deltaY * 0.01), this.pos(e).x)

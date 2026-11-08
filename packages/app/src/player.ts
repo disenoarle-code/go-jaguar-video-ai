@@ -63,6 +63,8 @@ export class Player {
   private pumping = false
   fps = { shown: 0, last: performance.now(), n: 0 }
   onTime: (t: number) => void = () => {}
+  /** Se llama al mover el cabezal con seek() (botones, flechas, clic en la línea de tiempo). */
+  onSeek: (t: number) => void = () => {}
 
   constructor(canvas: HTMLCanvasElement, private store: Store) {
     this.canvas = canvas
@@ -147,6 +149,7 @@ export class Player {
     if (this.playing) this.scheduleAudio(this.playhead)
     this.dirty = true
     this.onTime(this.playhead)
+    this.onSeek(this.playhead)
   }
 
   async play() {
