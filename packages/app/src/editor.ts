@@ -169,6 +169,20 @@ export async function bootEditor(slug: string) {
   // --- barra de herramientas ---------------------------------------------------
   const sel = () => store.selection
   $('play').onclick = () => player.toggle()
+  // pantalla completa: solo el video (Esc para salir; Espacio, ←/→ y clic funcionan)
+  const wrap = player.canvas.parentElement as HTMLElement
+  // Pantalla completa real del navegador; si el navegador no la permite (p. ej. el panel integrado), se simula cubriendo toda la ventana.
+  const salirPantalla = () => { wrap.classList.remove('pseudo-fs'); if (document.fullscreenElement) void document.exitFullscreen().catch(() => {}); player.pantalla = false; player.dirty = true; $('fullscreen').title = 'Pantalla completa (F)' }
+  const pantallaCompleta = async () => {
+    if (player.pantalla) { salirPantalla(); return }
+    player.pantalla = true; player.dirty = true; $('fullscreen').title = 'Salir de pantalla completa (Esc)'
+    // el panel integrado puede ignorar la pantalla completa real sin avisar: si en medio segundo no pasó, se simula
+    try { await Promise.race([wrap.requestFullscreen(), new Promise<void>(r => setTimeout(r, 500))]) } catch { /* se simula abajo */ }
+    if (!document.fullscreenElement && player.pantalla) wrap.classList.add('pseudo-fs')
+  }
+  $('fullscreen').onclick = () => { void pantallaCompleta() }
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && player.pantalla && !wrap.classList.contains('pseudo-fs')) salirPantalla() })
+  window.addEventListener('keydown', ev => { if (ev.key === 'Escape' && player.pantalla) salirPantalla() })
   // inicio · atrás 5 s · play · más rápido · final
   const RATES = [1, 1.5, 2]
   const fmtRate = (r: number) => `${String(r).replace('.', ',')}×`
@@ -233,10 +247,11 @@ export async function bootEditor(slug: string) {
     else if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? store.redo() : store.undo() }
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'j') $('prevclip').click()
     else if (!mod && !e.altKey && e.key.toLowerCase() === 'l') $('fast').click()
+    else if (!mod && !e.altKey && e.key.toLowerCase() === 'f') $('fullscreen').click()
     else if (e.key === 'Home') { e.preventDefault(); $('tostart').click() }
     else if (e.key === 'End') { e.preventDefault(); $('toend').click() }
-    else if (e.key === 'ArrowLeft') player.seek(player.playhead - 1 / 30)
-    else if (e.key === 'ArrowRight') player.seek(player.playhead + 1 / 30)
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); e.shiftKey ? player.seek(player.time() - 1 / 30) : $('prevclip').click() }     // ← clip anterior · Mayús+← un cuadro atrás
+    else if (e.key === 'ArrowRight') { e.preventDefault(); e.shiftKey ? player.seek(player.time() + 1 / 30) : $('nextclip').click() }   // → clip siguiente · Mayús+→ un cuadro adelante
   })
 
   // --- arrastrar gráficos/subtítulos directamente sobre el video ---------------
@@ -254,6 +269,7 @@ export async function bootEditor(slug: string) {
     return s?.type === 'layer' ? visibleOverlays(store.project, player.time()).find(l => l.id === s.id) : undefined
   }
   cv.addEventListener('mousedown', e => {
+    if (player.pantalla) { player.toggle(); return }      // a pantalla completa: tocar el video = play / pausa
     const m = toVideo(e), L = capaVisible()
     if (L) {
       const g = geomOf(player.ctx, L), a = hitAsa(g, m.x, m.y)

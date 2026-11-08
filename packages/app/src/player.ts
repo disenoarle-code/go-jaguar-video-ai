@@ -26,6 +26,8 @@ export class Player {
   playing = false
   /** Velocidad de reproducción de la vista previa (1, 1,5, 2…): solo al ver; no cambia la edición ni la exportación. El audio sube de tono, como al adelantar. */
   rate = 1
+  /** Pantalla completa (real o simulada): se ve solo el video, sin cajas de edición. */
+  pantalla = false
   dirty = true
 
   private t0 = 0
@@ -306,8 +308,9 @@ export class Player {
     const sel = this.store.selection
     const tr = this.store.project.tracks
     const proj = tr?.subtitle?.hidden || tr?.graphic?.hidden ? { ...this.store.project, layers: this.store.project.layers.filter(l => !tr?.[l.type]?.hidden) } : this.store.project
-    drawOverlays(this.ctx, proj, t, sel?.type === 'layer' ? sel.id : null)
-    const vg = this.videoGeom(); if (vg) dibujarAsas(this.ctx, vg.geom, 'video')
+    const pantallaCompleta = this.pantalla       // a pantalla completa se ve solo el video: sin cajas ni asas de edición
+    drawOverlays(this.ctx, proj, t, !pantallaCompleta && sel?.type === 'layer' ? sel.id : null)
+    const vg = pantallaCompleta ? null : this.videoGeom(); if (vg) dibujarAsas(this.ctx, vg.geom, 'video')
     this.fps.n++
     const now = performance.now()
     if (now - this.fps.last > 1000) { this.fps.shown = this.fps.n; this.fps.n = 0; this.fps.last = now }
