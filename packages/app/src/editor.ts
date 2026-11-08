@@ -1,5 +1,5 @@
 import {
-  Store, describe, duration, exec, execBatch, layout, parseProject, serialize, sincronizarPalabras,
+  CLIP_TRANSFORM_DEFAULT, Store, describe, formatoDe, duration, exec, execBatch, layout, locate, parseProject, serialize, sincronizarPalabras,
   TRANSITION_DEFAULTS, TRANSITION_KINDS, ZOOM_DEFAULTS, ZOOM_KINDS, type AssetInfo, type Cmd, type TransitionKind, type ZoomKind, type Project, type TextLayer,
 } from '@gojaguar/core'
 import { TRANSITION_INFO, ZOOM_INFO } from './fxinfo'
@@ -7,7 +7,7 @@ import { H, W } from './constants'
 import { ico } from './icons'
 import { runBench } from './bench'
 import { loadAsset } from './media'
-import { geomOf, guias, hitAsa, hitOverlay, transformEfectivo, visibleOverlays } from './overlays'
+import { aLocal, geomOf, guias, hitAsa, hitOverlay, transformEfectivo, visibleOverlays } from './overlays'
 import { Player } from './player'
 import { Timeline } from './timeline'
 
@@ -241,15 +241,70 @@ export async function bootEditor(slug: string) {
       }
     }
     const o = hitOverlay(player.ctx, store.project, player.time(), m.x, m.y)
-    if (!o) { store.select(null); return }
+    if (!o) { videoDown(m); return }
     store.select({ type: 'layer', id: o.id })
     store.beginTx()
     gesto = { kind: 'mover', id: o.id, m0: m, t0: transformEfectivo(geomOf(player.ctx, o), o), F0: geomOf(player.ctx, o).F, rot: 0, i: 0, movido: false }
   })
+  // --- mover / agrandar / girar el VIDEO seleccionado (pista principal o superpuesto) ---------
+  // Solo esquinas (tamaño, sin deformar) y asa de giro: un video no se estira por un lado.
+  type GestoV = { kind: 'mover' | 'escalar' | 'girar'; sel: { type: 'clip' | 'overlay'; id: string }; m0: { x: number; y: number }; F0: { x: number; y: number }; s0: number; r0: number; x0: number; y0: number; movido: boolean }
+  let gestoV: GestoV | null = null
+  const dentro = (g: ReturnType<typeof player.videoGeom>, m: { x: number; y: number }) => { if (!g) return false; const q = aLocal(g.geom, m.x, m.y), b = g.geom.b; return q.x >= b.x && q.x <= b.x + b.w && q.y >= b.y && q.y <= b.y + b.h }
+  function videoDown(m: { x: number; y: number }) {
+    let V = player.videoGeom()
+    const a = V ? hitAsa(V.geom, m.x, m.y) : null
+    if (V && a && (a.tipo === 'esquina' || a.tipo === 'girar')) {
+      store.beginTx()
+      gestoV = { kind: a.tipo === 'girar' ? 'girar' : 'escalar', sel: { type: V.kind, id: V.id }, m0: m, F0: V.geom.F, s0: V.scale, r0: V.rotation, x0: V.x, y0: V.y, movido: false }
+      return
+    }
+    if (!dentro(V, m)) {      // tocar el video sin tener su caja = seleccionar el clip que se ve ahora; fuera del video = quitar la selección
+      const loc = locate(store.project, player.time()), prev = store.selection
+      if (!loc || store.project.tracks?.main?.hidden) { store.select(null); return }
+      const cl = loc.placed.clip
+      store.select({ type: 'clip', id: cl.id }); V = player.videoGeom()
+      if (!V || !dentro(V, m)) { if (prev) store.select(null); return }
+    }
+    store.beginTx()
+    gestoV = { kind: 'mover', sel: { type: V!.kind, id: V!.id }, m0: m, F0: V!.geom.F, s0: V!.scale, r0: V!.rotation, x0: V!.x, y0: V!.y, movido: false }
+  }
+  window.addEventListener('mousemove', e => {
+    if (!gestoV) return
+    const G = gestoV, m = toVideo(e)
+    if (!G.movido && Math.hypot(m.x - G.m0.x, m.y - G.m0.y) < 2) return
+    G.movido = true
+    const nt: Partial<{ x: number; y: number; scale: number; rotation: number }> = {}
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
+    if (G.kind === 'mover') {
+      let cx = G.F0.x + (m.x - G.m0.x), cy = G.F0.y + (m.y - G.m0.y)
+      const thr = 8 * (W / cv.getBoundingClientRect().width)
+      guias.x = guias.y = false
+      if (!e.altKey) {      // imán al centro (Alt lo desactiva)
+        if (Math.abs(cx - W / 2) < thr) { cx = W / 2; guias.x = true }
+        if (Math.abs(cy - H / 2) < thr) { cy = H / 2; guias.y = true }
+      }
+      nt.x = cx / W; nt.y = cy / H
+    } else if (G.kind === 'escalar') nt.scale = clamp(G.s0 * (Math.hypot(m.x - G.F0.x, m.y - G.F0.y) / Math.max(Math.hypot(G.m0.x - G.F0.x, G.m0.y - G.F0.y), 8)), 0.1, 8)
+    else {
+      let r = G.r0 + ((Math.atan2(m.y - G.F0.y, m.x - G.F0.x) - Math.atan2(G.m0.y - G.F0.y, G.m0.x - G.F0.x)) * 180) / Math.PI
+      r = ((r + 180) % 360 + 360) % 360 - 180
+      const q = Math.round(r / 45) * 45; if (Math.abs(r - q) < 3) r = q                      // se pega a 0°, 45°, 90°…
+      nt.rotation = r
+    }
+    store.live(p => {
+      if (G.sel.type === 'clip') { const c = p.clips.find(q => q.id === G.sel.id); if (c) c.transform = { ...CLIP_TRANSFORM_DEFAULT, ...c.transform, ...nt } }
+      else { const o = p.overlays?.find(q => q.id === G.sel.id); if (o) o.transform = { ...o.transform, ...nt } }
+    })
+    player.dirty = true
+  })
+  window.addEventListener('mouseup', () => { if (gestoV) { store.endTx(); gestoV = null; guias.x = guias.y = false; player.dirty = true } })
   const CURSOR = ['ns-resize', 'ew-resize', 'ns-resize', 'ew-resize'], CURSOR_ESQ = ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize']
   cv.addEventListener('mousemove', e => {
-    if (gesto) return
+    if (gesto || gestoV) return
     const m = toVideo(e), L = capaVisible(), a = L ? hitAsa(geomOf(player.ctx, L), m.x, m.y) : null
+    const V = !L ? player.videoGeom() : null, av = V ? hitAsa(V.geom, m.x, m.y) : null
+    if (V) { cv.style.cursor = av?.tipo === 'girar' ? 'grab' : av?.tipo === 'esquina' ? CURSOR_ESQ[av.i] : dentro(V, m) ? 'move' : 'default'; return }
     cv.style.cursor = a ? (a.tipo === 'borrar' ? 'pointer' : a.tipo === 'girar' ? 'grab' : a.tipo === 'esquina' ? CURSOR_ESQ[a.i] : a.tipo === 'lado' ? CURSOR[a.i] : 'default') : hitOverlay(player.ctx, store.project, player.time(), m.x, m.y) ? 'move' : 'default'
   })
   window.addEventListener('mousemove', e => {
@@ -325,7 +380,34 @@ export async function bootEditor(slug: string) {
     m.style.left = Math.min(Math.max(8, cx - w / 2), window.innerWidth - w - 8) + 'px'
     m.style.top = Math.max(8, cy - h - 8) + 'px'
   }
-  window.addEventListener('mousedown', e => { if (cutMenu && !cutMenu.contains(e.target as Node)) closeCutMenu() }, true)
+  // --- relación de aspecto del video (formato del proyecto) ---------------------------------
+  const FORMATOS: [string, string, number, number][] = [['9:16', 'Vertical · TikTok, Reels, Shorts', 1080, 1920], ['16:9', 'Horizontal · YouTube', 1920, 1080], ['1:1', 'Cuadrado', 1080, 1080], ['4:5', 'Vertical · Instagram', 1080, 1350], ['4:3', 'Horizontal clásico', 1440, 1080]]
+  const aspectBtn = $('aspect')
+  const etiquetaFormato = () => { const f = store.project.format, r = f.width / f.height; return FORMATOS.find(x => Math.abs(x[2] / x[3] - r) < 0.01)?.[0] ?? `${f.width}×${f.height}` }
+  const updAspect = () => { aspectBtn.textContent = etiquetaFormato() }
+  updAspect()
+  aspectBtn.onclick = () => {
+    if (cutMenu?.dataset.aspect) { closeCutMenu(); return }
+    closeCutMenu()
+    const m = document.createElement('div'); m.className = 'cutmenu'; m.dataset.aspect = '1'
+    m.innerHTML = '<h4>Relación de aspecto</h4>'
+    const f = store.project.format
+    const poner = (w: number, h: number) => { exec(store, { op: 'set_format', width: w, height: h }); closeCutMenu() }
+    for (const [lab, desc, w, h] of FORMATOS) {
+      const b = document.createElement('button'); b.innerHTML = `<b>${lab}</b> · ${desc}`
+      if (Math.abs(f.width / f.height - w / h) < 0.01) b.classList.add('on')
+      b.onclick = () => poner(Math.abs(f.width / f.height - w / h) < 0.01 ? f.width : w, Math.abs(f.width / f.height - w / h) < 0.01 ? f.height : h)
+      m.append(b)
+    }
+    const v = store.project.assets.find(a => a.kind !== 'audio' && a.width > 0 && a.height > 0)
+    if (v) { const o = formatoDe(v.width, v.height, f.fps), b = document.createElement('button'); b.textContent = `Igual que el video (${o.width}×${o.height})`; b.onclick = () => poner(o.width, o.height); m.append(b) }
+    m.insertAdjacentHTML('beforeend', '<p class="hint">El video no se deforma nunca: se ajusta dentro del cuadro. Para llenarlo, selecciónalo y agrándalo.</p>')
+    document.body.append(m); cutMenu = m
+    const r = aspectBtn.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight
+    m.style.left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8) + 'px'
+    m.style.top = Math.max(8, r.top - h - 8) + 'px'
+  }
+  window.addEventListener('mousedown', e => { if (cutMenu && !cutMenu.contains(e.target as Node) && e.target !== aspectBtn) closeCutMenu() }, true)
   window.addEventListener('keydown', e => { if (e.key === 'Escape') closeCutMenu() })
 
   // --- inspector -----------------------------------------------------------------
@@ -386,8 +468,10 @@ export async function bootEditor(slug: string) {
     const esSub = lay?.type === 'subtitle'
     const listaSig = esSub && subTab === 'lista' ? p.layers.filter(l => l.type === 'subtitle').map(l => l.id + '\u0001' + l.text).join('\u0002') : ''
     if (esSub && subTab === 'lista' && lastKey.startsWith(`layer:${s!.id}:`) && insp.contains(document.activeElement) && (document.activeElement as HTMLElement).classList.contains('subtxt')) return   // no pisar lo que se está escribiendo
-    const keyFull = key + (esSub ? `:${subTab}:${listaSig}` : '')
+    const tk = clip ? [clip.transform?.x, clip.transform?.y, clip.transform?.scale, clip.transform?.rotation].map(v => v === undefined ? '' : Math.round(v * 100)).join(',') : ''
+    const keyFull = key + (esSub ? `:${subTab}:${listaSig}` : '') + (clip ? `:t${tk}` : '')
     if (keyFull === lastKey && key !== 'none') return
+    if (clip && lastKey.startsWith(`clip:${s!.id}:`) && insp.contains(document.activeElement) && /^(INPUT)$/.test((document.activeElement as HTMLElement).tagName) && lastKey.replace(/:t[^:]*$/, '') === keyFull.replace(/:t[^:]*$/, '')) return   // moviendo un deslizador de aquí: no reconstruir el panel
     if (lastKey.startsWith('overlay') && key.startsWith('overlay') && insp.contains(document.activeElement)) return   // no pisar lo que se está escribiendo
     if (key === 'none' && lastKey === 'none') { updatePool(); return }
     lastKey = keyFull
@@ -409,6 +493,23 @@ export async function bootEditor(slug: string) {
         insp.append(l, el)
       }
       const pct = (n: number) => `${Math.round(n * 100)} %`, sec = (n: number) => `${n.toFixed(2).replace(/\.?0+$/, '')} s`
+
+      // ---- POSICIÓN Y TAMAÑO del video (se mueve, agranda y gira SIN deformarlo; también con las asas sobre el video) ----
+      section('Posición y tamaño')
+      const T = (pr: Project) => ({ ...CLIP_TRANSFORM_DEFAULT, ...C(pr).transform })
+      const setT = (pr: Project, patch: Partial<typeof CLIP_TRANSFORM_DEFAULT>) => { C(pr).transform = { ...T(pr), ...patch } }
+      const tf = { ...CLIP_TRANSFORM_DEFAULT, ...clip.transform }
+      slider('Tamaño', tf.scale, 0.1, 4, 0.01, pct, (pr, n) => setT(pr, { scale: n }))
+      slider('Giro', tf.rotation, -180, 180, 1, n => `${Math.round(n)}°`, (pr, n) => setT(pr, { rotation: n }))
+      slider('Posición horizontal', tf.x, -0.5, 1.5, 0.01, pct, (pr, n) => setT(pr, { x: n }))
+      slider('Posición vertical', tf.y, -0.5, 1.5, 0.01, pct, (pr, n) => setT(pr, { y: n }))
+      const rowT = document.createElement('div'); rowT.className = 'row'; rowT.style.cssText = 'display:flex;gap:6px;margin:6px 0 2px'
+      const bFit = document.createElement('button'); bFit.textContent = 'Ajustar al cuadro'; bFit.title = 'El video entero dentro del cuadro, centrado y sin giro'
+      bFit.onclick = () => exec(store, { op: 'set_clip_transform', clip: id, transform: null })
+      const bFill = document.createElement('button'); bFill.textContent = 'Llenar el cuadro'; bFill.title = 'Agranda el video hasta cubrir todo el cuadro (recorta lo que sobra, sin deformar)'
+      bFill.onclick = () => { const cover = (() => { const a = store.asset(clip.assetId); const fw = a?.width || 16, fh = a?.height || 9, k = Math.min(W / fw, H / fh); return Math.max(W / (fw * k), H / (fh * k)) })(); exec(store, { op: 'set_clip_transform', clip: id, transform: { x: 0.5, y: 0.5, rotation: 0, scale: Math.round(cover * 1000) / 1000 } }) }
+      rowT.append(bFit, bFill); insp.append(rowT)
+      insp.insertAdjacentHTML('beforeend', '<p class="hint">También: toca el video y arrastra para moverlo, las esquinas para agrandarlo y el círculo de abajo para girarlo. La forma del video nunca se deforma.</p>')
 
       // ---- EFECTO (por ahora el único efecto es el Zoom; aquí irán los demás) ----
       section('Efecto')
@@ -461,6 +562,7 @@ export async function bootEditor(slug: string) {
       field('Inicio (s)', input('number', ov.start.toFixed(2), (pr, v) => { O(pr).start = Math.max(0, parseFloat(v) || 0) }, { step: '0.1', min: '0' }))
       if (ov.kind === 'video') {
         field('Tamaño', input('range', ov.transform.scale, (pr, v) => { O(pr).transform.scale = parseFloat(v) }, { min: '0.1', max: '2', step: '0.01' }))
+        field('Giro', input('range', ov.transform.rotation || 0, (pr, v) => { O(pr).transform.rotation = parseFloat(v) }, { min: '-180', max: '180', step: '1' }))
         field('Posición horizontal', input('range', ov.transform.x, (pr, v) => { O(pr).transform.x = parseFloat(v) }, { min: '0', max: '1', step: '0.01' }))
         field('Posición vertical', input('range', ov.transform.y, (pr, v) => { O(pr).transform.y = parseFloat(v) }, { min: '0', max: '1', step: '0.01' }))
         field('Opacidad', input('range', ov.transform.opacity, (pr, v) => { O(pr).transform.opacity = parseFloat(v) }, { min: '0', max: '1', step: '0.05' }))
@@ -632,7 +734,7 @@ export async function bootEditor(slug: string) {
     }
     poolSig = ''; updatePool()
   }
-  store.onChange(() => { renderInspector(); tl.dirty = true; player.dirty = true })
+  store.onChange(() => { renderInspector(); updAspect(); tl.dirty = true; player.dirty = true })
   renderInspector()
 
   // --- bucle principal ---------------------------------------------------------

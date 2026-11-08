@@ -2,9 +2,9 @@ import { MIN_DUR, clipDur, compactTracks, duration, freeTrack, layout, overlayDu
 import { LIMITS, TRANSITION_DEFAULTS, ZOOM_DEFAULTS } from './fx'
 import type { Store } from './store'
 import {
-  DEFAULT_TRANSFORM, isTextLayer,
+  CLIP_TRANSFORM_DEFAULT, DEFAULT_TRANSFORM, isTextLayer,
   TRANSITION_KINDS, ZOOM_KINDS,
-  type AssetInfo, type Clip, type Layer, type Project, type TextLayer, type Transform, type Transition, type ZoomFx,
+  type AssetInfo, type Clip, type ClipTransform, type Layer, type Project, type TextLayer, type Transform, type Transition, type ZoomFx,
 } from './types'
 
 /** Capa nueva sin id; el transform puede ser parcial. */
@@ -26,6 +26,7 @@ export type Cmd =
   | { op: 'set_track'; track: string; locked?: boolean; hidden?: boolean; muted?: boolean }
   | { op: 'set_zoom'; clip: string; zoom: ZoomFx | null }
   | { op: 'set_transition'; clip: string; transition: Transition | null }
+  | { op: 'set_clip_transform'; clip: string; transform: Partial<ClipTransform> | null }
   | { op: 'set_music'; asset: string; src_in?: number; volume?: number; fade_out?: number }
   | { op: 'clear_music' }
   | { op: 'set_format'; width: number; height: number; fps?: number }
@@ -190,6 +191,15 @@ function apply(store: Store, p: Project, cmd: Cmd): string {
       c.zoom = { kind: cmd.zoom.kind, amount: clamp(cmd.zoom.amount ?? d.amount, ...LIMITS.zoomAmount),
         ...(cmd.zoom.kind === 'punch' ? { duration: clamp(cmd.zoom.duration ?? d.duration ?? 0.35, ...LIMITS.zoomDuration) } : {}) }
       return `${c.id} zoom ${c.zoom.kind} ${Math.round(c.zoom.amount * 100)}%`
+    }
+    case 'set_clip_transform': {
+      const c = p.clips.find(x => x.id === cmd.clip)
+      if (!c) return 'clip no encontrado'
+      if (!cmd.transform) { delete c.transform; return `clip ${c.id}: video ajustado y centrado` }
+      const t = { ...CLIP_TRANSFORM_DEFAULT, ...c.transform, ...cmd.transform }
+      t.x = clamp(t.x, -1, 2); t.y = clamp(t.y, -1, 2); t.scale = clamp(t.scale, 0.05, 8); t.rotation = ((t.rotation + 180) % 360 + 360) % 360 - 180
+      if (t.x === 0.5 && t.y === 0.5 && t.scale === 1 && t.rotation === 0) delete c.transform; else c.transform = t
+      return `clip ${c.id}: video x${f2(t.x)} y${f2(t.y)} tamaño ${f2(t.scale)} giro ${f2(t.rotation)}°`
     }
     case 'set_transition': {
       // `clip` es el clip que ENTRA; la transición también es la salida del anterior

@@ -104,13 +104,17 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
   for (const [i, pl] of placed.entries()) {
     const c = pl.clip, D = pl.end - pl.start, file = await srcOf(c.assetId)
     const k = addInput(c.srcIn, (c.srcOut - c.srcIn) + 0.3, file)
-    const fx = fxExpr(c, placed[i + 1]?.clip, D, fps)
+    const fx = fxExpr(c, placed[i + 1]?.clip, D, fps), tf = c.transform
     if (!ts('main').hidden) {
     const eq = fx.flash ? `,eq=brightness='${fx.flash}':eval=frame` : ''
     const gpx = fx.glitch ? Math.max(2, Math.round(fx.glitch.amt * 0.04 * W)) : 0       // separación de color en px de salida (igual que la vista previa: 4 % del ancho × intensidad)
     const gl = fx.glitch ? `,format=gbrp,rgbashift=rh=-${gpx}:bh=${gpx}:enable='lt(t,${num(fx.glitch.dur)})',format=yuv420p` : ''
     vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(c.speed)},fps=${fps},scale=${2 * W}:${2 * H}:force_original_aspect_ratio=decrease,pad=${2 * W}:${2 * H}:(ow-iw)/2:(oh-ih)/2:black,`
-      + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps}${eq}${gl},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v${i}]`)
+      + `zoompan=z='${fx.z}':x='${fx.x}':y='${fx.y}':d=1:s=${W}x${H}:fps=${fps}${eq}${gl},trim=duration=${num(D)},setpts=PTS-STARTPTS,setsar=1,format=yuv420p${tf ? `,scale=w='trunc(iw*${num(tf.scale)}/2)*2':h='trunc(ih*${num(tf.scale)}/2)*2',rotate=a=${num(tf.rotation * Math.PI / 180)}:ow=${W}:oh=${H}:c=black,setsar=1` : ''}[${tf ? 'vt' : 'v'}${i}]`)
+    if (tf) {     // el video movido/agrandado/girado se pone sobre negro en su posición (igual que la vista previa: el cuadro entero se transforma alrededor de su centro)
+      vf.push(`color=c=black:s=${W}x${H}:r=${fps}:d=${num(D)}[kb${i}]`)
+      vf.push(`[kb${i}][vt${i}]overlay=x=${num((tf.x - 0.5) * W)}:y=${num((tf.y - 0.5) * H)}:eof_action=pass,format=yuv420p,setsar=1[v${i}]`)
+    }
     vlabels.push(`[v${i}]`)
     }
     if (!ts('main').muted && c.volume > 0 && await hasAudio(file)) audio.push(`[${k}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(c.speed)},volume=${num(c.volume)},atrim=0:${num(D)},adelay=${Math.round(pl.start * 1000)}:all=1[ac${i}]`)
@@ -136,7 +140,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
     } else if (o.kind === 'video' && !ts('v' + o.track).hidden) {
       const R = `(min(W,H)*0.06)`
       const round = `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(abs(X-W/2)-(W/2-${R}),0)*gt(abs(Y-H/2)-(H/2-${R}),0)*gt(hypot(abs(X-W/2)-(W/2-${R}),abs(Y-H/2)-(H/2-${R})),${R}),0,255)'`
-      vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${round},colorchannelmixer=aa=${num(o.transform.opacity)}[ov${j}]`)
+      vf.push(`[${k}:v]setpts=(PTS-STARTPTS)/${num(o.speed)}+${num(o.start)}/TB,fps=${fps},scale=w='trunc(min(${W}/iw,${H}/ih)*iw*${num(o.transform.scale)}/2)*2':h=-2,format=rgba,${round},colorchannelmixer=aa=${num(o.transform.opacity)}${o.transform.rotation ? `,rotate=a=${num(o.transform.rotation * Math.PI / 180)}:ow='rotw(${num(o.transform.rotation * Math.PI / 180)})':oh='roth(${num(o.transform.rotation * Math.PI / 180)})':c=none` : ''}[ov${j}]`)
       vf.push(`[${cur}][ov${j}]overlay=x='${num(W * o.transform.x)}-w/2':y='${num(H * o.transform.y)}-h/2':eof_action=pass:enable='between(t,${num(o.start)},${num(o.start + D)})'[b${j + 1}]`)
       cur = `b${j + 1}`
     }

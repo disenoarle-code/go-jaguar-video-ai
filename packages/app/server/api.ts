@@ -17,7 +17,7 @@ import path from 'node:path'
 import { analizarRitmo, type Ritmo } from './ritmo'
 import { activeExport, cancelExport, getExport, startExport, type ExportOpts, type Exportado } from './exportar'
 import { fileURLToPath } from 'node:url'
-import { Store, createProject, exec, execBatch, serialize, type AssetInfo, type Cmd } from '@gojaguar/core'
+import { Store, createProject, exec, execBatch, formatoDe, serialize, type AssetInfo, type Cmd } from '@gojaguar/core'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const ROOT = path.resolve(process.env.GOJAGUAR_BIBLIOTECA ?? path.join(HERE, '../../../biblioteca'))
@@ -476,13 +476,16 @@ function newJob(slug: string, modo: 'recorte' | 'completa' = 'recorte', recomend
 const step = (job: Job, id: string) => job.steps.find(s => s.id === id)!
 
 async function probe(file: string) {
-  const r = await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,r_frame_rate:format=duration', '-of', 'json', file])
+  const r = await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,r_frame_rate:stream_side_data=rotation:stream_tags=rotate:format=duration', '-of', 'json', file])
   if (r.code !== 0) return null
   try {
     const j = JSON.parse(r.out)
     const s = j.streams?.[0]; if (!s) return null
     const [n, d] = String(s.r_frame_rate).split('/').map(Number)
-    return { width: s.width as number, height: s.height as number, fps: Math.round((n / (d || 1)) * 1000) / 1000 || 30, duration: Number(j.format.duration) }
+    // los videos del celular vienen "acostados" con una marca de rotación: el tamaño que se ve es el girado (vertical = 2160×3840, no 3840×2160)
+    const rot = Math.abs(Number(s.side_data_list?.find((d: { rotation?: number }) => d.rotation !== undefined)?.rotation ?? s.tags?.rotate ?? 0)) % 180
+    const girado = rot === 90
+    return { width: (girado ? s.height : s.width) as number, height: (girado ? s.width : s.height) as number, fps: Math.round((n / (d || 1)) * 1000) / 1000 || 30, duration: Number(j.format.duration) }
   } catch { return null }
 }
 
@@ -628,7 +631,7 @@ async function processProjectInner(job: Job) {
     // 4) edición base ---------------------------------------------------------------------------
     set('base', { state: 'running' })
     const first = assets[0]
-    const store = new Store(createProject(meta.name, { width: first.width, height: first.height, fps: Math.round(first.fps) || 30 }))
+    const store = new Store(createProject(meta.name, formatoDe(first.width, first.height, first.fps)))
     for (const a of assets) exec(store, { op: 'import_asset', asset: a })
     for (const a of assets) {
       const cmds: Cmd[] = keepSegments(a.duration, cuts.get(a.id) ?? []).map(([s, e]) => ({ op: 'add_clip', asset: a.id, src_in: s, src_out: e }))

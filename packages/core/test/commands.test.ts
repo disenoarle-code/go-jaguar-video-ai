@@ -232,3 +232,15 @@ suite('sincronizarPalabras (cambiar el texto de un karaoke)', () => {
     expect(pal(s)).toEqual([['mundo', 2, 3], ['cruel', 3, 4]])
   })
 })
+
+suite('set_clip_transform', () => {
+  it('mueve, agranda y gira el video sin deformarlo; los valores por defecto limpian la transformación', () => {
+    const store = fresh(), id = store.project.clips[0].id
+    exec(store, { op: 'set_clip_transform', clip: id, transform: { scale: 1.5, rotation: 190, x: 0.4 } })
+    expect(store.project.clips[0].transform).toEqual({ x: 0.4, y: 0.5, scale: 1.5, rotation: -170 })
+    exec(store, { op: 'set_clip_transform', clip: id, transform: { scale: 99 } })
+    expect(store.project.clips[0].transform!.scale).toBe(8)
+    exec(store, { op: 'set_clip_transform', clip: id, transform: null })
+    expect(store.project.clips[0].transform).toBeUndefined()
+  })
+})

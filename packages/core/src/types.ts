@@ -28,6 +28,10 @@ export type TransitionKind = 'slide' | 'flash' | 'dip'
 export const TRANSITION_KINDS: TransitionKind[] = ['slide', 'flash', 'dip']
 export interface Transition { kind: TransitionKind; duration: number; intensity: number; dir?: 1 | -1 }
 
+/** Posición, tamaño y giro del VIDEO de un clip dentro del cuadro. x,y = centro normalizado (0..1); scale = tamaño relativo al ajuste normal (1 = cabe entero, sin deformar). Nunca estira por eje: la relación de aspecto del video no cambia. */
+export interface ClipTransform { x: number; y: number; scale: number; rotation: number }
+export const CLIP_TRANSFORM_DEFAULT: ClipTransform = { x: 0.5, y: 0.5, scale: 1, rotation: 0 }
+
 /** Tramo de un archivo fuente en la pista principal (magnética: sin huecos). */
 export interface Clip {
   id: string
@@ -35,6 +39,7 @@ export interface Clip {
   srcIn: number; srcOut: number   // segundos del archivo fuente
   speed: number; volume: number
   zoom?: ZoomFx
+  transform?: ClipTransform      // mover / agrandar / girar el video (sin deformarlo); ausente = ajustado y centrado
   transition?: Transition        // la del corte ANTES de este clip (entrada de este y salida del anterior)
 }
 
@@ -114,3 +119,9 @@ export function createProject(name = 'Proyecto sin título', format: Format = { 
 }
 
 export const DEFAULT_TRANSFORM: Transform = { x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }
+
+/** Formato de un proyecto según un video (ya con su giro): misma forma, con el lado corto como máximo 1080 para que editar y exportar sea ágil. */
+export function formatoDe(w: number, h: number, fps: number): Format {
+  const k = Math.min(1, 1080 / Math.min(w, h)), par = (n: number) => Math.max(2, Math.round((n * k) / 2) * 2)
+  return { width: par(w), height: par(h), fps: Math.round(fps) || 30 }
+}

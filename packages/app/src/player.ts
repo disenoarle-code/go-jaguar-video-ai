@@ -1,6 +1,6 @@
 import type { LoadedAsset } from './media'
-import { drawOverlays, setOverlayRedraw } from './overlays'
-import { duration, fxAt, layout, locate, overlayEnd, type FxState, type Store } from '@gojaguar/core'
+import { dibujarAsas, drawOverlays, setOverlayRedraw, type Geom } from './overlays'
+import { CLIP_TRANSFORM_DEFAULT, duration, fxAt, layout, locate, overlayEnd, type FxState, type Store } from '@gojaguar/core'
 import { H, W, setCanvasSize } from './constants'
 
 /**
@@ -31,6 +31,9 @@ export class Player {
   private nodes: AudioScheduledSourceNode[] = []
   private layer = new OffscreenCanvas(W, H)
   private glitchTmp: OffscreenCanvas | null = null
+  /** Tamaño (ya girado) del último fotograma dibujado de la pista principal y de cada video superpuesto: para las asas. */
+  private mainDims: { fw: number; fh: number } | null = null
+  private ovDims = new Map<string, { fw: number; fh: number }>()
   private layerCtx = this.layer.getContext('2d')!
   /** Música decodificada (por id de asset) y su envolvente para la línea de tiempo. */
   music = new Map<string, AudioBuffer>()
@@ -259,13 +262,19 @@ export class Player {
     } else {
       this.layerCtx.fillStyle = '#000'; this.layerCtx.fillRect(0, 0, W, H); this.layerKey = ''
     }
-    this.ctx.drawImage(this.layer, 0, 0)
+    const tf = loc?.placed.clip.transform
+    if (tf) {      // mover / agrandar / girar el video: todo el cuadro de la pista principal gira y se escala alrededor de su centro (el export hace lo mismo)
+      this.ctx.fillStyle = '#000'; this.ctx.fillRect(0, 0, W, H)
+      this.ctx.save(); this.ctx.translate(tf.x * W, tf.y * H); this.ctx.rotate((tf.rotation * Math.PI) / 180); this.ctx.scale(tf.scale, tf.scale); this.ctx.translate(-W / 2, -H / 2)
+      this.ctx.drawImage(this.layer, 0, 0); this.ctx.restore()
+    } else this.ctx.drawImage(this.layer, 0, 0)
     this.drawOverlayVideos(t)
     if (Math.abs(this.fx.flash) > 0.005) { this.ctx.fillStyle = this.fx.flash > 0 ? `rgba(255,255,255,${this.fx.flash})` : `rgba(0,0,0,${-this.fx.flash})`; this.ctx.fillRect(0, 0, W, H) }   // destello blanco o fundido a negro
     const sel = this.store.selection
     const tr = this.store.project.tracks
     const proj = tr?.subtitle?.hidden || tr?.graphic?.hidden ? { ...this.store.project, layers: this.store.project.layers.filter(l => !tr?.[l.type]?.hidden) } : this.store.project
     drawOverlays(this.ctx, proj, t, sel?.type === 'layer' ? sel.id : null)
+    const vg = this.videoGeom(); if (vg) dibujarAsas(this.ctx, vg.geom, 'video')
     this.fps.n++
     const now = performance.now()
     if (now - this.fps.last > 1000) { this.fps.shown = this.fps.n; this.fps.n = 0; this.fps.last = now }
@@ -283,8 +292,10 @@ export class Player {
       const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight
       const screen = o.blend === 'screen'      // luces: cubren todo el cuadro y suman su luz al video de abajo
       const k = (screen ? Math.max(W / fw, H / fh) : Math.min(W / fw, H / fh)) * o.transform.scale, w = fw * k, h = fh * k
+      this.ovDims.set(o.id, { fw, fh })
       const x = o.transform.x * W - w / 2, y = o.transform.y * H - h / 2
       this.ctx.save()
+      if (o.transform.rotation && !screen) { this.ctx.translate(o.transform.x * W, o.transform.y * H); this.ctx.rotate((o.transform.rotation * Math.PI) / 180); this.ctx.translate(-o.transform.x * W, -o.transform.y * H) }
       this.ctx.globalAlpha = o.transform.opacity
       if (screen) this.ctx.globalCompositeOperation = 'screen'
       else { this.ctx.beginPath(); this.ctx.roundRect(x, y, w, h, Math.min(w, h) * 0.06); this.ctx.clip() }
@@ -296,6 +307,7 @@ export class Player {
   /** Dibuja el frame ajustado al lienzo (sin deformar): videos verticales quedan con barras. */
   private blit(f: VideoFrame) {
     const fw = f.displayWidth || f.codedWidth, fh = f.displayHeight || f.codedHeight
+    this.mainDims = { fw, fh }
     const k = Math.min(W / fw, H / fh), z = this.fx.zoom, w = fw * k * z, h = fh * k * z
     this.layerCtx.fillStyle = '#000'; this.layerCtx.fillRect(0, 0, W, H)
     const dx = this.fx.shift * (fw * k * (z - 1)) / 2   // el efecto "slide" desplaza la ventana de recorte
@@ -325,6 +337,28 @@ export class Player {
         this.dirty = true
       }
     } finally { this.pumping = false }
+  }
+
+  /**
+   * Caja del video seleccionado (clip de la pista principal o video superpuesto) en el lienzo, con su transformación:
+   * con ella se dibujan y se prueban las asas (esquinas = tamaño sin deformar, asa de arriba = giro, dentro = mover).
+   */
+  videoGeom(): { kind: 'clip' | 'overlay'; id: string; geom: Geom; x: number; y: number; scale: number; rotation: number; cover: number } | null {
+    const sel = this.store.selection, p = this.store.project, t = this.time()
+    if (sel?.type === 'clip') {
+      const loc = locate(p, t); if (!loc || loc.placed.clip.id !== sel.id || p.tracks?.main?.hidden || !this.mainDims) return null
+      const { fw, fh } = this.mainDims, k = Math.min(W / fw, H / fh), cw = fw * k, ch = fh * k, tf = { ...CLIP_TRANSFORM_DEFAULT, ...loc.placed.clip.transform }
+      const geom: Geom = { b: { x: W / 2 - cw / 2, y: H / 2 - ch / 2, w: cw, h: ch }, D: { x: W / 2, y: H / 2 }, F: { x: tf.x * W, y: tf.y * H }, rot: (tf.rotation * Math.PI) / 180, sx: tf.scale, sy: tf.scale, auto: false }
+      return { kind: 'clip', id: sel.id, geom, x: tf.x, y: tf.y, scale: tf.scale, rotation: tf.rotation, cover: Math.max(W / cw, H / ch) }
+    }
+    if (sel?.type === 'overlay') {
+      const o = p.overlays?.find(q => q.id === sel.id), d = o && this.ovDims.get(o.id)
+      if (!o || !d || o.kind !== 'video' || o.blend === 'screen' || p.tracks?.['v' + o.track]?.hidden || t < o.start || t >= overlayEnd(o)) return null
+      const k = Math.min(W / d.fw, H / d.fh), w = d.fw * k, h = d.fh * k, tr = o.transform, c = { x: tr.x * W, y: tr.y * H }
+      const geom: Geom = { b: { x: c.x - (w * tr.scale) / 2, y: c.y - (h * tr.scale) / 2, w: w * tr.scale, h: h * tr.scale }, D: c, F: c, rot: ((tr.rotation || 0) * Math.PI) / 180, sx: 1, sy: 1, auto: false }
+      return { kind: 'overlay', id: o.id, geom, x: tr.x, y: tr.y, scale: tr.scale, rotation: tr.rotation || 0, cover: Math.max(W / w, H / h) }
+    }
+    return null
   }
 
   /** Captura de la vista previa actual (para que Claude "mire" un frame). */

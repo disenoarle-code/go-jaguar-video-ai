@@ -102,7 +102,7 @@ const aCanvas = (g: Geom, px: number, py: number): Pt => {
   const dx = (px - g.D.x) * g.sx, dy = (py - g.D.y) * g.sy, c = Math.cos(g.rot), s = Math.sin(g.rot)
   return { x: g.F.x + dx * c - dy * s, y: g.F.y + dx * s + dy * c }
 }
-const aLocal = (g: Geom, x: number, y: number): Pt => {
+export const aLocal = (g: Geom, x: number, y: number): Pt => {
   const dx = x - g.F.x, dy = y - g.F.y, c = Math.cos(-g.rot), s = Math.sin(-g.rot)
   return { x: g.D.x + (dx * c - dy * s) / g.sx, y: g.D.y + (dx * s + dy * c) / g.sy }
 }
@@ -127,7 +127,7 @@ export function hitAsa(g: Geom, x: number, y: number): Asa | null {
   for (let i = 0; i < 4; i++) if (cerca(h.lados[i])) return { tipo: 'lado', i }
   return null
 }
-function dibujarAsas(ctx: CanvasRenderingContext2D, g: Geom) {
+export function dibujarAsas(ctx: CanvasRenderingContext2D, g: Geom, solo?: 'video') {
   const h = asasDe(g), r = h.r
   ctx.save(); ctx.setLineDash([]); ctx.lineJoin = 'round'; ctx.lineCap = 'round'
   ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = r * 0.5
@@ -136,13 +136,15 @@ function dibujarAsas(ctx: CanvasRenderingContext2D, g: Geom) {
   ctx.beginPath(); ctx.moveTo(h.lados[2].x, h.lados[2].y); ctx.lineTo(h.girar.x, h.girar.y); ctx.stroke()
   ctx.fillStyle = '#fff'
   for (const p of h.esq) { ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.8, 0, Math.PI * 2); ctx.fill() }
-  h.lados.forEach((p, i) => {                                       // barritas en el medio de cada lado, giradas con la caja
+  if (!solo) h.lados.forEach((p, i) => {                            // barritas en el medio de cada lado, giradas con la caja (un video NO se estira: solo esquinas y giro)
     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(g.rot + (i % 2 ? Math.PI / 2 : 0)); ctx.beginPath(); ctx.roundRect(-r * 0.95, -r * 0.32, r * 1.9, r * 0.64, r * 0.32); ctx.fill(); ctx.restore()
   })
   ctx.shadowBlur = 0
-  ctx.beginPath(); ctx.arc(h.borrar.x, h.borrar.y, r * 1.05, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill()        // borrar (×)
-  ctx.strokeStyle = '#333'; ctx.lineWidth = r * 0.22; const d = r * 0.4
-  ctx.beginPath(); ctx.moveTo(h.borrar.x - d, h.borrar.y - d); ctx.lineTo(h.borrar.x + d, h.borrar.y + d); ctx.moveTo(h.borrar.x + d, h.borrar.y - d); ctx.lineTo(h.borrar.x - d, h.borrar.y + d); ctx.stroke()
+  if (!solo) {
+    ctx.beginPath(); ctx.arc(h.borrar.x, h.borrar.y, r * 1.05, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill()        // borrar (×)
+    ctx.strokeStyle = '#333'; ctx.lineWidth = r * 0.22; const d = r * 0.4
+    ctx.beginPath(); ctx.moveTo(h.borrar.x - d, h.borrar.y - d); ctx.lineTo(h.borrar.x + d, h.borrar.y + d); ctx.moveTo(h.borrar.x + d, h.borrar.y - d); ctx.lineTo(h.borrar.x - d, h.borrar.y + d); ctx.stroke()
+  }
   ctx.beginPath(); ctx.arc(h.girar.x, h.girar.y, r * 1.05, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill()           // girar (↻)
   ctx.strokeStyle = '#333'; ctx.lineWidth = r * 0.2
   ctx.beginPath(); ctx.arc(h.girar.x, h.girar.y, r * 0.5, -Math.PI * 0.15, Math.PI * 1.45); ctx.stroke()
