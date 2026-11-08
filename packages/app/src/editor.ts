@@ -170,7 +170,7 @@ export async function bootEditor(slug: string) {
   const sel = () => store.selection
   $('play').onclick = () => player.toggle()
   // pantalla completa: solo el video (Esc para salir; Espacio, ←/→ y clic funcionan)
-  const wrap = player.canvas.parentElement as HTMLElement
+  const wrap = $('stage')      // pantalla completa de TODO el escenario: el video y, abajo, la barra de botones
   // Pantalla completa real del navegador; si el navegador no la permite (p. ej. el panel integrado), se simula cubriendo toda la ventana.
   const salirPantalla = () => { wrap.classList.remove('pseudo-fs'); if (document.fullscreenElement) void document.exitFullscreen().catch(() => {}); player.pantalla = false; player.dirty = true; $('fullscreen').title = 'Pantalla completa (F)' }
   const pantallaCompleta = async () => {
@@ -442,7 +442,7 @@ export async function bootEditor(slug: string) {
     const v = store.project.assets.find(a => a.kind !== 'audio' && a.width > 0 && a.height > 0)
     if (v) { const o = formatoDe(v.width, v.height, f.fps), b = document.createElement('button'); b.textContent = `Igual que el video (${o.width}×${o.height})`; b.onclick = () => poner(o.width, o.height); m.append(b) }
     m.insertAdjacentHTML('beforeend', '<p class="hint">El video no se deforma nunca: se ajusta dentro del cuadro. Para llenarlo, selecciónalo y agrándalo.</p>')
-    document.body.append(m); cutMenu = m
+    ;(document.fullscreenElement ?? document.body).append(m); cutMenu = m
     const r = aspectBtn.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight
     m.style.left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8) + 'px'
     m.style.top = Math.max(8, r.top - h - 8) + 'px'
