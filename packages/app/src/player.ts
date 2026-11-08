@@ -18,8 +18,11 @@ export class Player {
   /** Imágenes del proyecto (assets de tipo imagen), ya decodificadas. */
   images = new Map<string, ImageBitmap>()
   private lastFrame: VideoFrame | null = null
-  private pCv: OffscreenCanvas | null = null
-  private mCv: OffscreenCanvas | null = null
+  private pCv: HTMLCanvasElement | null = null
+  private mCv: HTMLCanvasElement | null = null
+  private personaDe = ''          // de qué video es la persona que quedó dibujada en pCv (para reusarla si falta un cuadro de la máscara)
+  /** Cuántas veces la persona se dibujó con un cuadro de máscara que aún no llegaba (diagnóstico). */
+  personaRetrasos = 0
   /** Audio estirado conservando el tono, por (asset, velocidad). */
   private stretched = new Map<string, AudioBuffer>()
   private computing = new Set<string>()
@@ -331,7 +334,7 @@ export class Player {
     const trk = this.store.project.tracks
     const projT = trk?.subtitle?.hidden || trk?.graphic?.hidden ? { ...this.store.project, layers: this.store.project.layers.filter(l => !trk?.[l.type]?.hidden) } : this.store.project
     const mt = loc && projT.layers.some(l => l.type === 'graphic' && l.props?.detras === '1' && t >= l.start && t < l.end) ? this.mattes.get(loc.placed.clip.assetId) : undefined
-    if (mt && loc) { drawOverlays(this.ctx, projT, t, null, 'detras'); this.dibujarPersona(mt, loc.srcTime, tf); capa = 'frente' }
+    if (mt && loc) { drawOverlays(this.ctx, projT, t, null, 'detras'); this.dibujarPersona(mt, loc.placed.clip.assetId, loc.srcTime, tf); capa = 'frente' }
     this.drawOverlayVideos(t)
     if (Math.abs(this.fx.flash) > 0.005) { this.ctx.fillStyle = this.fx.flash > 0 ? `rgba(255,255,255,${this.fx.flash})` : `rgba(0,0,0,${-this.fx.flash})`; this.ctx.fillRect(0, 0, W, H) }   // destello blanco o fundido a negro
     const sel = this.store.selection
@@ -345,24 +348,42 @@ export class Player {
     if (now - this.fps.last > 1000) { this.fps.shown = this.fps.n; this.fps.n = 0; this.fps.last = now }
   }
 
-  /** Dibuja SOLO la persona (el cuadro del video recortado con su máscara) con el mismo encuadre, color y movimiento que la pista principal. */
-  private dibujarPersona(mt: LoadedAsset, srcTime: number, tf?: { x: number; y: number; scale: number; rotation: number }) {
-    const f = this.lastFrame; if (!f) return
-    const idx = mt.source.idxAt(srcTime), mf = mt.source.peek(idx)
-    if (!mf) { void mt.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}); return }
-    const pc = (this.pCv = this.pCv && this.pCv.width === W && this.pCv.height === H ? this.pCv : new OffscreenCanvas(W, H)), mc = (this.mCv = this.mCv && this.mCv.width === W && this.mCv.height === H ? this.mCv : new OffscreenCanvas(W, H))
-    const g = pc.getContext('2d')!, mg = mc.getContext('2d')!
-    const caja = (fr: VideoFrame) => { const fw = fr.displayWidth || fr.codedWidth, fh = fr.displayHeight || fr.codedHeight, k = Math.min(W / fw, H / fh), z = this.fx.zoom, w = fw * k * z, h = fh * k * z; return { w, h, x: (W - w) / 2 - this.fx.shift * (fw * k * (z - 1)) / 2, y: (H - h) / 2 - this.fx.shiftY * (fh * k * (z - 1)) / 2 } }
-    g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, W, H); mg.clearRect(0, 0, W, H)
-    const a = caja(f), b = caja(mf)
-    g.filter = this.colorCss || 'none'
-    try { g.drawImage(f, a.x, a.y, a.w, a.h) } catch { return }
-    g.filter = 'none'
-    try { mg.drawImage(mf, b.x, b.y, b.w, b.h) } catch { return }
-    const im = mg.getImageData(0, 0, W, H), d = im.data
-    for (let i = 0; i < d.length; i += 4) d[i + 3] = d[i]          // la máscara es gris: su luz (rojo) pasa a ser la transparencia
-    mg.putImageData(im, 0, 0)
-    g.globalCompositeOperation = 'destination-in'; g.drawImage(mc, 0, 0); g.globalCompositeOperation = 'source-over'
+  /** Filtro SVG que convierte la luz del recorte (gris) en transparencia: lo hace la tarjeta gráfica, sin leer píxeles uno a uno. */
+  private filtroLuz() {
+    if (document.getElementById('gj-lum')) return
+    const d = document.createElement('div'); d.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden'
+    d.innerHTML = '<svg width="0" height="0"><filter id="gj-lum" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0"/></filter></svg>'
+    document.body.append(d)
+  }
+
+  /**
+   * Dibuja SOLO la persona (el cuadro del video recortado con su máscara) con el mismo encuadre, color y movimiento que la pista principal.
+   * Si el cuadro de la máscara todavía no llegó, se repite la persona anterior (nunca se deja el texto al frente un instante: eso se veía como parpadeo).
+   */
+  private dibujarPersona(mt: LoadedAsset, assetId: string, srcTime: number, tf?: { x: number; y: number; scale: number; rotation: number }) {
+    const f = this.lastFrame
+    const idx = mt.source.idxAt(srcTime)
+    if (this.playing) mt.source.prefetch(idx, 8)
+    const mf = mt.source.peek(idx)
+    const mk = (c: HTMLCanvasElement | null) => (c && c.width === W && c.height === H ? c : Object.assign(document.createElement('canvas'), { width: W, height: H }))
+    const pc = (this.pCv = mk(this.pCv)), mc = (this.mCv = mk(this.mCv))
+    let listo = this.personaDe === assetId
+    if (f && mf) {
+      this.filtroLuz()
+      const g = pc.getContext('2d')!, mg = mc.getContext('2d')!
+      const caja = (fr: VideoFrame) => { const fw = fr.displayWidth || fr.codedWidth, fh = fr.displayHeight || fr.codedHeight, k = Math.min(W / fw, H / fh), z = this.fx.zoom, w = fw * k * z, h = fh * k * z; return { w, h, x: (W - w) / 2 - this.fx.shift * (fw * k * (z - 1)) / 2, y: (H - h) / 2 - this.fx.shiftY * (fh * k * (z - 1)) / 2 } }
+      const a = caja(f), b = caja(mf)
+      g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, W, H); mg.clearRect(0, 0, W, H)
+      let ok = true
+      g.filter = this.colorCss || 'none'
+      try { g.drawImage(f, a.x, a.y, a.w, a.h) } catch { ok = false }
+      g.filter = 'none'
+      mg.filter = 'url(#gj-lum)'
+      try { mg.drawImage(mf, b.x, b.y, b.w, b.h) } catch { ok = false }
+      mg.filter = 'none'
+      if (ok) { g.globalCompositeOperation = 'destination-in'; g.drawImage(mc, 0, 0); g.globalCompositeOperation = 'source-over'; this.personaDe = assetId; listo = true }
+    } else if (!mf) { this.personaRetrasos++; void mt.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}) }
+    if (!listo) return
     if (tf) { this.ctx.save(); this.ctx.translate(tf.x * W, tf.y * H); this.ctx.rotate((tf.rotation * Math.PI) / 180); this.ctx.scale(tf.scale, tf.scale); this.ctx.translate(-W / 2, -H / 2); this.ctx.drawImage(pc, 0, 0); this.ctx.restore() }
     else this.ctx.drawImage(pc, 0, 0)
   }
