@@ -5,7 +5,7 @@ Uso:  python3 analizar-color.py <video> <inicio_s> <fin_s> [--json]
 Toma 7 cuadros repartidos entre inicio y fin (del proxy o del original), mide luz (media y extremos) y saturación, y busca el par (brillo, contraste)
 que acerca la imagen a una luz "bonita y natural": media ~0,50, sombras ~0,06 y luces ~0,93 sin quemar. La fórmula es LA MISMA del editor
 (brillo → contraste → saturación, canal por canal en RGB), así que lo que predice es lo que se verá.
-Después SIEMPRE mirar un cuadro antes/después (ver .claude/skills/guion-viral/SKILL.md, "Luces y color"): los números proponen, el ojo decide
+Después SIEMPRE mirar un cuadro antes/después (ver el paso `color` de .claude/skills/edicion-inicial/SKILL.md): los números proponen, el ojo decide
 (piel natural, cielo sin quemar, nada de colores exagerados).
 """
 import json, subprocess, sys

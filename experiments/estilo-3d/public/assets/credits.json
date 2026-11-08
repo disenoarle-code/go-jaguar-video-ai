@@ -1,0 +1,14 @@
+[
+ {
+  "set": "tabler",
+  "nombre": "perfume",
+  "licencia": "MIT",
+  "archivo": "tabler-perfume.svg"
+ },
+ {
+  "set": "iconoven",
+  "nombre": "free-shipping",
+  "licencia": "MIT",
+  "archivo": "iconoven-free-shipping.svg"
+ }
+]

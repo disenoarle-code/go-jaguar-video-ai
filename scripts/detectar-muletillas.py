@@ -7,7 +7,7 @@ Whisper NO escribe los "eh", "mmm", "eeee" (los limpia) y los alineadores los pe
 
 Uso:  python3 detectar-muletillas.py <audio.wav 16k mono> <palabras.json> [salida.json]
 Salida: [{tipo, a, b, texto, auto, motivo}] en segundos del archivo de origen. `auto: true` = se puede cortar sin duda; `auto: false` = REVISAR (puede ser énfasis o llevar sentido).
-Después de cortar: transcribir el audio final y volver a correr scripts/verificar-sincronia.py (ver .claude/skills/guion-viral/SKILL.md, sección "Muletillas").
+Después de cortar: transcribir el audio final y volver a correr scripts/verificar-sincronia.py (ver docs/guia/15-muletillas-y-tartamudeos-cortarlos-siemp.md).
 """
 import json, re, subprocess, sys
 import numpy as np

@@ -13,3 +13,7 @@ experiments/**/public/person/
 
 # La biblioteca (media lake) es local y pesada
 biblioteca/
+experiments/**/.cache/
+experiments/**/public/assets/modelos/
+experiments/**/public/assets/hdri/
+experiments/**/public/assets/texturas/
