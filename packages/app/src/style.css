@@ -360,3 +360,11 @@ header .grow { flex:1 1 0; min-width:0; }
 #stage:fullscreen #loading, #stage.pseudo-fs #loading { display:none; }
 #stage:fullscreen .player, #stage.pseudo-fs .player { padding:10px 12px 12px; background:#0b0b0a; }
 .cutmenu { z-index:300; }
+
+/* fotos: vistas CUADRADAS en cuadrícula de 3 columnas */
+.pool-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; margin-top:6px; }
+.pool-grid .pool-item { min-width:0; }
+.pcard.sq canvas { height:auto; aspect-ratio:1 / 1; }
+.pool-item.sq .pname { margin:3px 2px 2px; font-size:10.5px; }
+.pcard.sq .pdur { top:auto; bottom:5px; right:auto; left:6px; font-size:9.5px; }
+.pcard.sq .pbadge { font-size:9px; padding:0 5px; }

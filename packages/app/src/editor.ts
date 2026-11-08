@@ -813,16 +813,19 @@ export async function bootEditor(slug: string) {
     const q = poolQuery.trim().toLowerCase(), u = used()
     const items = store.project.assets.filter(a => (!q || a.name.toLowerCase().includes(q)) && (poolFilter === 'todo' || (poolFilter === 'audio' ? a.kind === 'audio' : poolFilter === 'imagen' ? a.kind === 'image' : a.kind !== 'audio' && a.kind !== 'image')))
     if (!items.length) list.innerHTML = `<p class="hint">${store.project.assets.length ? 'Sin resultados.' : 'Aún no hay archivos. Pulsa Importar.'}</p>`
-    for (const a of items) {
-      const box = document.createElement('div'); box.className = 'pool-item'
-      const card = document.createElement('div'); card.className = 'pcard'; card.draggable = true
-      const cv = document.createElement('canvas'); cv.width = 640; cv.height = 112; card.append(cv)
+    let grid: HTMLElement | null = null
+    for (const a of [...items.filter(x => x.kind !== 'image'), ...items.filter(x => x.kind === 'image')]) {
+      const foto = a.kind === 'image'
+      if (foto && !grid) { grid = document.createElement('div'); grid.className = 'pool-grid'; list.append(grid) }      // las fotos van en cuadrícula de vistas cuadradas
+      const box = document.createElement('div'); box.className = foto ? 'pool-item sq' : 'pool-item'
+      const card = document.createElement('div'); card.className = foto ? 'pcard sq' : 'pcard'; card.draggable = true
+      const cv = document.createElement('canvas'); cv.width = foto ? 256 : 640; cv.height = foto ? 256 : 112; card.append(cv)
       card.insertAdjacentHTML('beforeend', `${u.has(a.id) ? '<span class="pbadge">Agregado</span>' : ''}<span class="pdur">${a.kind === 'image' ? 'Foto' : mmss(a.duration)}</span><button class="padd" title="Agregar en el cabezal">+</button>`)
       card.querySelector<HTMLElement>('.padd')!.onclick = e => { e.stopPropagation(); addAt(a) }
       card.ondragstart = ev => { ev.dataTransfer!.setData('text/gojaguar-asset', a.id); ev.dataTransfer!.effectAllowed = 'copy'; tl.showDropLane(a.kind === 'audio' ? 'audio' : 'video') }
       card.ondragend = () => tl.showDropLane(null)
       box.append(card); box.insertAdjacentHTML('beforeend', `<div class="pname" title="${a.name.replace(/["<&]/g, '')}">${a.name.replace(/[<&]/g, '')}</div>`)
-      list.append(box); drawCard(cv, a)
+      ;(foto ? grid! : list).append(box); drawCard(cv, a)
     }
   }
   const poolSignature = () => JSON.stringify([store.project.assets.map(a => a.id), [...used()].sort(), poolQuery, poolFilter])
@@ -898,12 +901,14 @@ export async function bootEditor(slug: string) {
       const btn = ev.currentTarget as HTMLButtonElement, note = insp.querySelector<HTMLElement>('#p-note')!
       btn.disabled = true; btn.innerHTML = 'Elige los archivos…'
       try {
-        await fetch(`/api/proyectos/${slug}/material/elegir`, { method: 'POST' }).then(r => r.json())
+        const el = await fetch(`/api/proyectos/${slug}/material/elegir`, { method: 'POST' }).then(r => r.json())
+        const ignorados: string[] = el.ignorados ?? []
         btn.innerHTML = 'Preparando…'
         const r = await fetch(`/api/proyectos/${slug}/preparar`, { method: 'POST' }).then(r => r.json())
         if (r.error) throw new Error(r.error)
         if (r.assets.length) { execBatch(store, r.assets.map((a: AssetInfo) => ({ op: 'import_asset', asset: a }) as Cmd)); await loadMedia() }
-        note.textContent = r.omitidos.length ? `No se pudieron preparar: ${r.omitidos.join(', ')} (formato no compatible).` : ''
+        const malos = [...ignorados, ...r.omitidos]
+        note.textContent = malos.length ? `No se pudieron usar: ${malos.join(', ')} (formato no compatible).` : ''
       } catch (e) { note.textContent = (e as Error).message }
       btn.disabled = false; btn.innerHTML = '<b>+</b> Importar'
       poolSig = ''; updatePool()

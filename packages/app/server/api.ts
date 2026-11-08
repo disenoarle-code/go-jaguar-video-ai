@@ -27,7 +27,7 @@ const REFS = path.join(ROOT, 'referencias')
 const MODEL = process.env.GOJAGUAR_WHISPER_MODEL ?? path.join(os.homedir(), '.whisper-models', 'ggml-medium.bin')
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi'])
 const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.aiff', '.aif'])
-const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.gif', '.bmp', '.tif', '.tiff'])
+const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.jfif', '.png', '.webp', '.avif', '.heic', '.heif', '.gif', '.bmp', '.tif', '.tiff'])
 type Tipo = 'video' | 'audio' | 'imagen'
 const tipoDe = (n: string): Tipo | null => { const e = path.extname(n).toLowerCase(); return VIDEO_EXT.has(e) ? 'video' : AUDIO_EXT.has(e) ? 'audio' : IMAGE_EXT.has(e) ? 'imagen' : null }
 const MIME: Record<string, string> = { '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wav': 'audio/wav', '.jpg': 'image/jpeg', '.m4a': 'audio/mp4', '.mp3': 'audio/mpeg', '.png': 'image/png' }
@@ -272,9 +272,9 @@ async function linkMaterial(slug: string, rutas: string[]) {
   const meta = (await loadMeta(slug))!
   meta.material ??= []
   const usados = new Set((await listMaterial(slug)).map(f => f.stem))
-  const agregados: string[] = []
+  const agregados: string[] = [], ignorados: string[] = []
   for (const ruta of rutas) {
-    if (!path.isAbsolute(ruta) || !isMaterialName(ruta)) continue
+    if (!path.isAbsolute(ruta) || !isMaterialName(ruta)) { if (ruta) ignorados.push(path.basename(ruta)); continue }       // nunca se descarta nada en silencio: se avisa cuáles no son compatibles
     const st = await fsp.stat(ruta).catch(() => null); if (!st?.isFile()) continue
     if (meta.material.some(r => r.ruta === ruta)) continue
     let stem = stemOf(ruta), i = 2; const base = stem
@@ -284,6 +284,7 @@ async function linkMaterial(slug: string, rutas: string[]) {
     agregados.push(path.basename(ruta))
   }
   await writeJson(path.join(projDir(slug), 'proyecto.json'), meta)
+  Object.assign(agregados, { ignorados })
   return agregados
 }
 
@@ -414,7 +415,7 @@ async function pickFiles(multiple: boolean, titulo: string, todo = false): Promi
       'set AppleScript\'s text item delimiters to linefeed', 'return o as text']
     r = await run('osascript', lines.flatMap(l => ['-e', l]))
   } else if (process.platform === 'win32') {
-    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.OpenFileDialog; $f.Title='${titulo}'; $f.Multiselect=$${multiple}; $f.Filter='${todo ? 'Material|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.jpg;*.jpeg;*.png;*.webp;*.heic|Todos|*.*' : 'Videos|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi|Todos|*.*'}'; if($f.ShowDialog() -eq 'OK'){ $f.FileNames -join [char]10 }`])
+    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.OpenFileDialog; $f.Title='${titulo}'; $f.Multiselect=$${multiple}; $f.Filter='${todo ? 'Material|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.jpg;*.jpeg;*.png;*.webp;*.avif;*.jfif;*.heic|Todos|*.*' : 'Videos|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi|Todos|*.*'}'; if($f.ShowDialog() -eq 'OK'){ $f.FileNames -join [char]10 }`])
   } else {
     r = await run('zenity', ['--file-selection', `--title=${titulo}`, ...(multiple ? ['--multiple', '--separator=\n'] : [])])
   }
@@ -753,7 +754,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/material\/elegir$/.exec(p)) && m === 'POST') {
       if (!isSlug(g[1]) || !(await loadMeta(g[1]))) return send(res, 404, { error: 'Proyecto no encontrado' })
       const rutas = await pickFiles(true, 'Elige videos, música o imágenes del proyecto', true)
-      return send(res, 200, { agregados: await linkMaterial(g[1], rutas), cancelado: rutas.length === 0 })
+      const ag = await linkMaterial(g[1], rutas)
+      return send(res, 200, { agregados: [...ag], ignorados: (ag as unknown as { ignorados: string[] }).ignorados, cancelado: rutas.length === 0 })
     }
     // Arrastrar y soltar: el navegador no da la ruta; se busca el original por nombre+tamaño+fecha y se enlaza
     if ((g = /^\/proyectos\/([a-z0-9-]+)\/material\/enlazar$/.exec(p)) && m === 'POST') {
