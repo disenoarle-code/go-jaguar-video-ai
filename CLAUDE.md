@@ -142,6 +142,10 @@ Los tiempos por palabra de Whisper se desfasan (hasta ~1 s), así que **no se us
 6. Si escribiste `proyecto.gojaguar` en disco con el editor abierto, **recarga la página del editor** (`location.reload()`): no detecta cambios externos, sigue mostrando (y guardando) la versión vieja. Comprueba con `JSON.parse(editor.serialize())`.
 7. Mirar a ojo 2-3 zonas (energía vs palabras) antes de decir "listo".
 
+## Muletillas y tartamudeos (cortarlos siempre)
+
+`scripts/detectar-muletillas.py <audio.wav> <palabras.json>` encuentra los "eeeh/mmm" (sonidos con voz de tono plano entre palabras, que Whisper no escribe), palabras repetidas, arranques en falso y muletillas de relleno. Úsalo en TODA edición (pedidos `errores` y `completa`) y decide con el criterio de `.claude/skills/guion-viral/SKILL.md` (sección "Muletillas"): se quita lo que es relleno, se deja lo que lleva sentido o énfasis. Después, transcribir el audio final y revisar.
+
 ## Momentos sin voz que hay que reconocer y cortar
 
 No basta con quitar silencios: el usuario también quiere cortar tramos en que **no habla** aunque haya ruido (toca el celular, mira a otro lado, ruido de caja o de micrófono). Al preparar una edición, lista los huecos sin voz ≥ 0,5 s (energía baja entre palabras alineadas, también al inicio y al final del video), mira fotogramas de cada uno (`ffmpeg … fps=5 … tile`) y corta los que no son habla; deja ~0,1 s antes de la siguiente palabra. Tras cortar vuelve a pasar la revisión de sincronía. Ojo: `silencedetect`/energía baja NO es lo mismo que voz: golpes del celular y ruidos de boca parecen "voz" con un umbral flojo; el fin real de la última palabra es el del alineador, no el de la cola de ruido.

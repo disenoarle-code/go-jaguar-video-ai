@@ -56,7 +56,7 @@ Si alguna respuesta es "no": corrige (añade el contexto que falta, cambia el ga
 2. **Marca cada bloque** (idea completa) como: `gancho` · `contexto` · `valor` · `repetido` · `relleno` · `ejemplo` · `cierre`.
 3. **Decide**:
    - Cada idea una vez, en su mejor formulación (la más clara).
-   - Quita: repeticiones, rodeos, anécdotas que no prueban el punto, meta-comentarios ("como les dije", "a ver"), ejemplos extra (deja el mejor), muletillas largas.
+   - Quita: muletillas y repetidas (sección "Muletillas"), repeticiones, rodeos, anécdotas que no prueban el punto, meta-comentarios ("como les dije", "a ver"), ejemplos extra (deja el mejor), muletillas largas.
    - Conserva: la tesis, el **contexto necesario**, los datos concretos (números, nombres), las explicaciones del "porqué", las objeciones/pasos completos con su respuesta.
    - Antes de quitar algo pregunta: *¿lo siguiente se entiende sin esto?* Si no, se queda.
 4. **Gancho**: la frase más fuerte **que se entienda sola** (afirmación, pregunta intrigante, resultado). Si la mejor frase depende de un contexto previo, no es gancho: elige otra o empieza directo con la introducción. Puede repetirse luego.
@@ -68,6 +68,19 @@ Si alguna respuesta es "no": corrige (añade el contexto que falta, cambia el ga
 - Ajusta cada corte a la **pausa** más cercana (±0,8 s); si no hay, al punto de menor energía del audio. Avisa de los cortes sin pausa.
 - Un tramo que queda cojo sin su contexto: o incluye el contexto o se elimina.
 - No cambies el sentido: si quitas una objeción, quita también su respuesta.
+
+## Muletillas, tartamudeos y repetidas (OBLIGATORIO, la fluidez es parte del trabajo)
+
+El usuario quiere el video **fluido**: sin "eeeh", "mmm", "ehmm", sin palabras repetidas ("que que", "el el", "no sé no sé") y sin tartamudeos ("co-conocimiento"). Whisper NO las escribe (las limpia) y el alineador las pega a la palabra de al lado, así que hay que buscarlas en el AUDIO:
+
+1. Alinear las palabras (`scripts/alinear-palabras.py`; ahora guarda también `r1`, el fin real de cada palabra) y correr `python3 scripts/detectar-muletillas.py audio.wav analisis/<video>.palabras.json analisis/<video>.muletillas.json`. Marca `✓` (seguro) y `?` (revisar).
+2. **Decidir con criterio** cada candidato (la herramienta propone, tú decides):
+   - SE QUITAN: sonidos de duda (`[eeeh]`, `[mmm]`), repeticiones de la primera copia (se deja la completa), arranques en falso, tartamudeos, y muletillas de relleno aisladas por pausa ("o sea", "pues", "digamos", "entonces" cuando no unen ideas, "no sé" que no responde nada).
+   - SE DEJAN: palabras con sentido ("este espacio", "no se sabe", "como que" dentro de una comparación), énfasis intencional ("triste, triste, triste"), y todo lo que al quitarlo deje la frase rota.
+   - Si hay duda, mira el espectrograma (`ffmpeg -ss … -lavfi showspectrumpic`): una vocal sostenida de tono plano (bandas armónicas horizontales) es una muletilla; una palabra tiene tono que sube y baja.
+3. Cortar **dentro de la pausa**, dejando ~0,05 s a cada lado de las palabras vecinas; nunca comerse el inicio de la siguiente palabra. Los tiempos son del archivo de origen: pásalos a la línea de tiempo (o usa `delete_ranges` sobre la edición actual, que respeta los cambios a mano).
+4. **Verificar**: armar el audio final, transcribirlo y leerlo (no debe quedar "ehh", ni doble palabra, ni palabra cortada), y repetir las dos pasadas de claridad. Si había subtítulos karaoke, volver a pasar `verificar-sincronia.py`.
+5. En la respuesta al usuario: lista corta de lo que se quitó (tiempo + qué) y lo que se dejó a propósito.
 
 ## Salida
 1. **El guion final completo, en texto**, para que el usuario lo lea (es lo más importante).
