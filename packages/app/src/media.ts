@@ -14,14 +14,39 @@ export class FrameSource {
   private cache = new Map<number, VideoFrame>()      // LRU: orden de inserción
   private pending = new Map<number, { p: Promise<VideoFrame>; res: (f: VideoFrame) => void }>()
   private cap = 48
+  private fallos = 0
   stats = { decoded: 0 }
 
   constructor(private samples: VSample[], private config: VideoDecoderConfig, private fps: number) {
-    this.decoder = new VideoDecoder({
+    this.decoder = this.nuevoDecoder()
+  }
+
+  /** En Windows el decodificador por hardware tiene pocos cuadros en memoria; si se agotan da "Decoding error" y se CIERRA para siempre
+   *  (la vista previa se queda sin imagen y solo suena el audio). Por eso, al fallar, se crea otro, ya por software, y se repiden los cuadros pendientes. */
+  private nuevoDecoder(): VideoDecoder {
+    const d: VideoDecoder = new VideoDecoder({
       output: f => this.onFrame(f),
-      error: e => console.error('VideoDecoder', e),
+      error: e => { console.error('VideoDecoder', e); queueMicrotask(() => { if (this.decoder === d && this.fallos < 20) this.reiniciar() }) },
     })
-    this.decoder.configure(config)
+    d.configure(this.fallos ? { ...this.config, hardwareAcceleration: 'prefer-software' } : this.config)
+    return d
+  }
+
+  private reiniciar() {
+    this.fallos++
+    try { if (this.decoder.state !== 'closed') this.decoder.close() } catch { /* ya cerrado */ }
+    this.decoder = this.nuevoDecoder()
+    for (const idx of this.pending.keys()) this.enviar(idx)
+  }
+
+  private enviar(idx: number) {
+    if (this.decoder.state === 'closed') { if (this.fallos < 20) this.reiniciar(); return }
+    const s = this.samples[idx]
+    this.decoder.decode(new EncodedVideoChunk({
+      type: s.sync ? 'key' : 'delta', timestamp: idx, data: s.data,
+    }))
+    // Todo-keyframes: no hay reordenamiento, así que se fuerza la salida de inmediato.
+    void this.decoder.flush().catch(() => {})
   }
 
   get frameCount() { return this.samples.length }
@@ -55,12 +80,7 @@ export class FrameSource {
     let res!: (f: VideoFrame) => void
     const p = new Promise<VideoFrame>(r => { res = r })
     this.pending.set(idx, { p, res })
-    const s = this.samples[idx]
-    this.decoder.decode(new EncodedVideoChunk({
-      type: s.sync ? 'key' : 'delta', timestamp: idx, data: s.data,
-    }))
-    // Todo-keyframes: no hay reordenamiento, así que se fuerza la salida de inmediato.
-    void this.decoder.flush().catch(() => {})
+    this.enviar(idx)
     return p
   }
 
