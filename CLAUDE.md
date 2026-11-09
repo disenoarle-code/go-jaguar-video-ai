@@ -8,9 +8,10 @@ Editor de video local que tú (Claude) controlas con comandos. El usuario ve los
 
 **Mac y Windows (también Linux, menos probado). Necesitas Node 22+ ([nodejs.org](https://nodejs.org)); en Windows con `winget` y Git ya instalados el resto lo hace el instalador.**
 1. Revisa qué falta: `npm install` y luego `npm run instalar` (solo revisa: Node, ffmpeg/ffprobe, Python 3.9+, paquetes de Python, whisper-cli y su modelo, modelo de recorte de persona, Chrome, npm de las animaciones).
-   - Falta algo → dile al usuario qué es, **pide permiso** y corre `npm run instalar -- --instalar` (usa `brew` en Mac y `winget` en Windows; baja whisper-cli + modelo de 1,5 GB y el modelo de recorte de 15 MB; `--alinear` añade el entorno de karaoke, +1,5 GB; `--sin-modelos` se salta las descargas grandes). Lo opcional (marcado con ·) solo desactiva esa función.
+   - Falta algo → dile al usuario qué es, **pide permiso** y corre `npm run instalar -- --instalar` (usa `brew` en Mac y `winget` en Windows; baja whisper-cli + modelo de 1,5 GB, el entorno de **alineación por audio** (torch, +1,5 GB) y el modelo de recorte de 15 MB; `--sin-modelos` se salta las descargas de modelos). Solo el recorte de persona es opcional (marcado con ·).
+   - **La alineación por audio es IMPRESCINDIBLE** (`~/.gojaguar-alinear`, wav2vec2): Whisper solo da el TEXTO y sus tiempos se desfasan hasta ~1 s; la alineación da el segundo exacto de cada palabra (~30–50 ms). Sin ella los cortes, las tomas de apoyo y los subtítulos NO quedan bien. Si falta, no edites: instálala primero.
    - **Windows:** tras instalar con winget **cierra y abre la terminal** (y Claude Code) para que se actualice el PATH, y vuelve a correr `npm run instalar`.
-   - **Python:** los scripts `.py` se corren SIEMPRE con `node scripts/py.mjs scripts/<x>.py …` (elige solo `python`/`python3` y el entorno `~/.gojaguar-py`; `--alinear` usa el de torch). Nunca `python3 …` a mano (en Windows no existe).
+   - **Python:** los scripts `.py` se corren SIEMPRE con `node scripts/py.mjs scripts/<x>.py …` (elige solo `python`/`python3` y el entorno `~/.gojaguar-py`; `--alinear` usa el entorno de torch de la alineación). Nunca `python3 …` a mano (en Windows no existe).
 2. Si `npm install` no se hizo, hazlo en la carpeta del proyecto (el instalador también instala `experiments/estilo-3d`).
 3. Inicia **en segundo plano**: `npm run dev` → http://127.0.0.1:5273
 4. Ábrelo en el panel del navegador. Verás el **Home** (lista de proyectos).
@@ -57,6 +58,7 @@ biblioteca/
 ```
 
 ## Procedimientos estándar de TODA edición
+**Antes de cortar, poner o borrar tomas: tiempos por palabra con la alineación por audio** (`node scripts/py.mjs --alinear scripts/alinear-palabras.py …`, guía 14), nunca con los tiempos crudos de Whisper; luego `verificar-sincronia.py`.
 Guion (lo revisa el usuario en la app), muletillas (`docs/guia/15-…`), voz limpia y pareja y luces/color (pasos `voz` y `color` de `.claude/skills/edicion-inicial/SKILL.md`). El estilo (`.claude/skills/estilos/`) se aplica encima.
 
 ## Ejecutar una orden del chat

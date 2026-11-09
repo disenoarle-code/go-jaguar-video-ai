@@ -2,7 +2,7 @@
 // Prepara TODO lo que necesita el editor en Mac, Windows y Linux. Idempotente: lo que ya está, se salta.
 //   npm run instalar                  → solo REVISA y dice qué falta (no instala nada)
 //   npm run instalar -- --instalar    → instala lo que falte (winget/brew, Python, modelos, npm)   ← pedir permiso al usuario antes
-//   opciones: --alinear (karaoke, +1,5 GB)  --sin-modelos (no baja whisper medium ni el modelo de recorte)
+//   opciones: --sin-modelos (no baja whisper medium ni el modelo de recorte). La alineación por audio (torch, +1,5 GB) es IMPRESCINDIBLE y siempre se instala.
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync, renameSync, createWriteStream, rmSync, mkdtempSync } from 'node:fs'
 import { join, dirname, resolve, delimiter } from 'node:path'
@@ -13,7 +13,7 @@ import { pipeline } from 'node:stream/promises'
 
 const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = new Set(process.argv.slice(2))
-const INSTALAR = args.has('--instalar'), ALINEAR = args.has('--alinear'), MODELOS = !args.has('--sin-modelos')
+const INSTALAR = args.has('--instalar'), MODELOS = !args.has('--sin-modelos')
 const win = platform() === 'win32', mac = platform() === 'darwin'
 const home = homedir()
 const BIN = join(home, '.gojaguar-bin')               // whisper-cli.exe en Windows (el servidor lo agrega al PATH)
@@ -76,11 +76,12 @@ function entorno(dir, req, etiqueta, obligatorio) {
   const enVenv = existsSync(enEnv(dir)) && existeCmd(enEnv(dir), ['-c', mods])
   const enSistema = !enVenv && req === 'requirements.txt' && py && existeCmd(py[0], [...py.slice(1), '-c', mods])   // ya instalados a mano en el Python del sistema
   const ok = enVenv || enSistema
-  anota(etiqueta, ok, enVenv ? dir : enSistema ? 'en el Python del sistema' : `npm run instalar -- --instalar${req.includes('alinear') ? ' --alinear' : ''}`, obligatorio)
+  anota(etiqueta, ok, enVenv ? dir : enSistema ? 'en el Python del sistema' : 'npm run instalar -- --instalar', obligatorio)
 }
 if (py || existsSync(enEnv(PYENV))) entorno(PYENV, 'requirements.txt', 'Paquetes de Python (ilustraciones, escenas, recorte de persona, audio)', true)
-if (ALINEAR) entorno(ALINENV, 'requirements-alinear.txt', 'Alineación de karaoke (torch)', false)
-else anota('Alineación de karaoke (torch)', existsSync(enEnv(ALINENV)), existsSync(enEnv(ALINENV)) ? ALINENV : 'opcional: npm run instalar -- --instalar --alinear', false)
+// IMPRESCINDIBLE: Whisper da el texto, pero sus tiempos se desfasan hasta ~1 s. Esta alineación (wav2vec2) da el segundo exacto de cada palabra (~30-50 ms)
+// y de ahí salen los cortes, las tomas de apoyo y los subtítulos. Sin ella las ediciones y recortes no quedan bien.
+if (py || existsSync(enEnv(ALINENV))) entorno(ALINENV, 'requirements-alinear.txt', 'Alineación de palabras por audio (torch) — imprescindible', true)
 
 // ---- 5. whisper-cli + modelo (texto/transcripción) ----
 let hayW = existeCmd('whisper-cli', ['-h'])
@@ -98,10 +99,10 @@ if (!hayW && INSTALAR) {
   }
   hayW = existeCmd('whisper-cli', ['-h'])
 }
-anota('whisper-cli (texto del guion)', hayW, hayW ? '' : win ? 'se baja a ~/.gojaguar-bin con --instalar (solo Windows x64)' : mac ? 'brew install whisper-cpp' : 'compilar whisper.cpp y dejar whisper-cli en el PATH', false)
+anota('whisper-cli (texto: base de la alineación)', hayW, hayW ? '' : win ? 'se baja a ~/.gojaguar-bin con --instalar (solo Windows x64)' : mac ? 'brew install whisper-cpp' : 'compilar whisper.cpp y dejar whisper-cli en el PATH', true)
 const modeloOk = () => existsSync(MODELO_WHISPER) && statSync(MODELO_WHISPER).size > 1.4e9
 if (MODELOS && !modeloOk() && INSTALAR) { console.log('Bajando modelo de voz (1,5 GB)…'); await descarga(URL_WHISPER_MODELO, MODELO_WHISPER, 'ggml-medium').catch(e => console.log('  falló: ' + e.message)) }
-anota('Modelo de voz ggml-medium.bin', modeloOk(), modeloOk() ? '' : '1,5 GB; con --instalar se baja a ' + MODELO_WHISPER, false)
+anota('Modelo de voz ggml-medium.bin', modeloOk(), modeloOk() ? '' : '1,5 GB; con --instalar se baja a ' + MODELO_WHISPER, true)
 
 // ---- 6. Modelo de recorte de persona (Robust Video Matting, GPL-3.0, se baja aparte) ----
 const rvmOk = () => existsSync(MODELO_RVM) && statSync(MODELO_RVM).size > 1e7

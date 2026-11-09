@@ -28,7 +28,8 @@ npm run instalar -- --instalar     # instala lo que falte: ffmpeg, Python y sus 
 ```
 
 - **Windows:** después de instalar con winget, cierra y abre la terminal y vuelve a correr `npm run instalar` hasta que todo salga con ✓.
-- Opcionales (marcadas con `·`): whisper (texto del guion) y su modelo, recorte de persona, y `--alinear` para subtítulos karaoke (+1,5 GB). Sin ellas, esa función se omite y el resto funciona.
+- **Imprescindible:** whisper (texto) + la **alineación por audio** (torch, +1,5 GB; se instala siempre). Whisper solo da el texto; la alineación da el segundo exacto de cada palabra, y de ahí salen los cortes, las tomas de apoyo y los subtítulos. Sin ella las ediciones no quedan bien.
+- Opcional (marcado con `·`): recorte de persona; sin él esa función se omite y el resto funciona.
 - Los scripts de Python se ejecutan con `node scripts/py.mjs scripts/<script>.py …` (elige solo `python` o `python3`; no hace falta activar nada).
 - Con Claude Code: abre la carpeta, escribe `claude` y pide **"instala y abre el editor"**.
 - Variables útiles: `GOJAGUAR_BIBLIOTECA` (dónde guardar proyectos), `GOJAGUAR_WHISPER_MODEL`, `GOJAGUAR_PYTHON`, `GOJAGUAR_NO_HWACCEL=1`.
