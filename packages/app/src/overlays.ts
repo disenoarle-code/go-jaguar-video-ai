@@ -4,7 +4,11 @@ import { cajaEscena, dibujarEscena } from './escenas'
 import { PLANTILLAS_NUEVAS, cajaPlantilla, dibujarPlantillaNueva } from './plantillas'
 
 const ease = (x: number) => 1 - Math.pow(1 - Math.min(Math.max(x, 0), 1), 3)
-const FONT = (o: TextLayer) => `700 ${o.size}px Figtree, "Segoe UI", system-ui, sans-serif`
+/** Fuente de un subtítulo/rótulo simple: Figtree 700 por defecto; `props.fuente` (p. ej. 'Montserrat', que solo trae peso 900) y `props.peso` la cambian. */
+const FONT = (o: TextLayer) => {
+  const f = o.props?.fuente, peso = o.props?.peso ?? (f === 'Montserrat' ? '900' : '700')
+  return `${peso} ${o.size}px ${f ? `"${f}", ` : ''}Figtree, "Segoe UI", system-ui, sans-serif`
+}
 
 export interface Rect { x: number; y: number; w: number; h: number }
 
