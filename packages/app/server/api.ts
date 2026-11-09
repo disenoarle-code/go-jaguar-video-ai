@@ -440,6 +440,7 @@ async function seleccionarEnProyecto(slug: string | null, ids: string[]) {
 }
 
 // --- diálogo nativo para elegir archivos (devuelve rutas reales: así no hace falta copiar nada) ----------------
+// Windows: el diálogo se abre con una ventana dueña TopMost ($o); sin ella queda DETRÁS del navegador y la app parece colgada.
 async function pickFiles(multiple: boolean, titulo: string, todo = false): Promise<string[]> {
   let r: { code: number; out: string }
   if (process.platform === 'darwin') {
@@ -449,7 +450,7 @@ async function pickFiles(multiple: boolean, titulo: string, todo = false): Promi
       'set AppleScript\'s text item delimiters to linefeed', 'return o as text']
     r = await run('osascript', lines.flatMap(l => ['-e', l]))
   } else if (process.platform === 'win32') {
-    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.OpenFileDialog; $f.Title='${titulo.replace(/'/g, "''")}'; $f.Multiselect=$${multiple}; $f.Filter='${todo ? 'Material|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.jpg;*.jpeg;*.png;*.webp;*.avif;*.jfif;*.heic|Todos|*.*' : 'Videos|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi|Todos|*.*'}'; if($f.ShowDialog() -eq 'OK'){ $f.FileNames -join [char]10 }`])
+    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $o=New-Object System.Windows.Forms.Form -Property @{TopMost=$true}; $f=New-Object System.Windows.Forms.OpenFileDialog; $f.Title='${titulo.replace(/'/g, "''")}'; $f.Multiselect=$${multiple}; $f.Filter='${todo ? 'Material|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.jpg;*.jpeg;*.png;*.webp;*.avif;*.jfif;*.heic|Todos|*.*' : 'Videos|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi|Todos|*.*'}'; if($f.ShowDialog($o) -eq 'OK'){ $f.FileNames -join [char]10 }`])
   } else {
     r = await run('zenity', ['--file-selection', `--title=${titulo}`, ...(multiple ? ['--multiple', '--separator=\n'] : [])])
   }
@@ -464,7 +465,7 @@ async function pickFolder(titulo: string, inicial: string): Promise<string | nul
     r = await run('osascript', ['-e', 'tell me to activate', '-e', `set d to choose folder with prompt "${titulo.replace(/"/g, '')}" default location (POSIX file "${ini}")`, '-e', 'return POSIX path of d'])
     if (r.code !== 0) r = await run('osascript', ['-e', 'tell me to activate', '-e', `POSIX path of (choose folder with prompt "${titulo.replace(/"/g, '')}")`])
   } else if (process.platform === 'win32') {
-    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description='${titulo.replace(/'/g, "''")}'; $f.SelectedPath='${ini.replace(/'/g, "''")}'; if($f.ShowDialog() -eq 'OK'){ $f.SelectedPath }`])
+    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $o=New-Object System.Windows.Forms.Form -Property @{TopMost=$true}; $f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description='${titulo.replace(/'/g, "''")}'; $f.SelectedPath='${ini.replace(/'/g, "''")}'; if($f.ShowDialog($o) -eq 'OK'){ $f.SelectedPath }`])
   } else r = await run('zenity', ['--file-selection', '--directory', `--title=${titulo}`, `--filename=${ini}/`])
   const out = r.code === 0 ? r.out.trim().replace(/\/$/, '') : ''
   return out || null
