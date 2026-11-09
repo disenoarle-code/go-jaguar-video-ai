@@ -1,7 +1,7 @@
 """
 Revisión de sincronía de subtítulos karaoke contra el AUDIO REAL. Correrla SIEMPRE después de alinear palabras y antes de dar el video por listo.
 
-Uso:  python3 verificar-sincronia.py <audio> <palabras.json | proyecto.gojaguar>
+Uso:  node scripts/py.mjs verificar-sincronia.py <audio> <palabras.json | proyecto.gojaguar>
   · con palabras.json: tiempos del archivo de origen contra su audio (mismo audio que usó el alineador).
   · con proyecto.gojaguar: lee las palabras de las capas karaoke (tiempos de la LÍNEA DE TIEMPO) y las compara con el audio del MP4 YA EXPORTADO
     (ffmpeg -i export.mp4 -vn -ac 1 -ar 16000 audio.wav). Es la prueba de punta a punta: incluye cortes, orden y velocidad.

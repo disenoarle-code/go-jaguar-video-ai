@@ -17,7 +17,7 @@ Llega por `npm run vigilar` como `PEDIDO {"tipo":"edicion","slug":…}`. Al puls
 
 ## Qué hacer en cada paso
 Abre `http://127.0.0.1:5273/#/editor/<slug>` (`editor.describe()` antes de editar; lotes con `editor.batch`; nada de exportar pruebas).
-- **voz**: `set_audio_fx {on:true}` y comprueba con `python3 scripts/medir-audio.py <archivo>`: sonoridad entre -19 y -14 LUFS, pico ≤ -2 dBFS, el inicio no más bajo que el resto (<1 dB) y nunca saturar (si suena duro, baja el volumen antes que comprimir más).
+- **voz**: `set_audio_fx {on:true}` y comprueba con `node scripts/py.mjs scripts/medir-audio.py <archivo>`: sonoridad entre -19 y -14 LUFS, pico ≤ -2 dBFS, el inicio no más bajo que el resto (<1 dB) y nunca saturar (si suena duro, baja el volumen antes que comprimir más).
 - **zonas**: `analisis/propuesta.json`: por cada zona con `decision:'aceptada'` (o `pendiente` si el usuario no decidió y la sugerencia es clara) pon la toma de apoyo/imagen (`add_overlay`, sin audio: `volume 0`) o crea la animación 2D/3D; usa las tomas que el usuario subió en `aportes` y respeta su `prompt` por zona. Las `descartada` NO se hacen. Reglas: fondo plano debajo de las cards (guía regla 6), cards 4:5 con 3D en vertical, tomas sin texto. Lee **siempre** `analisis/notas-edicion.json` (recomendaciones generales).
   Para animaciones/iconos/3D usa `.claude/skills/ilustraciones/SKILL.md` (comandos de una llamada, caché, 2D primero).
 - **movimiento**: aplica la REGLA DE MOVIMIENTO de `.claude/skills/estilos/SKILL.md` (cambio cada 4–7 s, nunca >8 s igual, énfasis en lo dramático) con el estilo elegido.

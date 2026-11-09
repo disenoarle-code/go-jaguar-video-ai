@@ -1,7 +1,7 @@
 """
 Luces y color de un tramo de video: mide cuadros reales y propone brillo / contraste / saturación para `set_clip_color`.
 
-Uso:  python3 analizar-color.py <video> <inicio_s> <fin_s> [--json]
+Uso:  node scripts/py.mjs analizar-color.py <video> <inicio_s> <fin_s> [--json]
 Toma 7 cuadros repartidos entre inicio y fin (del proxy o del original), mide luz (media y extremos) y saturación, y busca el par (brillo, contraste)
 que acerca la imagen a una luz "bonita y natural": media ~0,50, sombras ~0,06 y luces ~0,93 sin quemar. La fórmula es LA MISMA del editor
 (brillo → contraste → saturación, canal por canal en RGB), así que lo que predice es lo que se verá.

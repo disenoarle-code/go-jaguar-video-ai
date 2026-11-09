@@ -1,0 +1,6 @@
+# Solo para la alineación de subtítulos karaoke (~1,5 GB). Entorno aparte: ~/.gojaguar-alinear
+torch
+torchaudio
+transformers
+soundfile
+numpy

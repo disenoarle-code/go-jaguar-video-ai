@@ -6,9 +6,12 @@ Editor de video local que tú (Claude) controlas con comandos. El usuario ve los
 
 ## Primer uso: "instala y abre el editor"
 
-1. Comprueba herramientas: `node -v` (22+), `ffmpeg -version`, `ffprobe -version`. Para texto: `whisper-cli` y el modelo `~/.whisper-models/ggml-medium.bin`.
-   - Falta algo → instálalo (Mac: `brew install node ffmpeg whisper-cpp`; Windows: `winget install OpenJS.NodeJS.LTS Gyan.FFmpeg`). Pide permiso antes de instalar.
-2. `npm install` en la carpeta del proyecto.
+**Mac y Windows (también Linux, menos probado). Necesitas Node 22+ ([nodejs.org](https://nodejs.org)); en Windows con `winget` y Git ya instalados el resto lo hace el instalador.**
+1. Revisa qué falta: `npm install` y luego `npm run instalar` (solo revisa: Node, ffmpeg/ffprobe, Python 3.9+, paquetes de Python, whisper-cli y su modelo, modelo de recorte de persona, Chrome, npm de las animaciones).
+   - Falta algo → dile al usuario qué es, **pide permiso** y corre `npm run instalar -- --instalar` (usa `brew` en Mac y `winget` en Windows; baja whisper-cli + modelo de 1,5 GB y el modelo de recorte de 15 MB; `--alinear` añade el entorno de karaoke, +1,5 GB; `--sin-modelos` se salta las descargas grandes). Lo opcional (marcado con ·) solo desactiva esa función.
+   - **Windows:** tras instalar con winget **cierra y abre la terminal** (y Claude Code) para que se actualice el PATH, y vuelve a correr `npm run instalar`.
+   - **Python:** los scripts `.py` se corren SIEMPRE con `node scripts/py.mjs scripts/<x>.py …` (elige solo `python`/`python3` y el entorno `~/.gojaguar-py`; `--alinear` usa el de torch). Nunca `python3 …` a mano (en Windows no existe).
+2. Si `npm install` no se hizo, hazlo en la carpeta del proyecto (el instalador también instala `experiments/estilo-3d`).
 3. Inicia **en segundo plano**: `npm run dev` → http://127.0.0.1:5273
 4. Ábrelo en el panel del navegador. Verás el **Home** (lista de proyectos).
 
@@ -16,7 +19,7 @@ Editor de video local que tú (Claude) controlas con comandos. El usuario ve los
 
 Barra de fases arriba: **1 Material → 2 Guion → 3 Propuesta → 4 Editar** (Anterior/Siguiente; se puede retroceder mientras el video no esté en el editor).
 1. **Material** (los archivos se ENLAZAN, no se copian; si el original se mueve, *Ubicar*): **Contenido principal** (de aquí sale el guion; es lo único que procesa el botón final **"Recortar silencios y revisar guion"**), **Cámaras adicionales** (se guardan, aún sin usar: PENDIENTE sincronizarlas con el audio del principal), **Tomas de apoyo** (videos/imágenes, SIN audio) y **Referencias** (se quitará cuando los estilos estén entrenados). **4 · Recomendaciones (opcional)**: texto libre del usuario (`analisis/notas-edicion.json`), antes del botón final.
-   - Cada toma de apoyo y referencia nueva deja una **hoja de contacto por escenas** (`scripts/escenas-contacto.py`, PySceneDetect+ffmpeg+Pillow; `pip3 install "scenedetect[opencv-headless]" pillow`): `analisis/apoyo/<toma>/hoja.jpg` + `escenas.json` e índice `analisis/apoyo/<toma>.json` (`descripcion: null` hasta que TÚ la escribas mirando la hoja). **Mira la hoja (1 imagen), nunca fotogramas sueltos.** Referencias: `biblioteca/referencias/<id>.analisis/`.
+   - Cada toma de apoyo y referencia nueva deja una **hoja de contacto por escenas** (`scripts/escenas-contacto.py`, PySceneDetect+ffmpeg+Pillow; `npm run instalar`): `analisis/apoyo/<toma>/hoja.jpg` + `escenas.json` e índice `analisis/apoyo/<toma>.json` (`descripcion: null` hasta que TÚ la escribas mirando la hoja). **Mira la hoja (1 imagen), nunca fotogramas sueltos.** Referencias: `biblioteca/referencias/<id>.analisis/`.
 2. **Guion** (`guion.ts`): secciones con miniatura; el usuario reordena, quita palabras (clic, arrastrar, Mayús+clic) o secciones; muletillas ya quitadas. Estado en `analisis/guion.json`; para LEER usa `analisis/guion-texto.txt` (texto plano, ~5× menos tokens). **Padding de 30 ms en TODOS los cortes** (`PADDING` en `server/guion.ts`): respétalo si cortas tú.
 3. **Propuesta** (`propuesta.ts`): pedido **`propuesta`** → `.claude/skills/propuesta-zonas/SKILL.md` escribe `analisis/propuesta.json`. Solo hay zonas donde entra OTRA imagen (toma de apoyo, imagen, video generado, animación 2D/3D); textos, subtítulos, letras y zooms los decides tú (subtítulos virales: sección propia pendiente). Lee SIEMPRE `analisis/notas-edicion.json` (recomendaciones generales del usuario).
 4. **Editar**: hasta este botón NO se ha editado nada. Arma el video con el guion (`aplicarGuion`) y deja un pedido **`edicion`**; la app muestra "Editando tu video" con 7 pasos que tú marcas (`npm run progreso -- <slug> <voz|zonas|movimiento|color|textos|revision> <en_curso|hecho|omitido> "detalle"`). Sigue `.claude/skills/edicion-inicial/SKILL.md`. Estilos y REGLA DE MOVIMIENTO (nada >8 s igual): `.claude/skills/estilos/`.
@@ -91,7 +94,7 @@ Reglas:
 
 ## Recursos ilustrativos para Remotion (mínimos tokens)
 - **Escalera de ilustración (2D minimalista primero; 3D solo si hace falta) y comando `scripts/ilustrar.py` (render + transparencia + caché en una llamada): `.claude/skills/ilustraciones/SKILL.md`. Léelo antes de ilustrar.**
-- **Una sola llamada:** `python3 experiments/estilo-3d/scripts/assets.py traer <icono|modelo|hdri|textura> <palabras en inglés>` → busca, elige el primero y lo baja a `public/assets/` (reutiliza lo ya descargado); imprime UNA línea (~20 tokens). Úsalo con `staticFile()`. NUNCA abras ni imprimas el archivo (SVG/gltf).
+- **Una sola llamada:** `node scripts/py.mjs experiments/estilo-3d/scripts/assets.py traer <icono|modelo|hdri|textura> <palabras en inglés>` → busca, elige el primero y lo baja a `public/assets/` (reutiliza lo ya descargado); imprime UNA línea (~20 tokens). Úsalo con `staticFile()`. NUNCA abras ni imprimas el archivo (SVG/gltf).
 - Si el primero no sirve: `assets.py buscar <tipo> <palabras>` (≤5 líneas) y `assets.py bajar <tipo> <id>`; `assets.py categorias <tipo>` para afinar. NO consultes las APIs a mano (Iconify devuelve ~5k tokens de metadatos; Poly Haven, listas enormes).
 - Iconos: solo MIT / Apache-2.0 / CC0 (el script descarta el resto). 3D/HDRI/texturas: Poly Haven, CC0, resolución 1k por defecto. Todo se registra en `public/assets/credits.json`.
 - 3D solo si el 2D no alcanza; Poly Haven es sobre todo utilería (muebles, plantas, herramientas): para un producto concreto no habrá modelo. Sin Blender MCP ni MCP de iconos.
@@ -120,5 +123,5 @@ Antes de cambiar código: `npm test` y `npm run check` deben pasar.
 - **El video se exporta desde la app** (botón **Exportar** del editor: resolución, calidad, progreso, descargar). El servidor renderiza la edición actual con ffmpeg (`server/exportar.ts`: cortes, zoom/transiciones, superpuestos, audio de clips, música). **Nunca le envíes el video al usuario por el chat ni lo renderices tú a mano**; si algo falta en la exportación, se arregla en `exportar.ts`.
 - 3D, zoom y subtítulos animados viven solo en `experiments/estilo-3d`; no son capas del editor.
 - El análisis de referencias lo haces tú (Claude) cuando el usuario pide la edición completa; la app no lo hace sola.
-- Recorte de fondo (Apple Vision) solo en Mac: `experiments/estilo-3d/scripts/matte.swift`.
-- Probado solo en Mac. Windows sin verificar. Arrastrar y soltar archivos en la interfaz no está probado por mí (sí la subida por API y el procesamiento).
+- Recorte de persona: `scripts/recortar-persona.py` (Robust Video Matting, ONNX, **Mac y Windows**; guía 08). `experiments/estilo-3d/scripts/matte.swift` (Apple Vision) es un experimento solo de Mac: no lo uses.
+- Desarrollado y probado en Mac. Windows: el código está preparado (diálogos con PowerShell, whisper-cli.exe, sin aceleración por hardware) pero aún sin verificar de punta a punta; si algo falla, repórtalo y arréglalo en el código. Arrastrar y soltar archivos en la interfaz no está probado por mí (sí la subida por API y el procesamiento).

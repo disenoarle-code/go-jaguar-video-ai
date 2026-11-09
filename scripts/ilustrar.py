@@ -2,13 +2,13 @@
 UNA llamada: renderiza una composición PARAMETRIZADA de Remotion con transparencia, la empaca para el editor y devuelve lo que hay que ejecutar (≈100 tokens de salida).
 Con caché: la misma composición + mismos parámetros NO se vuelve a renderizar (biblioteca/animaciones/).
 
-  python3 scripts/ilustrar.py <Composicion> '<props JSON>' [inicio_en_segundos=0] [nombre]
+  node scripts/py.mjs scripts/ilustrar.py <Composicion> '<props JSON>' [inicio_en_segundos=0] [nombre]
   Composiciones: Iconos · Modelo3D (ver experiments/estilo-3d/src; parámetros y valores por defecto en los .tsx)
   Salida: JSON con las operaciones listas para  editor.batch(<salida>)  (import_asset + add_overlay, sin audio)
 Ejemplos:
-  python3 scripts/ilustrar.py Iconos '{"items":[{"icono":"tabler-perfume.svg","etiqueta":"PERFUME"}],"duracion":3}' 12
-  python3 scripts/ilustrar.py Modelo3D '{"modelo":"assets/modelos/<id>/<id>.gltf","movimiento":"giro1","duracion":3}' 20
-Los iconos/modelos se traen antes con  python3 experiments/estilo-3d/scripts/assets.py traer <tipo> <palabras>.
+  node scripts/py.mjs scripts/ilustrar.py Iconos '{"items":[{"icono":"tabler-perfume.svg","etiqueta":"PERFUME"}],"duracion":3}' 12
+  node scripts/py.mjs scripts/ilustrar.py Modelo3D '{"modelo":"assets/modelos/<id>/<id>.gltf","movimiento":"giro1","duracion":3}' 20
+Los iconos/modelos se traen antes con  node scripts/py.mjs experiments/estilo-3d/scripts/assets.py traer <tipo> <palabras>.
 """
 import hashlib, json, os, shutil, subprocess, sys
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,7 +21,7 @@ pack = os.path.join(LIB, f'{key}.pack.mp4')
 if key not in idx or not os.path.exists(pack):
     pf = os.path.join(R3D, 'out', f'{key}.props.json'); seq = os.path.join(R3D, 'out', key)
     os.makedirs(os.path.dirname(pf), exist_ok=True); shutil.rmtree(seq, ignore_errors=True); json.dump(props, open(pf, 'w'))
-    r = subprocess.run(['npx', 'remotion', 'render', 'src/index.ts', comp, f'out/{key}', '--sequence', '--image-format=png', f'--props={pf}', '--log=error'], cwd=R3D, capture_output=True, text=True)
+    r = subprocess.run([shutil.which('npx') or 'npx', 'remotion', 'render', 'src/index.ts', comp, f'out/{key}', '--sequence', '--image-format=png', f'--props={pf}', '--log=error'], cwd=R3D, capture_output=True, text=True)
     if r.returncode: sys.exit('render falló: ' + (r.stderr or r.stdout)[-300:])
     p = subprocess.run([sys.executable, os.path.join(RAIZ, 'scripts', 'remotion-a-pack.py'), seq, pack], capture_output=True, text=True)
     if p.returncode: sys.exit('empaquetado falló: ' + p.stderr[-300:])

@@ -6,9 +6,9 @@ Los tiempos por palabra de Whisper NO sirven para karaoke (se desfasan hasta ~1 
 letra por letra (torchaudio.functional.forced_align). Precisión típica ~30–50 ms.
 
 Instalación única (gratis, ~1,5 GB; el modelo se baja la primera vez):
-    python3 -m venv ~/.gojaguar-alinear && ~/.gojaguar-alinear/bin/pip install torch torchaudio transformers soundfile numpy
+    npm run instalar -- --instalar --alinear        (Mac y Windows: crea ~/.gojaguar-alinear con torch y transformers)
 Uso:
-    ~/.gojaguar-alinear/bin/python alinear-palabras.py <audio.wav 16k mono> <words.json (texto de referencia)> <salida.json>
+    node scripts/py.mjs --alinear scripts/alinear-palabras.py <audio.wav 16k mono> <words.json (texto de referencia)> <salida.json>
 Salida: [{w, t0, t1}] en segundos del archivo de origen.  DESPUÉS correr SIEMPRE scripts/verificar-sincronia.py (ver CLAUDE.md).
 """
 import json, re, subprocess, sys

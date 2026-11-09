@@ -10,6 +10,8 @@
     "dev": "npm run dev -w @gojaguar/app",
     "test": "vitest run",
     "check": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/app",
+    "instalar": "node scripts/instalar.mjs",
+    "py": "node scripts/py.mjs",
     "vigilar": "node scripts/vigilar-solicitudes.mjs",
     "solicitud": "node scripts/solicitud.mjs",
     "progreso": "node scripts/progreso.mjs",

@@ -4,7 +4,7 @@ Sonidos para las escenas animadas (propios, libres de derechos, sin descargar na
   SFX-temblor.wav  retumbo grave con vibración rápida (cámara que tiembla); sube y baja suave
   SFX-suspiro.wav  soplo de aire que se apaga (momento triste); sin tonos
 Reglas del usuario: nada de tambores ni golpes secos ni campanitas; suaves, nada robóticos.
-Uso: python3 sonidos-escenas.py <carpeta de salida>
+Uso: node scripts/py.mjs sonidos-escenas.py <carpeta de salida>
 """
 import numpy as np, wave, sys, os
 SR=44100; rng=np.random.default_rng(23)

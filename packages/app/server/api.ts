@@ -25,6 +25,10 @@ export const ROOT = path.resolve(process.env.GOJAGUAR_BIBLIOTECA ?? path.join(HE
 const PROJ = path.join(ROOT, 'proyectos')
 const SOL = path.join(ROOT, 'solicitudes')
 const REFS = path.join(ROOT, 'referencias')
+// Herramientas que deja `npm run instalar` (whisper-cli.exe en Windows) y Python del entorno propio, si existe.
+process.env.PATH = path.join(os.homedir(), '.gojaguar-bin') + path.delimiter + (process.env.PATH ?? '')
+const PY_ENTORNO = path.join(os.homedir(), '.gojaguar-py', process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python')
+const PY = process.env.GOJAGUAR_PYTHON ?? (fs.existsSync(PY_ENTORNO) ? PY_ENTORNO : process.platform === 'win32' ? 'python' : 'python3')
 const MODEL = process.env.GOJAGUAR_WHISPER_MODEL ?? path.join(os.homedir(), '.whisper-models', 'ggml-medium.bin')
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi'])
 const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.aiff', '.aif'])
@@ -419,7 +423,7 @@ async function analizarReferencias() {
     for (const r of await listReferences()) {
       const dir = path.join(REFS, `${r.id}.analisis`)
       if (!r.existe || (await exists(path.join(dir, 'escenas.json')))) continue
-      await run(process.platform === 'win32' ? 'python' : 'python3', [path.join(HERE, '../../../scripts/escenas-contacto.py'), r.ruta, dir, '24'])
+      await run(PY, [path.join(HERE, '../../../scripts/escenas-contacto.py'), r.ruta, dir, '24'])
     }
   } finally { refBusy = false }
 }
@@ -445,7 +449,7 @@ async function pickFiles(multiple: boolean, titulo: string, todo = false): Promi
       'set AppleScript\'s text item delimiters to linefeed', 'return o as text']
     r = await run('osascript', lines.flatMap(l => ['-e', l]))
   } else if (process.platform === 'win32') {
-    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.OpenFileDialog; $f.Title='${titulo}'; $f.Multiselect=$${multiple}; $f.Filter='${todo ? 'Material|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.jpg;*.jpeg;*.png;*.webp;*.avif;*.jfif;*.heic|Todos|*.*' : 'Videos|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi|Todos|*.*'}'; if($f.ShowDialog() -eq 'OK'){ $f.FileNames -join [char]10 }`])
+    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.OpenFileDialog; $f.Title='${titulo.replace(/'/g, "''")}'; $f.Multiselect=$${multiple}; $f.Filter='${todo ? 'Material|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg;*.jpg;*.jpeg;*.png;*.webp;*.avif;*.jfif;*.heic|Todos|*.*' : 'Videos|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi|Todos|*.*'}'; if($f.ShowDialog() -eq 'OK'){ $f.FileNames -join [char]10 }`])
   } else {
     r = await run('zenity', ['--file-selection', `--title=${titulo}`, ...(multiple ? ['--multiple', '--separator=\n'] : [])])
   }
@@ -460,7 +464,7 @@ async function pickFolder(titulo: string, inicial: string): Promise<string | nul
     r = await run('osascript', ['-e', 'tell me to activate', '-e', `set d to choose folder with prompt "${titulo.replace(/"/g, '')}" default location (POSIX file "${ini}")`, '-e', 'return POSIX path of d'])
     if (r.code !== 0) r = await run('osascript', ['-e', 'tell me to activate', '-e', `POSIX path of (choose folder with prompt "${titulo.replace(/"/g, '')}")`])
   } else if (process.platform === 'win32') {
-    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description='${titulo}'; $f.SelectedPath='${ini}'; if($f.ShowDialog() -eq 'OK'){ $f.SelectedPath }`])
+    r = await run('powershell', ['-NoProfile', '-Command', `Add-Type -AssemblyName System.Windows.Forms; $f=New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description='${titulo.replace(/'/g, "''")}'; $f.SelectedPath='${ini.replace(/'/g, "''")}'; if($f.ShowDialog() -eq 'OK'){ $f.SelectedPath }`])
   } else r = await run('zenity', ['--file-selection', '--directory', `--title=${titulo}`, `--filename=${ini}/`])
   const out = r.code === 0 ? r.out.trim().replace(/\/$/, '') : ''
   return out || null
@@ -473,10 +477,14 @@ const carpetaGuardada = async () => { const c = (await readJson<{ carpetaExporta
 const leerLog = () => readJson<Exportado[]>(LOG, [])
 const revelar = async (abs: string) => { if (process.platform === 'darwin') await run('open', ['-R', abs]); else if (process.platform === 'win32') await run('explorer', ['/select,', abs]); else await run('xdg-open', [path.dirname(abs)]) }
 
-/** Busca en el disco el original de un archivo arrastrado (mismo nombre, tamaño y fecha) para enlazarlo sin copiarlo. Solo macOS. */
+/** Busca en el disco el original de un archivo arrastrado (mismo nombre, tamaño y fecha) para enlazarlo sin copiarlo. Mac (mdfind), Windows (PowerShell) y Linux (find). */
 async function locateFile(name: string, size: number, lastModified: number): Promise<string | null> {
-  if (process.platform !== 'darwin') return null
-  const r = await run('mdfind', ['-name', name])
+  let r: { code: number; out: string }
+  if (process.platform === 'darwin') r = await run('mdfind', ['-name', name])
+  else if (process.platform === 'win32') {   // busca por nombre en las carpetas habituales del usuario
+    const dirs = ['Videos', 'Desktop', 'Downloads', 'Documents', 'Pictures', 'Music', 'OneDrive'].map(d => `'${path.join(os.homedir(), d).replace(/'/g, "''")}'`).join(',')
+    r = await run('powershell', ['-NoProfile', '-Command', `Get-ChildItem -LiteralPath ${dirs} -Recurse -File -Filter '${name.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }`])
+  } else r = await run('find', [os.homedir(), '-type', 'f', '-name', name])
   for (const f of r.out.split('\n').map(x => x.trim()).filter(Boolean)) {
     if (path.basename(f) !== name || f.startsWith(ROOT)) continue
     const st = await fsp.stat(f).catch(() => null)
@@ -613,7 +621,7 @@ async function analizarApoyoPendiente(slug: string) {
       const dir = path.join(projDir(slug), 'analisis', 'apoyo', f.stem); await fsp.mkdir(dir, { recursive: true })
       const dur = f.tipo === 'video' ? ((await probe(f.ruta))?.duration ?? 0) : 0
       // preferido: UNA hoja de contacto con un fotograma por escena (PySceneDetect) = una sola imagen para mirar (ahorra tokens)
-      const py = process.platform === 'win32' ? 'python' : 'python3'
+      const py = PY
       const hr = await run(py, [path.join(HERE, '../../../scripts/escenas-contacto.py'), f.ruta, dir, '20'])
       if (hr.code === 0 && (await exists(path.join(dir, 'escenas.json')))) {
         const esc = await readJson<{ escenas: { n: number; t0: number; t1: number; t: number }[] }>(path.join(dir, 'escenas.json'), { escenas: [] })
@@ -1000,7 +1008,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       await fsp.appendFile(path.join(dir, 'ediciones-usuario.jsonl'), ev.slice(0, 200).map(e => JSON.stringify(e)).join('\n') + '\n')
       const total = (await fsp.readFile(path.join(dir, 'ediciones-usuario.jsonl'), 'utf8')).split('\n').filter(Boolean).length
       const leidas = (await readJson<{ leidas?: number }>(path.join(dir, 'aprendizaje-estado.json'), {})).leidas ?? 0
-      if (total - leidas >= 20) void run(process.platform === 'win32' ? 'python' : 'python3', [path.join(HERE, '../../../scripts/aprender.py'), g[1]])
+      if (total - leidas >= 20) void run(PY, [path.join(HERE, '../../../scripts/aprender.py'), g[1]])
       return send(res, 200, { ok: true })
     }
 
@@ -1050,7 +1058,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, next: ()
       }
       let etapa = await etapaDe(slug)
       const sol = (await solicitudesDe(slug)).find(x => x.tipo === 'edicion') ?? null
-      if (etapa === 'editando' && sol?.estado === 'hecho') { await ponerEtapa(slug, 'editor'); etapa = 'editor'; void run(process.platform === 'win32' ? 'python' : 'python3', [path.join(HERE, '../../../scripts/aprender.py'), slug, '--cierre']) }     // cierre: suma lo que aceptó/descartó y sus recomendaciones al perfil     // desde aquí no se vuelve a la creación
+      if (etapa === 'editando' && sol?.estado === 'hecho') { await ponerEtapa(slug, 'editor'); etapa = 'editor'; void run(PY, [path.join(HERE, '../../../scripts/aprender.py'), slug, '--cierre']) }     // cierre: suma lo que aceptó/descartó y sus recomendaciones al perfil     // desde aquí no se vuelve a la creación
       const pr = await readJson<{ pasos: PasoEdicion[] }>(progresoPath(slug), { pasos: PASOS_EDICION })
       return send(res, 200, { etapa, solicitud: sol, pasos: pr.pasos })
     }

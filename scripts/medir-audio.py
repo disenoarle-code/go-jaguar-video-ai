@@ -1,6 +1,6 @@
 """
 Mide si un audio (o el audio de un video/MP4 exportado) está bien de volumen y NO saturado.
-Uso:  python3 medir-audio.py <archivo>
+Uso:  node scripts/py.mjs medir-audio.py <archivo>
 Imprime sonoridad (LUFS), pico, % de muestras casi al tope (>0,9), y qué tan parejo está el nivel de la voz. Objetivo: voz a -19…-14 LUFS,
 pico <= -2 dBFS, sobre 0,9 ~ 0 %, desviación por segundo < 1 dB. Sale con código 1 si suena demasiado fuerte o saturado.
 """

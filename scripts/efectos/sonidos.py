@@ -1,7 +1,7 @@
 """
 Swooshes de aire sintetizados (sin tambores ni tonos): ruido rosa suave que pasa por un filtro que se abre y se cierra,
 con modulación lenta irregular, cola de reverberación y movimiento estéreo. Graves y suaves, para que no suenen robóticos.
-Uso: python3 sonidos.py <carpeta de salida>
+Uso: node scripts/py.mjs sonidos.py <carpeta de salida>
 """
 import numpy as np, wave, sys, os
 SR=44100; rng=np.random.default_rng(11)

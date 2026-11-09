@@ -5,7 +5,7 @@ Whisper NO escribe los "eh", "mmm", "eeee" (los limpia) y los alineadores los pe
   · en el TEXTO alineado (palabras.json con t0/t1/r1 del alineador):  repeticiones ("que que", "no sé no sé"), arranques en falso, tartamudeos ("co-conocimiento"), muletillas escritas (eh, mm, este, o sea…)
   · en el AUDIO, en lo que queda ENTRE palabras: sonidos con voz (tono estable, sin ser una palabra) = "eeeh" / "mmm", y alargues de la última vocal de una palabra.
 
-Uso:  python3 detectar-muletillas.py <audio.wav 16k mono> <palabras.json> [salida.json]
+Uso:  node scripts/py.mjs detectar-muletillas.py <audio.wav 16k mono> <palabras.json> [salida.json]
 Salida: [{tipo, a, b, texto, auto, motivo}] en segundos del archivo de origen. `auto: true` = se puede cortar sin duda; `auto: false` = REVISAR (puede ser énfasis o llevar sentido).
 Después de cortar: transcribir el audio final y volver a correr scripts/verificar-sincronia.py (ver docs/guia/15-muletillas-y-tartamudeos-cortarlos-siemp.md).
 """

@@ -1,13 +1,13 @@
 """
 APRENDIZAJE DEL ESTILO DEL USUARIO — todo por código; Claude solo interviene para lo CUALITATIVO (cero tokens en lo cuantitativo).
 
-  python3 scripts/aprender.py <slug> [--cierre]
+  node scripts/py.mjs scripts/aprender.py <slug> [--cierre]
     · lee SOLO los eventos nuevos de analisis/ediciones-usuario.jsonl (lo que el usuario hizo a mano en el editor; las órdenes de Claude no cuentan),
     · los funde en biblioteca/aprendizaje/perfil.json (contadores y medias; nunca guarda el historial crudo, así no crece),
     · regenera el bloque AUTOMÁTICO de biblioteca/aprendizaje/estilo-usuario.md (≤ ~25 líneas): solo lo que se repite (n ≥ 3) y domina (≥ 60 %),
     · con --cierre (al pasar al editor) suma también lo que aceptó/descartó en la propuesta, las palabras que quitó del guion y su texto de recomendaciones,
     · si quedan notas CUALITATIVAS sin condensar (recomendaciones, notas del chat) crea UN pedido `aprendizaje` para Claude (≈100–300 tokens). Si no hay, NO se le pide nada.
-  python3 scripts/aprender.py --condensado   (lo corre Claude al terminar: borra las notas pendientes ya condensadas)
+  node scripts/py.mjs scripts/aprender.py --condensado   (lo corre Claude al terminar: borra las notas pendientes ya condensadas)
 """
 import hashlib, json, os, sys, time
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); BIB = os.path.join(RAIZ, os.environ.get('GOJAGUAR_BIBLIOTECA', 'biblioteca'))

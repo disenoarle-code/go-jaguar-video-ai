@@ -11,9 +11,9 @@ description: Aprendizaje del estilo de edición del usuario con el mínimo de to
 
 **Cuándo te piden algo (solo si hay notas CUALITATIVAS nuevas):** pedido `aprendizaje` (recomendaciones escritas por el usuario, prompts por zona, notas del chat):
 1. `npm run solicitud -- <id> en_curso`.
-2. Lee `biblioteca/aprendizaje/perfil.json` SOLO el campo `pendientes` (`python3 -c "import json;print(json.load(open('biblioteca/aprendizaje/perfil.json'))['pendientes'])"`) y la sección "Cualitativo" de `estilo-usuario.md`.
+2. Lee `biblioteca/aprendizaje/perfil.json` SOLO el campo `pendientes` (`node scripts/py.mjs -c "import json;print(json.load(open('biblioteca/aprendizaje/perfil.json'))['pendientes'])"`) y la sección "Cualitativo" de `estilo-usuario.md`.
 3. Reescribe esa sección (entre `<!-- cualitativo -->` y `<!-- fin -->`): **una regla corta por línea, máx. 15 líneas**; funde duplicados, generaliza (“prefiere X” no “en el video de ayer pidió X”), descarta lo puntual de un solo video y quita lo que ahora se contradiga. Nada de explicaciones.
-4. `python3 scripts/aprender.py --condensado` (limpia los pendientes) → `npm run solicitud -- <id> hecho` → vuelve a `npm run vigilar`.
+4. `node scripts/py.mjs scripts/aprender.py --condensado` (limpia los pendientes) → `npm run solicitud -- <id> hecho` → vuelve a `npm run vigilar`.
 
 **Órdenes por el chat:** cuando el usuario te pida un cambio de edición, además de hacerlo anota la preferencia en una línea: `npm run nota-estilo -- <slug> "prefiere zoom más suave en la cara"` (~30 tokens). Solo si parece una preferencia general, no un arreglo puntual.
 

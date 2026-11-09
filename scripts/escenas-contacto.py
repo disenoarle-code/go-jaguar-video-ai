@@ -1,7 +1,7 @@
 """
 Hoja de contacto por ESCENAS: una sola imagen con un fotograma por escena y su hora marcada (ahorra tokens: ~20 fotogramas ≈ 1 imagen).
 
-Uso:  python3 escenas-contacto.py <video> <carpeta_salida> [max_fotogramas=20]
+Uso:  node scripts/py.mjs escenas-contacto.py <video> <carpeta_salida> [max_fotogramas=20]
 Salida: <carpeta_salida>/hoja.jpg  y  <carpeta_salida>/escenas.json
   escenas.json = { duracion, hoja, columnas, escenas: [{ n, t0, t1, t }] }   (t = segundo del fotograma mostrado, n = número de celda, de izquierda a derecha y de arriba abajo)
 Detecta cortes con PySceneDetect (AdaptiveDetector, sobre fotogramas reducidos). Si el video casi no tiene cortes (una sola toma, grabación de pantalla),

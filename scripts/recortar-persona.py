@@ -5,11 +5,10 @@ Usa Robust Video Matting (modelo ONNX MobileNetV3, ~15 MB) con onnxruntime: hech
 Licencia del modelo: GPL-3.0 (PeterL1n/RobustVideoMatting). Se descarga aparte (no va dentro del repo); revisar antes de redistribuirlo empaquetado.
 
 Instalación única (gratis, ~50 MB en total):
-    python3 -m venv ~/.gojaguar-recorte && ~/.gojaguar-recorte/bin/pip install onnxruntime numpy pillow          # Windows: %USERPROFILE%\\.gojaguar-recorte\\Scripts\\pip
-    descargar https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx  →  ~/.gojaguar-recorte/modelos/
+    npm run instalar -- --instalar        (Mac y Windows: crea el entorno de Python y baja el modelo rvm_mobilenetv3_fp32.onnx a ~/.gojaguar-recorte/modelos/)
 
 Uso:
-    ~/.gojaguar-recorte/bin/python recortar-persona.py <video> <salida_mascara.mp4> [--ini S] [--fin S] [--fps 30] [--lado 768] [--png carpeta]
+    node scripts/py.mjs scripts/recortar-persona.py <video> <salida_mascara.mp4> [--ini S] [--fin S] [--fps 30] [--lado 768] [--png carpeta]
 La salida es un video en ESCALA DE GRISES (blanco = persona, negro = fondo) del mismo tamaño que el de entrada y que empieza en `--ini`
 (los tiempos de la máscara = tiempos del video - ini). El editor la usa como transparencia de la persona (`proxies/<video>.recorte.mp4`).
 """

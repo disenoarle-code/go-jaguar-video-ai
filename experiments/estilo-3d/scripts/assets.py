@@ -2,16 +2,16 @@
 Buscar y traer recursos con MÍNIMOS TOKENS (las APIs devuelven miles de entradas/metadatos: aquí solo se imprime lo útil, ≤5 líneas; NUNCA se imprime el contenido de un archivo).
 Busca SIEMPRE en inglés. Todo queda en public/assets/ (úsalo con staticFile()) y se anota en public/assets/credits.json.
 
-  python3 scripts/assets.py traer <icono|modelo|hdri|textura> <palabras>   ← LO NORMAL: 1 llamada, 1 línea de salida (reutiliza lo ya bajado; si no, busca, elige el 1.º y lo baja)
-  python3 scripts/assets.py buscar icono <palabra>        Iconify · solo licencias MIT / Apache-2.0 / CC0 (el resto se descarta)
-  python3 scripts/assets.py buscar modelo <palabra>       Poly Haven modelos 3D (CC0)      · salida: id | categorías | polígonos
-  python3 scripts/assets.py buscar hdri <palabra>         Poly Haven HDRIs de iluminación (CC0)
-  python3 scripts/assets.py buscar textura <palabra>      Poly Haven texturas PBR (CC0)
-  python3 scripts/assets.py categorias <modelo|hdri|textura>   categorías disponibles (para afinar la búsqueda)
-  python3 scripts/assets.py bajar icono <set:nombre> [color=#ffffff]
-  python3 scripts/assets.py bajar modelo <id> [res=1k]    → public/assets/modelos/<id>/<id>.gltf (+ .bin y texturas; carga con useGLTF(staticFile(...)))
-  python3 scripts/assets.py bajar hdri <id> [res=1k]      → public/assets/hdri/<id>_<res>.hdr
-  python3 scripts/assets.py bajar textura <id> [res=1k]   → public/assets/texturas/<id>/{diff,nor,rough}.jpg
+  node scripts/py.mjs scripts/assets.py traer <icono|modelo|hdri|textura> <palabras>   ← LO NORMAL: 1 llamada, 1 línea de salida (reutiliza lo ya bajado; si no, busca, elige el 1.º y lo baja)
+  node scripts/py.mjs scripts/assets.py buscar icono <palabra>        Iconify · solo licencias MIT / Apache-2.0 / CC0 (el resto se descarta)
+  node scripts/py.mjs scripts/assets.py buscar modelo <palabra>       Poly Haven modelos 3D (CC0)      · salida: id | categorías | polígonos
+  node scripts/py.mjs scripts/assets.py buscar hdri <palabra>         Poly Haven HDRIs de iluminación (CC0)
+  node scripts/py.mjs scripts/assets.py buscar textura <palabra>      Poly Haven texturas PBR (CC0)
+  node scripts/py.mjs scripts/assets.py categorias <modelo|hdri|textura>   categorías disponibles (para afinar la búsqueda)
+  node scripts/py.mjs scripts/assets.py bajar icono <set:nombre> [color=#ffffff]
+  node scripts/py.mjs scripts/assets.py bajar modelo <id> [res=1k]    → public/assets/modelos/<id>/<id>.gltf (+ .bin y texturas; carga con useGLTF(staticFile(...)))
+  node scripts/py.mjs scripts/assets.py bajar hdri <id> [res=1k]      → public/assets/hdri/<id>_<res>.hdr
+  node scripts/py.mjs scripts/assets.py bajar textura <id> [res=1k]   → public/assets/texturas/<id>/{diff,nor,rough}.jpg
 """
 import json, os, subprocess, sys, urllib.parse
 AQUI = os.path.dirname(os.path.abspath(__file__)); ASSETS = os.path.normpath(os.path.join(AQUI, '..', 'public', 'assets'))
