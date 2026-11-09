@@ -396,7 +396,7 @@ export class Player {
    * Superpuesto con MÁSCARA tipo card (p. ej. 4:5 redondeada): el video completo se dibuja en su posición pero solo se ve dentro de la ventana.
    * Con transición '3d' la card entra y sale girando en perspectiva (mismas cuentas que la exportación: `anguloCard`).
    */
-  private dibujarCard(o: OverlayClip, f: CanvasImageSource, sx0: number, sy0: number, fw: number, fh: number, x: number, y: number, w: number, h: number, t: number) {
+  private dibujarCard(o: OverlayClip, f: CanvasImageSource, sx0: number, sy0: number, fw: number, fh: number, x: number, y: number, w: number, h: number, t: number, filtro = '') {
     const m = o.mascara!, mw = m.w * W, mh = mw / m.aspect, mcx = m.x * W, mcy = m.y * H, mx0 = mcx - mw / 2, my0 = mcy - mh / 2
     const cw = Math.max(2, Math.ceil(mw)), ch = Math.max(2, Math.ceil(mh))
     const cv = (this.cardCv = this.cardCv && this.cardCv.width === cw && this.cardCv.height === ch ? this.cardCv : new OffscreenCanvas(cw, ch))
@@ -405,6 +405,7 @@ export class Player {
     g.fillStyle = '#000'; g.fillRect(0, 0, cw, ch)
     g.translate(-mx0, -my0)
     if (o.transform.rotation) { g.translate(x + w / 2, y + h / 2); g.rotate((o.transform.rotation * Math.PI) / 180); g.translate(-(x + w / 2), -(y + h / 2)) }
+    if (filtro) g.filter = filtro
     try { g.drawImage(f, sx0, sy0, fw, fh, x, y, w, h) } catch { /* frame cerrado */ }
     g.restore()
     const sel = this.store.selection?.type === 'overlay' && this.store.selection.id === o.id && !this.playing && !this.pantalla
@@ -456,8 +457,11 @@ export class Player {
       // transición suave: aparece y se desvanece (y con 'subir' flota un poco hacia arriba al entrar)
       let alfaT = 1, dy = 0
       if (o.transicion) { const u = t - o.start, d = overlayEnd(o) - o.start, ent = clamp01q(u / 0.35), sal = clamp01q((d - u) / 0.3); alfaT = Math.min(ent, sal); if (o.transicion === 'subir') dy = H * 0.025 * Math.pow(1 - ent, 2) }
-      if (o.mascara && !screen) { this.dibujarCard(o, f, sx0, sy0, fw, fh, x, y, w, h, t); continue }
+      // luces y color de la toma: el mismo filtro (brillo → contraste → saturación) que los clips de la pista principal y que colorChain() en la exportación
+      const oc = o.color && !pack && !screen ? `brightness(${o.color.brillo}) contrast(${o.color.contraste}) saturate(${o.color.saturacion})` : ''
+      if (o.mascara && !screen) { this.dibujarCard(o, f, sx0, sy0, fw, fh, x, y, w, h, t, oc); continue }
       this.ctx.save()
+      if (oc) this.ctx.filter = oc
       if (dy) this.ctx.translate(0, dy)
       if (o.transform.rotation && !screen) { this.ctx.translate(o.transform.x * W, o.transform.y * H); this.ctx.rotate((o.transform.rotation * Math.PI) / 180); this.ctx.translate(-o.transform.x * W, -o.transform.y * H) }
       this.ctx.globalAlpha = o.transform.opacity * alfaT

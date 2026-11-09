@@ -122,6 +122,7 @@ export interface OverlayClip {
    */
   mascara?: { x: number; y: number; w: number; aspect: number; r: number }
   blend?: 'screen'                // 'screen' suma la luz del clip al video de abajo (luces, destellos, humo): lo negro no se ve
+  color?: ClipColor               // luces y color (misma fórmula que los clips de la pista principal); ausente = sin corrección
 }
 
 /** Estado de una pista de la línea de tiempo. Claves: 'main', 'music', 'subtitle', 'graphic', 'v1','v2'… (video superpuesto) y 'a1','a2'… (audio extra). */
