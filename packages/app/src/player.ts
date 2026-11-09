@@ -442,8 +442,12 @@ export class Player {
         const asset = this.assets.get(o.assetId); if (!asset) continue
         const idx = asset.source.idxAt(o.srcIn + (t - o.start) * o.speed)
         if (this.playing) asset.source.prefetch(idx, 6)
-        const vf = asset.source.peek(idx)
-        if (!vf) { void asset.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {}); continue }
+        let vf = asset.source.peek(idx)
+        if (!vf) {
+          void asset.source.getFrame(idx).then(() => { this.dirty = true }).catch(() => {})
+          vf = asset.source.peekCerca(idx)      // mientras llega el exacto, el más cercano ya decodificado: la toma no parpadea al mover el cabezal
+          if (!vf) continue
+        }
         f = vf; fw = vf.displayWidth || vf.codedWidth; fh = vf.displayHeight || vf.codedHeight
       }
       const pack = this.store.asset(o.assetId)?.alfa === 'pack'        // video con transparencia: color | alfa lado a lado

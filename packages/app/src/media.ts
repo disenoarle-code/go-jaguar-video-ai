@@ -3,6 +3,11 @@ import type { AssetInfo } from '@gojaguar/core'
 
 interface VSample { data: Uint8Array; sync: boolean; t: number }   // t = instante real del fotograma en segundos (PTS)
 
+/** En Windows las copias livianas (640 px, todo keyframes) se decodifican por SOFTWARE: medido en un equipo real, el decodificador por
+ *  hardware tardaba ~43 ms por cuadro con flush (≈2 fps al reproducir varios videos) y el de software ~3–7 ms; además el de hardware
+ *  agota su memoria de cuadros y se cierra ("Decoding error"). En Mac (VideoToolbox) se deja el hardware. */
+const EN_WINDOWS = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+
 /**
  * Decodifica frames sueltos con WebCodecs. El proxy es "todo keyframes",
  * así que cualquier frame se decodifica de forma independiente (scrub instantáneo).
@@ -28,9 +33,10 @@ export class FrameSource {
       output: f => this.onFrame(f),
       error: e => { console.error('VideoDecoder', e); queueMicrotask(() => { if (this.decoder === d && this.fallos < 20) this.reiniciar() }) },
     })
-    d.configure(this.fallos ? { ...this.config, hardwareAcceleration: 'prefer-software' } : this.config)
+    d.configure(this.fallos || EN_WINDOWS ? { ...this.config, hardwareAcceleration: 'prefer-software' } : this.config)
     return d
   }
+  private flushPendiente = false
 
   private reiniciar() {
     this.fallos++
@@ -45,8 +51,11 @@ export class FrameSource {
     this.decoder.decode(new EncodedVideoChunk({
       type: s.sync ? 'key' : 'delta', timestamp: idx, data: s.data,
     }))
-    // Todo-keyframes: no hay reordenamiento, así que se fuerza la salida de inmediato.
-    void this.decoder.flush().catch(() => {})
+    // Todo-keyframes: no hay reordenamiento, así que se fuerza la salida de inmediato. UN solo flush por tanda (la precarga pide varios
+    // cuadros seguidos): cada flush reinicia el decodificador y en Windows cuesta ~35 ms por llamada.
+    if (this.flushPendiente) return
+    this.flushPendiente = true
+    queueMicrotask(() => { this.flushPendiente = false; if (this.decoder.state === 'configured') void this.decoder.flush().catch(() => {}) })
   }
 
   get frameCount() { return this.samples.length }
@@ -57,6 +66,12 @@ export class FrameSource {
     return lo
   }
   peek(idx: number) { return this.cache.get(idx) ?? null }
+  /** El cuadro ya decodificado más cercano a `idx` (hasta `rango` cuadros a cada lado): se muestra mientras llega el exacto, para que
+   *  una superposición no desaparezca (y deje ver el video de abajo) cada vez que el cabezal pide un cuadro que aún no está listo. */
+  peekCerca(idx: number, rango = 45): VideoFrame | null {
+    for (let d = 1; d <= rango; d++) { const f = this.cache.get(idx - d) ?? this.cache.get(idx + d); if (f) return f }
+    return null
+  }
 
   private onFrame(f: VideoFrame) {
     const idx = f.timestamp
