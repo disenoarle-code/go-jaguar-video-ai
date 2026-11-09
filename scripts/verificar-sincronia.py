@@ -15,12 +15,14 @@ import json, re, subprocess, sys
 import numpy as np
 
 wav, pj = sys.argv[1:3]
-J = json.load(open(pj))
+J = json.load(open(pj, encoding='utf-8'))
 if isinstance(J, dict):
     P = []
     for l in J['project']['layers']:
         if l.get('type') == 'subtitle' and l.get('template') == 'karaoke':
             P += [{'w': w, 't0': a, 't1': b} for w, a, b in json.loads(l['props']['palabras'])]
+        elif l.get('type') == 'subtitle' and not l.get('template') and len(l.get('text', '').split()) == 1:
+            P.append({'w': l['text'], 't0': l['start'], 't1': l['end']})   # subtítulo de UNA palabra (estilo palabra por palabra)
     P.sort(key=lambda x: x['t0'])
 else: P = J
 raw = subprocess.check_output(['ffmpeg', '-v', 'error', '-i', wav, '-f', 's16le', '-ac', '1', '-ar', '16000', '-'])
@@ -59,7 +61,7 @@ for q in range(0, len(P) - 4, max(4, (len(P) - 4) // 14)):
     with tempfile.TemporaryDirectory() as d:
         f = os.path.join(d, 'w.wav'); subprocess.run(['ffmpeg', '-v', 'error', '-y', '-ss', f'{a:.3f}', '-t', f'{b - a:.3f}', '-i', wav, '-ac', '1', '-ar', '16000', f], check=True)
         subprocess.run(['whisper-cli', '-m', MOD, '-l', 'es', '-f', f, '-mc', '0', '-otxt', '-of', os.path.join(d, 'o')], capture_output=True)
-        txt = norm(open(os.path.join(d, 'o.txt')).read()) if os.path.exists(os.path.join(d, 'o.txt')) else ''
+        txt = norm(open(os.path.join(d, 'o.txt'), encoding='utf-8', errors='replace').read()) if os.path.exists(os.path.join(d, 'o.txt')) else ''
     probadas += 1
     esp = norm(''.join(x['w'] for x in g))
     if difflib.SequenceMatcher(None, esp, txt.replace(' ', '')).ratio() < 0.6: cortadas.append((q, ' '.join(x['w'] for x in g), a))      # Whisper confunde alguna palabra: se compara el parecido, no palabra por palabra
