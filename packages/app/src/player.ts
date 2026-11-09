@@ -266,6 +266,16 @@ export class Player {
       if (!so && R !== 1) continue
       const src = this.actx.createBufferSource(); src.buffer = so ?? buf; src.playbackRate.value = so ? 1 : o.speed
       const sc = so ? 1 / eo : 1, g = this.actx.createGain(); g.gain.value = o.volume
+      // fundido de entrada / salida del audio (mismas rampas lineales que afade en la exportación)
+      const fi = o.fundido?.entrada ?? 0, fo = o.fundido?.salida ?? 0
+      if (fi > 0 || fo > 0) {
+        const end = overlayEnd(o), aCtx = (tl: number) => this.ctxStart + (tl - from) / R
+        const vAt = (tl: number) => o.volume * Math.max(0, Math.min(1, fi > 0 ? (tl - o.start) / fi : 1, fo > 0 ? (end - tl) / fo : 1))
+        const t0 = Math.max(from, o.start)
+        g.gain.setValueAtTime(vAt(t0), aCtx(t0))
+        if (fi > 0 && t0 < o.start + fi) g.gain.linearRampToValueAtTime(vAt(o.start + fi), aCtx(o.start + fi))
+        if (fo > 0) { const fs = Math.max(t0, end - fo); g.gain.setValueAtTime(vAt(fs), aCtx(fs)); g.gain.linearRampToValueAtTime(0, aCtx(end)) }
+      }
       src.connect(g).connect(this.actx.destination)
       src.start(this.ctxStart + Math.max(o.start - from, 0) / R, Math.min((o.srcIn + inO * o.speed) * sc, src.buffer!.duration - 0.01), len * sc)
       this.nodes.push(src)

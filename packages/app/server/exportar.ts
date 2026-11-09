@@ -259,7 +259,7 @@ export async function buildExport(project: Project, root: string, opts: ExportOp
       vf.push(`[${cur}][ov${j}]overlay=x='${num(W * o.transform.x)}-w/2':y='${num(H * o.transform.y)}-h/2${o.transicion === 'subir' ? `+${num(H * 0.025)}*pow(max(0,1-(t-${num(o.start)})/0.35),2)` : ''}':eof_action=pass:enable='between(t,${num(o.start)},${num(o.start + D)})'[b${j + 1}]`)
       cur = `b${j + 1}`
     }
-    if (!ts((o.kind === 'video' ? 'v' : 'a') + o.track).muted && o.volume > 0 && await hasAudio(vozO ?? file)) audio.push(`[${kaO}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(o.speed)},volume=${num(o.volume)},atrim=0:${num(D)},adelay=${Math.round(o.start * 1000)}:all=1[ao${j}]`)
+    if (!ts((o.kind === 'video' ? 'v' : 'a') + o.track).muted && o.volume > 0 && await hasAudio(vozO ?? file)) audio.push(`[${kaO}:a]asetpts=PTS-STARTPTS,${A_FMT},${atempoChain(o.speed)},volume=${num(o.volume)},atrim=0:${num(D)}${o.fundido?.entrada ? `,afade=t=in:st=0:d=${num(o.fundido.entrada)}` : ''}${o.fundido?.salida ? `,afade=t=out:st=${num(Math.max(0, D - o.fundido.salida))}:d=${num(o.fundido.salida)}` : ''},adelay=${Math.round(o.start * 1000)}:all=1[ao${j}]`)
   }
 
   // 3) música
